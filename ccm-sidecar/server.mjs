@@ -666,7 +666,16 @@ function sendCachedInitialize(response, requestPayload, session) {
   response.end('event: message\ndata: ' + JSON.stringify(message) + '\n\n');
 }
 
-const UPSTREAM_SESSION_STATE_VERSION = 1;
+const UPSTREAM_SESSION_STATE_VERSION = 2;
+
+function persistedInitializeHeaders(sourceHeaders = {}) {
+  const headers = {};
+  for (const name of ['accept', 'content-type', 'mcp-protocol-version']) {
+    const value = sourceHeaders[name];
+    if (value !== undefined) headers[name] = value;
+  }
+  return headers;
+}
 
 function loadUpstreamSession(file, upstreamUrl) {
   if (!file || !fs.existsSync(file)) {
@@ -676,7 +685,7 @@ function loadUpstreamSession(file, upstreamUrl) {
     const state = JSON.parse(fs.readFileSync(file, 'utf8'));
     if (
       !state ||
-      state.version !== UPSTREAM_SESSION_STATE_VERSION ||
+      ![1, UPSTREAM_SESSION_STATE_VERSION].includes(state.version) ||
       state.upstreamUrl !== upstreamUrl ||
       typeof state.sessionId !== 'string' ||
       !state.sessionId ||
@@ -689,13 +698,28 @@ function loadUpstreamSession(file, upstreamUrl) {
     return {
       sessionId: state.sessionId,
       initializeMessage: state.initializeMessage,
+      initializeRequest:
+        state.version >= 2 && state.initializeRequest?.payload
+          ? {
+              headers: persistedInitializeHeaders(
+                state.initializeRequest.headers || {},
+              ),
+              payload: state.initializeRequest.payload,
+            }
+          : null,
     };
   } catch {
     return null;
   }
 }
 
-function saveUpstreamSession(file, upstreamUrl, sessionId, initializeMessage) {
+function saveUpstreamSession(
+  file,
+  upstreamUrl,
+  sessionId,
+  initializeMessage,
+  initializeRequest,
+) {
   if (!file) {
     return;
   }
@@ -708,6 +732,12 @@ function saveUpstreamSession(file, upstreamUrl, sessionId, initializeMessage) {
       upstreamUrl,
       sessionId,
       initializeMessage,
+      initializeRequest: initializeRequest
+        ? {
+            headers: persistedInitializeHeaders(initializeRequest.headers),
+            payload: initializeRequest.payload,
+          }
+        : null,
     }),
     { encoding: 'utf8', mode: 0o600 },
   );
@@ -758,18 +788,24 @@ class UpstreamSessionManager {
     );
     this.sessionId = persisted?.sessionId || null;
     this.initializeMessage = persisted?.initializeMessage || null;
-    this.initializeRequest = null;
+    this.initializeRequest = persisted?.initializeRequest || null;
     this.initializing = null;
   }
 
   async initializeFromRequest(requestHeaders, payload) {
-    if (!this.initializeRequest) {
-      this.initializeRequest = {
-        headers: buildUpstreamHeaders(requestHeaders, null),
-        payload,
-      };
-    }
-    return this.ensureSession();
+    this.initializeRequest = {
+      headers: persistedInitializeHeaders(requestHeaders),
+      payload,
+    };
+    const session = await this.ensureSession();
+    saveUpstreamSession(
+      this.runtime.config.upstreamSessionFile,
+      this.runtime.upstreamUrl,
+      session.sessionId,
+      session.initializeMessage,
+      this.initializeRequest,
+    );
+    return session;
   }
 
   async ensureSession() {
@@ -820,6 +856,7 @@ class UpstreamSessionManager {
       this.runtime.upstreamUrl,
       sessionId,
       message,
+      this.initializeRequest,
     );
     return { sessionId, initializeMessage: message };
   }

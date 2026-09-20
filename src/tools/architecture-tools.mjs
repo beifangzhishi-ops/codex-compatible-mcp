@@ -45,7 +45,7 @@ export function registerArchitectureTools(
     ].join('\n\n'),
     inputSchema: {
       query: z.string().default('').describe(
-        'Space-separated search terms. Empty returns the first deferred capabilities.',
+        'Search terms separated by spaces or punctuation. Empty returns the first deferred capabilities. Multi-term searches rank full matches first and may return partial matches.',
       ),
       limit: z.number().int().min(1).max(25).optional().describe(
         'Maximum number of matches. Defaults to 8.',

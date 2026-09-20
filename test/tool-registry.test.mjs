@@ -173,6 +173,32 @@ test('tool_search metadata includes schema, provenance, and requirements', async
   });
 });
 
+test('tool_search tolerates punctuation and returns partial multi-term matches', async () => {
+  const registry = new ToolRegistry();
+  registry.register(textTool({
+    name: 'quark_probe',
+    namespace: 'ccm-extra',
+    surfaces: { deferred: true, codeMode: true },
+    tags: ['quark', 'cloud'],
+  }));
+  registry.register(textTool({
+    name: 'bilibili_download_dash',
+    namespace: 'ccm-extra',
+    surfaces: { deferred: true, codeMode: true },
+    tags: ['bilibili', 'video'],
+  }));
+
+  registerArchitectureTools(registry);
+  const search = registry.get('tool_search');
+  const result = await search.handler({ query: 'quark / bilibili', limit: 8 });
+
+  assert.equal(result.structuredContent.count, 2);
+  assert.deepEqual(
+    result.structuredContent.tools.map((tool) => tool.qualified_name).sort(),
+    ['ccm-extra.bilibili_download_dash', 'ccm-extra.quark_probe'],
+  );
+});
+
 
 test('exec invokes deferred nested capabilities and wait resumes long cells', async () => {
   const registry = new ToolRegistry();

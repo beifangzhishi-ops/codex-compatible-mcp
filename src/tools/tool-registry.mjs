@@ -49,7 +49,9 @@ function scoreTool(tool, query) {
   if (qualified === normalized || name === normalized) return 1000;
   if (qualified.startsWith(normalized) || name.startsWith(normalized)) return 500;
 
-  const tokens = normalized.split(/\s+/u).filter(Boolean);
+  const tokens = normalized
+    .split(/[^\p{L}\p{N}_-]+/u)
+    .filter(Boolean);
   const haystack = [
     tool.qualifiedName,
     tool.name,
@@ -60,11 +62,15 @@ function scoreTool(tool, query) {
   ].join(' ').toLowerCase();
 
   let score = 0;
+  let matched = 0;
   for (const token of tokens) {
-    if (!haystack.includes(token)) return 0;
+    if (!haystack.includes(token)) continue;
+    matched += 1;
     score += name.includes(token) ? 50 : qualified.includes(token) ? 30 : 10;
   }
-  return score;
+  if (matched === 0) return 0;
+  // Prefer tools matching every term, but keep partial matches discoverable.
+  return score + (matched === tokens.length ? 200 : matched * 5);
 }
 
 export class ToolRegistry {
