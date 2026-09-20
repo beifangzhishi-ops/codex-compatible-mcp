@@ -33,10 +33,11 @@ WScript.Quit rc
 "@ | Set-Content -LiteralPath $vbs -Encoding ASCII
 
 $action=New-ScheduledTaskAction -Execute "$env:WINDIR\System32\wscript.exe" -Argument ('"' + $vbs + '"')
-$trigger=New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$currentUser=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+$trigger=New-ScheduledTaskTrigger -AtLogOn -User $currentUser
 $trigger.Delay='PT1M'
 $settings=New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -RestartCount 10 -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-$principal=New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+$principal=New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
 
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
 Write-Output ("Installed scheduled task: {0}" -f $TaskName)

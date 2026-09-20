@@ -144,6 +144,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\uninstall-ccm-
 
 The Remote Worker supervisor reads `config/worker.env` itself, builds the native helpers on startup, and launches `src/worker/agent.mjs`. The Worker agent owns connection retry/reconnect behavior, so temporary Controller/network loss does not cause a process restart. `config/worker.env`, PID files, and supervisor logs are local runtime state and are not committed.
 
+The Worker task installer resolves the current fully qualified Windows identity for both the logon trigger and task principal. This also supports machines whose hostname and local username are identical.
+
 ## OAuth-protected public endpoint
 
 For ChatGPT/plugin use, expose the OAuth sidecar rather than the raw Controller.
