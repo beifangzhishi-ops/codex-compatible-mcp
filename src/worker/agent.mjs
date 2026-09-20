@@ -1,5 +1,14 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createWorkerRuntime } from '../runtime/index.mjs';
 import { RemoteWorkerClient } from './remote-worker-client.mjs';
+
+const installRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+  '..',
+);
+process.env.CCM_INSTALL_ROOT ||= installRoot;
 
 const runtime = createWorkerRuntime();
 const reconnectDelayMs = Number(process.env.CCM_WORKER_RECONNECT_MS || 1000);

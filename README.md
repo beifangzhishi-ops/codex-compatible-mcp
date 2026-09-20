@@ -67,9 +67,21 @@ CCM stores capability exposure as three independent surfaces:
 
 Convenience states such as Direct, Deferred, CodeModeOnly, DirectModelOnly, DeferredModelOnly, and Hidden are derived from those surfaces rather than stored as one rigid enum.
 
-The current stable direct MCP surface contains the five execution/editing tools plus the three architecture tools above. Registering a new deferred capability does not change `tools/list`; it becomes discoverable immediately through `tool_search` and callable through `exec`.
+The current stable direct MCP surface contains six execution/approval/editing tools plus the three architecture tools above. Registering a new deferred capability does not change `tools/list`; it becomes discoverable immediately through `tool_search` and callable through `exec`.
 
 CCM deliberately does not embed a second JavaScript interpreter for Code Mode. The host application remains responsible for loops, branching, and data processing. CCM's `exec/wait` pair is a bounded structured dispatcher over ToolRegistry capabilities. If a nested `exec_command` finishes the outer cell while leaving a live process session, the result explicitly directs the caller to continue that session with `write_stdin`.
+
+### Bundled specialized deferred capabilities
+
+CCM ships optional Windows workflows ported from WCM without expanding the top-level MCP schema:
+
+- `ccm-extra.quark_probe` checks a locally running, already logged-in Quark Cloud Drive desktop client.
+- `ccm-extra.quark_upload` submits one or more files through that local Quark desktop session and can wait for verified completion.
+- `ccm-extra.bilibili_download_dash` downloads signed DASH video/audio URLs obtained from an authenticated browser session and remuxes them with `ffmpeg -c copy`.
+
+Discover them with `tool_search` (for example, `quark upload` or `bilibili`) and invoke them through `exec`. Long uploads/downloads may return a live process session; continue that session with the top-level `write_stdin` tool.
+
+The Quark helper reuses only the login state of the local Quark desktop client and does not export account credentials. The Bilibili helper intentionally leaves authenticated `playurl` discovery to the browser/BMG layer and accepts only the resulting short-lived signed media URLs; it does not export cookies or attempt to bypass account/quality restrictions.
 
 ## Requirements
 
