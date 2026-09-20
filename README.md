@@ -233,7 +233,26 @@ Windows is the current fully supported restricted-execution platform.
 
 Restricted command execution on Linux/macOS is not implemented yet and **fails closed** rather than silently running unsandboxed. A Linux/macOS Worker therefore currently needs `CCM_PERMISSION_PROFILE=full-access` for shell execution.
 
-`apply_patch` enforces its own workspace-write boundary on the Worker, including real-path checks that reject symlink/junction escapes. `require_escalated` execution is rejected until a real approval/reviewer path exists.
+`apply_patch` enforces its own workspace-write boundary on the Worker, including real-path checks that reject symlink/junction escapes. `exec_command` can cross the command sandbox only through the one-shot approval flow below.
+
+### One-shot sandbox escalation
+
+Restricted Workers support an explicit one-shot escalation flow for `exec_command`.
+
+When `sandbox_permissions=require_escalated` is requested on a `read-only` or `workspace-write` environment, CCM does not execute the command immediately. It returns an `approval_required` result containing the selected environment, exact command, execution context, justification, a short-lived approval id, and a SHA-256 hash of the frozen execution intent.
+
+The host should show that request to the user and wait. After the user explicitly approves it, the host calls `respond_to_escalation` with `decision=approve`, then retries the exact same `exec_command` with the returned `approval_id`. The grant:
+
+- is valid for five minutes,
+- can be consumed only once,
+- is bound to the environment, command, working directory, shell, and TTY mode,
+- runs that one command with `full-access`,
+- cannot be reused after execution,
+- does not create a persistent allow rule.
+
+Changing the command or execution context requires a new approval. Denied and expired requests cannot execute.
+
+This approval mechanism controls CCM's sandbox boundary; it does **not** grant Windows Administrator/UAC privileges. Also, MCP currently provides no cryptographic proof that an approval tool call originated from a human message. CCM enforces the frozen one-shot grant, while the ChatGPT/host interaction layer is responsible for calling `respond_to_escalation` only after an explicit user decision. A separately authenticated consent UI would be required for CCM itself to independently verify human presence.
 
 ## Output and transport protection
 

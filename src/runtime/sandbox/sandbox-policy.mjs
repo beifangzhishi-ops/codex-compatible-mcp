@@ -12,5 +12,9 @@ export function resolvePermissionProfile(
     );
   }
 
+  if (sandboxPermissions === 'approved_escalated') {
+    return 'full-access';
+  }
+
   throw new Error(`Unknown sandbox_permissions value: ${sandboxPermissions}`);
 }

@@ -2,6 +2,7 @@ import { EnvironmentRegistry } from '../runtime/environment-registry.mjs';
 import { RemoteProcessManager } from '../runtime/remote-process-manager.mjs';
 import { RemoteFileService } from '../runtime/filesystem/remote-file-service.mjs';
 import { WorkerHub } from './worker-hub.mjs';
+import { ApprovalManager } from './approval-manager.mjs';
 
 export function createControllerRuntime(options = {}) {
   const environmentRegistry = options.environmentRegistry ||
@@ -11,9 +12,11 @@ export function createControllerRuntime(options = {}) {
     host: options.workerHost,
     port: options.workerPort,
   });
+  const approvalManager = options.approvalManager || new ApprovalManager();
   const processManager = options.processManager || new RemoteProcessManager({
     environmentRegistry,
     workerHub,
+    approvalManager,
   });
   const fileService = options.fileService || new RemoteFileService({
     environmentRegistry,
@@ -23,6 +26,7 @@ export function createControllerRuntime(options = {}) {
   return {
     environmentRegistry,
     workerHub,
+    approvalManager,
     processManager,
     fileService,
     async start() {

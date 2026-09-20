@@ -1,10 +1,11 @@
 export class RemoteProcessManager {
-  constructor({ environmentRegistry, workerHub }) {
+  constructor({ environmentRegistry, workerHub, approvalManager = null }) {
     if (!environmentRegistry || !workerHub) {
       throw new Error('RemoteProcessManager requires environmentRegistry and workerHub.');
     }
     this.environmentRegistry = environmentRegistry;
     this.workerHub = workerHub;
+    this.approvalManager = approvalManager;
     this.sessions = new Map();
     this.nextSessionId = 1000;
     this.onEnvironmentDisconnected = (environmentId) => {
@@ -30,6 +31,52 @@ export class RemoteProcessManager {
 
   async execCommand(args) {
     const environment = this.environmentRegistry.resolve(args.environment_id);
+    let forwardedArgs = { ...args, environment_id: environment.id };
+    const wantsEscalation = args.sandbox_permissions === 'require_escalated';
+
+    if (args.approval_id && !wantsEscalation) {
+      throw new Error(
+        'approval_id is only valid with sandbox_permissions=require_escalated.',
+      );
+    }
+
+    if (wantsEscalation && environment.permissionProfile !== 'full-access') {
+      if (!this.approvalManager) {
+        throw new Error('Escalated execution requires an approval manager.');
+      }
+      if (!args.approval_id) {
+        const approval = this.approvalManager.requestExecution(
+          args,
+          environment.id,
+        );
+        return {
+          chunk_id: 'approval',
+          wall_time_seconds: 0,
+          output:
+            'Approval required before this command can run outside the sandbox.',
+          approval_required: true,
+          ...approval,
+        };
+      }
+
+      this.approvalManager.consumeExecution(
+        args.approval_id,
+        args,
+        environment.id,
+      );
+      forwardedArgs = {
+        ...forwardedArgs,
+        sandbox_permissions: 'approved_escalated',
+      };
+      delete forwardedArgs.approval_id;
+    } else if (wantsEscalation) {
+      forwardedArgs = {
+        ...forwardedArgs,
+        sandbox_permissions: 'use_default',
+      };
+      delete forwardedArgs.approval_id;
+    }
+
     const timeoutMs = Math.max(
       35_000,
       Number(args.yield_time_ms || 10_000) + 10_000,
@@ -37,7 +84,7 @@ export class RemoteProcessManager {
     const result = await this.workerHub.call(
       environment.id,
       'exec_command',
-      { ...args, environment_id: environment.id },
+      forwardedArgs,
       { timeoutMs },
     );
     if (result?.session_id !== undefined) {

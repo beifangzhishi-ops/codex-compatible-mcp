@@ -51,6 +51,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       'exec',
       'exec_command',
       'list_environments',
+      'respond_to_escalation',
       'tool_search',
       'view_image',
       'wait',
@@ -67,6 +68,43 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(result.isError, undefined);
     assert.equal(Object.hasOwn(result, 'resultType'), false);
     assert.match(result.content[0].text, /MCP_OK/);
+
+    const escalation = await client.callTool({
+      name: 'exec_command',
+      arguments: {
+        environment_id: 'mcp-worker',
+        cmd: 'Write-Output MCP_ESCALATED_OK',
+        sandbox_permissions: 'require_escalated',
+        justification: 'Allow this MCP test command once?',
+      },
+    });
+    assert.equal(escalation.isError, undefined);
+    assert.equal(escalation.structuredContent.approval_required, true);
+    assert.match(escalation.content[0].text, /Approval required/);
+
+    const approvalId = escalation.structuredContent.approval_id;
+    const approved = await client.callTool({
+      name: 'respond_to_escalation',
+      arguments: {
+        approval_id: approvalId,
+        decision: 'approve',
+      },
+    });
+    assert.equal(approved.isError, undefined);
+    assert.equal(approved.structuredContent.state, 'approved');
+
+    const escalatedResult = await client.callTool({
+      name: 'exec_command',
+      arguments: {
+        environment_id: 'mcp-worker',
+        cmd: 'Write-Output MCP_ESCALATED_OK',
+        sandbox_permissions: 'require_escalated',
+        justification: 'Allow this MCP test command once?',
+        approval_id: approvalId,
+      },
+    });
+    assert.equal(escalatedResult.isError, undefined);
+    assert.match(escalatedResult.content[0].text, /MCP_ESCALATED_OK/);
 
     const nestedCore = await client.callTool({
       name: 'exec',

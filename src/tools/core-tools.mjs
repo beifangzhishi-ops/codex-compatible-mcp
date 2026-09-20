@@ -7,6 +7,17 @@ const UNIFIED_EXEC_OUTPUT_SCHEMA = {
   session_id: z.number().int().optional(),
   original_token_count: z.number().int().optional(),
   output: z.string(),
+  approval_required: z.boolean().optional(),
+  approval_id: z.string().optional(),
+  state: z.enum(['pending', 'approved', 'denied', 'consumed']).optional(),
+  environment_id: z.string().optional(),
+  command: z.string().optional(),
+  workdir: z.string().nullable().optional(),
+  tty: z.boolean().optional(),
+  shell: z.string().nullable().optional(),
+  justification: z.string().optional(),
+  expires_at: z.string().optional(),
+  intent_sha256: z.string().optional(),
 };
 
 function jsonResult(value) {
@@ -18,6 +29,20 @@ function jsonResult(value) {
 
 function execResult(value) {
   const lines = [];
+  if (value.approval_required) {
+    lines.push('Approval required: yes');
+    lines.push('Approval ID: ' + value.approval_id);
+    lines.push('Environment: ' + value.environment_id);
+    lines.push('Command: ' + value.command);
+    lines.push('Permission: full-access for this execution only');
+    lines.push('Expires: ' + value.expires_at);
+    lines.push('Justification: ' + value.justification);
+    lines.push(
+      'Stop and ask the user for explicit approval. ' +
+      'After approval, call respond_to_escalation and retry exec_command ' +
+      'with the same command plus this approval_id.',
+    );
+  }
   if (value.chunk_id) lines.push(`Chunk ID: ${value.chunk_id}`);
   lines.push(`Wall time: ${value.wall_time_seconds.toFixed(4)} seconds`);
   if (value.exit_code !== undefined) lines.push(`Process exited with code ${value.exit_code}`);
@@ -101,12 +126,41 @@ export function registerCoreTools(registry, runtime) {
       environment_id: z.string().optional().describe('Environment id. Omit to use the primary environment.'),
       sandbox_permissions: z.enum(['use_default', 'require_escalated']).optional().describe('Per-command sandbox override. Defaults to use_default.'),
       justification: z.string().optional().describe('User-facing approval question for require_escalated; omit otherwise.'),
-      prefix_rule: z.array(z.string()).optional().describe('Reusable approval prefix for cmd; only meaningful with require_escalated.'),
+      approval_id: z.string().uuid().optional().describe('One-shot approval id returned by an earlier require_escalated request. Retry the exact same execution with this id only after the user explicitly approves it.'),
     },
     outputSchema: UNIFIED_EXEC_OUTPUT_SCHEMA,
     handler: async (args) => {
       try {
         return execResult(await runtime.processManager.execCommand(args));
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  });
+
+  registry.register({
+    name: 'respond_to_escalation',
+    provider: 'ccm-core',
+    surfaces: { direct: true },
+    tags: ['approval', 'sandbox', 'permission'],
+    description: [
+      'Records the user response to a pending one-shot CCM escalation request.',
+      'MUST NOT approve unless the user explicitly approved the displayed request in a user message.',
+      'Approval does not execute anything; retry the exact exec_command with sandbox_permissions=require_escalated and the same approval_id.',
+    ].join('\n\n'),
+    inputSchema: {
+      approval_id: z.string().uuid().describe('Pending approval id returned by exec_command.'),
+      decision: z.enum(['approve', 'deny']).describe('The user\'s explicit decision.'),
+    },
+    handler: async (args) => {
+      try {
+        if (!runtime.approvalManager) {
+          throw new Error('CCM approval manager is not available.');
+        }
+        return jsonResult(runtime.approvalManager.respond(
+          args.approval_id,
+          args.decision,
+        ));
       } catch (error) {
         return toolError(error);
       }
