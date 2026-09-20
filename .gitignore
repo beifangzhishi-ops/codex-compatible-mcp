@@ -2,3 +2,7 @@ node_modules/
 .state/ 
 logs/ 
 .env
+native/bin/*
+!native/bin/.gitkeep
+
+native/pty-proxy/target/

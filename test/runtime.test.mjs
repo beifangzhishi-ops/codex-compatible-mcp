@@ -1,0 +1,126 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createRuntime } from '../src/runtime/index.mjs';
+
+const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
+const stateDir = path.join(root, '.state');
+
+function runtimeFor(permissionProfile = 'workspace-write') {
+  return createRuntime({
+    environment: {
+      id: 'test-local',
+      cwd: root,
+      permissionProfile,
+    },
+  });
+}
+
+test('exec_command preserves a nonzero exit code', async () => {
+  const runtime = runtimeFor();
+  try {
+    const result = await runtime.processManager.execCommand({
+      cmd: 'Write-Output CCM_TEST_OK; exit 7',
+    });
+    assert.equal(result.exit_code, 7);
+    assert.match(result.output, /CCM_TEST_OK/);
+  } finally {
+    runtime.close();
+  }
+});
+test('workspace-write can write inside the workspace', async () => {
+  fs.mkdirSync(stateDir, { recursive: true });
+  const target = path.join(stateDir, 'workspace-write-test.txt');
+  fs.rmSync(target, { force: true });
+  const runtime = runtimeFor('workspace-write');
+  try {
+    const result = await runtime.processManager.execCommand({
+      cmd: "Set-Content -LiteralPath '.state/workspace-write-test.txt' -Value ok; Get-Content -LiteralPath '.state/workspace-write-test.txt'",
+    });
+    assert.equal(result.exit_code, 0);
+    assert.match(result.output, /ok/);
+    assert.equal(fs.existsSync(target), true);
+  } finally {
+    runtime.close();
+    fs.rmSync(target, { force: true });
+  }
+});
+
+test('read-only blocks writes inside the workspace', async () => {
+  fs.mkdirSync(stateDir, { recursive: true });
+  const target = path.join(stateDir, 'read-only-test.txt');
+  fs.rmSync(target, { force: true });
+  const runtime = runtimeFor('read-only');
+  try {
+    const result = await runtime.processManager.execCommand({
+      cmd: "Set-Content -LiteralPath '.state/read-only-test.txt' -Value blocked -ErrorAction Stop",
+    });
+    assert.notEqual(result.exit_code, 0);
+    assert.equal(fs.existsSync(target), false);
+  } finally {
+    runtime.close();
+    fs.rmSync(target, { force: true });
+  }
+});
+test('long commands yield an integer session id and resume with write_stdin', async () => {
+  const runtime = runtimeFor();
+  try {
+    const first = await runtime.processManager.execCommand({
+      cmd: 'Write-Output before; Start-Sleep -Seconds 11; Write-Output after',
+      yield_time_ms: 250,
+    });
+    assert.equal(typeof first.session_id, 'number');
+    assert.match(first.output, /before/);
+
+    const second = await runtime.processManager.writeStdin({
+      session_id: first.session_id,
+      chars: '',
+      yield_time_ms: 5000,
+    });
+    assert.equal(second.exit_code, 0);
+    assert.match(second.output, /after/);
+  } finally {
+    runtime.close();
+  }
+});
+
+test('tty mode runs through the same native sandbox path', async () => {
+  const runtime = runtimeFor();
+  try {
+    const result = await runtime.processManager.execCommand({
+      cmd: 'Write-Output TTY_OK',
+      tty: true,
+    });
+    assert.equal(result.exit_code, 0);
+    assert.match(result.output, /TTY_OK/);
+  } finally {
+    runtime.close();
+  }
+});
+
+
+test('tty sessions accept interactive write_stdin input', async () => {
+  const runtime = runtimeFor();
+  try {
+    const first = await runtime.processManager.execCommand({
+      cmd: 'echo TTY_READY & set /p LINE= & echo TTY_DONE',
+      shell: 'cmd.exe',
+      tty: true,
+      yield_time_ms: 250,
+    });
+    assert.equal(typeof first.session_id, 'number');
+    assert.match(first.output, /TTY_READY/);
+
+    const second = await runtime.processManager.writeStdin({
+      session_id: first.session_id,
+      chars: 'hello\n',
+      yield_time_ms: 5000,
+    });
+    assert.equal(second.exit_code, 0);
+    assert.match(second.output, /TTY_DONE/);
+  } finally {
+    runtime.close();
+  }
+});

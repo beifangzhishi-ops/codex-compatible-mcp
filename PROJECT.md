@@ -2,18 +2,20 @@
 
 CCM means **Codex-Compatible MCP**. It is a new project and must remain separate from WCM.
 
-CCM exists to give GPT, through MCP/plugin integration, a tool surface and runtime behavior that resemble the Codex harness as closely as practical. The first priority is model-facing harness compatibility, not Desktop Commander compatibility.
+CCM exists to improve GPT's coding/execution performance over WCM by providing a smaller, more consistent agent-oriented harness. Codex is the main implementation reference where its design improves execution efficiency, but CCM is not a full Codex-parity project and does not attempt to reproduce Codex's host-owned conversation/context loop.
 
 ## Current priorities
 
-1. **P0 — Codex-like harness surface and execution semantics.**
-2. **P1 — Remote environments, Plan Mode, and persistent Goal execution.**
-3. **P1 — Code Mode / ToolRegistry so capabilities can grow without continuously adding top-level MCP tools.**
-4. **P2 — Tool discovery / hot capability access when the ChatGPT plugin schema is stale.**
-5. **P2 — MCP resource aggregation.**
-6. **P3 — Multi-agent orchestration and other advanced runtime features.**
+The first implementation round is intentionally narrow and performance-oriented:
 
-The earlier idea of keeping Desktop Commander tools as the main model-visible API is superseded. CCM may temporarily reuse implementation ideas or adapters, but GPT should primarily see CCM's Codex-like harness.
+1. **P0 — Execution Core:** `exec_command`, `write_stdin`, reliable PTY/process sessions, bounded command output, structured results, and the native sandbox required to run them safely.
+2. **P0 — Environment + Remote Worker:** every execution environment is backed by the same Remote Worker protocol, including the machine that hosts the Controller; a session has a default environment and each operation may override `environment_id`.
+3. **P0 — Editing:** CCM-owned `apply_patch` and `view_image`.
+4. **P0 — Tool Architecture:** a stable small top-level MCP surface plus ToolRegistry, deferred discovery, `tool_search`, and Code Mode so capability growth does not continuously enlarge the plugin schema.
+
+The first round ends after these four areas are working and tested. Plan Mode, Goal, MCP resource aggregation, Skills, multi-agent orchestration, and reviewer/auto-review features are later work unless a concrete workflow proves they are needed earlier.
+
+The earlier idea of keeping Desktop Commander tools as the main model-visible API is superseded. CCM may reuse implementation ideas, but GPT should primarily see CCM's smaller Codex-like execution surface.
 
 ## Core design principles
 
@@ -22,28 +24,49 @@ The earlier idea of keeping Desktop Commander tools as the main model-visible AP
 - Treat remote machines as first-class environments rather than adding a device argument everywhere.
 - Keep shell, cwd, path syntax, filesystem semantics, and process state native to the selected environment.
 - Do not let the controller reinterpret Windows paths as Linux paths or vice versa.
+
+## Orchestration ownership
+
+CCM cannot copy Codex's control loop exactly because the control direction is different.
+
+In Codex, the harness is the active orchestrator: it invokes the model, executes tools, and decides when to invoke the model again.
+
+In ChatGPT + CCM, ChatGPT is the active orchestrator. CCM is a passive but persistent execution/runtime substrate and must never rely on being able to initiate another LLM turn.
+
+CCM therefore owns only the state required for execution and continuation: environments, process sessions, sandbox/policy state, runtime events, optional Goal state, and other execution metadata. It does not own or duplicate ChatGPT conversation history or ChatGPT-side context management.
+
+The current filesystem and live runtime remain the source of truth for code and execution state. Goal checkpoints record durable execution progress and decisions needed for continuation, not verbose reasoning transcripts.
 ## Execution core
 
-The initial execution surface should center on:
+The first-round model-visible execution surface should converge on:
 
 - `exec_command`
 - `write_stdin`
 - `apply_patch`
 - `view_image`
 
-Normal repository work such as reading files, searching, Git, builds, tests, directory operations, and diagnostics should normally be performed through `exec_command`, matching the Codex style rather than exposing many narrow file/process tools.
+Normal repository work such as reading files, searching, Git, builds, tests, directory operations, and diagnostics should normally be performed through `exec_command` rather than many narrow file/process tools.
 
-`exec_command` must have a real process lifecycle. A still-running command returns a CCM-managed public `session_id`; `write_stdin` resumes or polls that session without requiring the model to re-specify its environment. CCM maps the public session to the underlying worker/process internally.
+`exec_command` must have a real process lifecycle. A still-running command returns a CCM-managed public `session_id`; `write_stdin` resumes, polls, or writes to that session without requiring the model to repeat its environment.
+
+Command output must be bounded before it is returned to the model. This is **output/context protection**, not a separate feature phase: CCM keeps structured metadata such as exit/session state and original output size, while limiting the text sent back in one tool result. Large build logs, recursive listings, test output, and similar commands must not consume the model's entire context window. Incremental polling should return only new output where practical.
 
 `apply_patch` should use Codex-style patch grammar and execute against the selected environment filesystem. It is not just an alias for string replacement.
 
 `view_image` reads an image from the selected environment. Image **generation** is intentionally out of scope because ChatGPT already provides a better native image-generation path.
 
-## Remote environment model
+## Environment and Remote Worker model
 
-Current environments include 6v1f and noha, but the design must support additional workers.
+Current environments include 6v1f and noha, but the design must support additional Remote Workers.
 
-A worker should report environment metadata such as:
+CCM uses a single worker model. The Controller does not have a separate Local Worker or Local Executor execution path. The machine hosting the Controller runs a normal **Remote Worker** too; when both processes are on the same machine, the connection may use loopback/local transport, but the protocol and runtime semantics remain identical to every other worker.
+
+Environment selection is **per operation with a session default**, not an exclusive global mode. A normal call can omit `environment_id` and use the session/default environment, while workflows that alternate between machines can explicitly target each operation:
+
+`exec_command(environment_id="machine1", ...)`
+`apply_patch(environment_id="machine2", ...)`
+
+A Remote Worker should report environment metadata such as:
 
 - environment id
 - operating system
@@ -51,68 +74,52 @@ A worker should report environment metadata such as:
 - cwd / workspace roots
 - process, patch, image, and filesystem capabilities
 
+The Controller routes each operation to the Remote Worker that owns the selected environment. Shell syntax, cwd, filesystem paths, PTY/process lifecycle, sandbox enforcement, patching, and image access remain native to that worker.
+
+This single-worker architecture is intentional: local and physically remote machines must not develop separate execution semantics or separate implementations.
+
+Cross-environment file-transfer functionality is not a current CCM goal.
+
 The existing WCM controller/worker idea is useful conceptually, but CCM is a fresh implementation and should not be constrained by Desktop Commander schemas.
-## Plan Mode
+## Deferred runtime features
 
-Plan Mode is a real CCM session mode, not a cosmetic tool name.
+### Plan Mode
 
-In Plan Mode, repository inspection, searching, and non-destructive validation are allowed. Mutating operations such as `apply_patch` and clearly destructive execution must be blocked or separately gated by the runtime.
+Plan Mode is useful for reliability but is not part of the first performance-focused implementation round. If implemented later, it should be a real runtime mode: inspection and non-destructive validation remain available while mutations are blocked or separately gated server-side.
 
-Because an MCP server cannot inject exactly the same host-level instructions as Codex, Plan Mode should combine model instructions with server-side enforcement.
+### Goal
 
-A structured user-question mechanism may be added for important planning decisions, but CCM should not pretend to reproduce a native Codex UI if ChatGPT already provides the interaction surface.
+Goal is also deferred until after the first four implementation areas. It must not be used as a substitute for unavailable ChatGPT conversation history.
 
-## Goal Mode and scheduled continuation
+If Goal is implemented, it should stay lightweight and persist only durable continuation state:
 
-Goal continuity must not depend on the original ChatGPT conversation being available.
+- **Goal Contract:** objective, success criteria, scope, constraints, target workspace/repository, target environments, status.
+- **Directive Ledger:** append-only user instructions that materially affect future continuation; not every user message.
+- **Implementation Decisions:** agent/runtime technical decisions kept distinct from user directives.
+- **Checkpoint:** completed work, remaining work, verified facts, blockers, and next actions.
 
-CCM therefore needs a persistent GoalStore. A goal checkpoint should preserve at least:
-
-- goal id and objective
-- status: active / paused / blocked / complete
-- current phase
-- completed work
-- remaining work
-- important decisions and assumptions
-- target repository and environment
-- last verified repository/runtime state
-- blockers and next actions
-- optional budget/accounting metadata
-
-The intended continuation driver is a ChatGPT scheduled task. The current desired cadence is hourly, matching the platform's highest scheduling frequency.
-Each scheduled run should restore the active CCM goal, inspect the checkpoint, re-verify actual repository state, and continue doing useful work. It must not treat one successful command as completion of the run.
-
-The continuation instruction should explicitly prefer multiple consecutive implementation / verification steps during the available run window, checkpointing before the run ends. The user has observed roughly a 25-minute tool-work window in current usage, but CCM must not hard-code that duration as a guaranteed platform contract.
-
-A run should stop early only when the goal is complete, genuinely blocked, requires user input, or cannot make another justified step.
-
-This is an MCP-compatible approximation of Codex Goal continuation: CCM persists the state, while ChatGPT scheduling starts later turns.
+Normal interactive CCM sessions should not require a Goal. Goal exists only for durable cross-run or scheduled continuation.
 
 ## Code Mode and extensibility
 
 Code Mode is a major design target, not an optional decoration.
 
-CCM should own a ToolRegistry with exposure concepts similar to:
+CCM should own a ToolRegistry where model exposure is represented by independent surfaces:
 
-- Direct
-- Deferred
-- CodeModeOnly
-- Hidden
+- **Direct** — included in the initial model-visible tool list
+- **Deferred** — omitted initially but discoverable through `tool_search`
+- **Code Mode** — callable as a nested capability from Code Mode
 
-The stable top-level MCP surface should not grow every time CCM gains a specialized capability. Specialized tools should normally become nested ToolRegistry capabilities callable from Code Mode.
+A tool may support any useful combination of these surfaces; no enabled surface is equivalent to Hidden. Convenience labels such as Direct, Deferred, CodeModeOnly, DirectModelOnly, DeferredModelOnly, and Hidden may be derived from the surface flags.
+
+The stable top-level MCP surface should not grow every time CCM gains a specialized capability. Specialized tools should normally become deferred and/or nested ToolRegistry capabilities rather than new top-level MCP functions.
 
 This is also the preferred solution to the plugin-refresh problem: new nested capabilities can become usable without requiring ChatGPT to register a brand-new top-level MCP function.
 
 A `tool_search`-style capability should search the current registry and expose relevant deferred/nested capabilities to the model.
-## MCP resources
+## Later extension: MCP resources
 
-CCM should support Codex-style resource helpers even if no external MCP servers are configured initially:
-
-- `list_mcp_resources`
-- `list_mcp_resource_templates`
-- `read_mcp_resource`
-
-Long term, CCM may act as an MCP aggregator with its own connection manager for child MCP servers.
+MCP resource aggregation is explicitly outside the first release. If a later workflow justifies it, CCM may add Codex-style resource helpers and a child-MCP connection manager without changing the first-release execution ABI.
 
 ## Later work
 
@@ -135,122 +142,100 @@ No Git remote should be required during early development. When CCM is ready for
 `/ccm/mcp`
 
 WCM remains a separate project and should not be modified as part of CCM development unless explicitly requested.
-## Codex parity gaps found after source review
+## Codex source alignment for the first release
 
-A second comparison against the current Codex repository found several harness layers that are important enough to add to CCM's roadmap.
+The current Codex source is used as a design reference only for CCM's first four milestones. CCM should copy execution contracts that improve reliability or model efficiency, not host-specific lifecycle features that ChatGPT already owns.
 
-### Permission, sandbox, and approval policy
+### 1. Execution Core
 
-CCM should carry a Codex-style native sandbox backend as a first-class part of the worker runtime.
+Current Codex `unified_exec` uses the same basic limits CCM already adopted: a default 10,000-token model-output budget, a 1 MiB captured-output ceiling, and a 64-process ceiling. CCM should keep these as initial defaults and additionally enforce an absolute serialized MCP-response byte limit at the Controller boundary.
 
-The model-facing permission semantics should stay close to Codex, while enforcement is platform-native inside each worker:
+For live processes, the useful Codex pattern is cursor-based incremental output rather than replaying the full buffer. The Remote Worker protocol should therefore support sequence/cursor reads with a response byte budget and bounded wait time.
 
-- Linux: Landlock/seccomp for policies the native backend can enforce, with bubblewrap available for richer filesystem policies.
-- Windows: a restricted-token/AppContainer-style backend following Codex's Windows sandbox approach.
+On Windows, Codex does not rely on the stock `portable-pty` Windows backend. Its `codex-utils-pty` contains a modified ConPTY implementation with process-tree/Job Object handling and newer ConPTY lifecycle fixes. CCM should align its Windows PTY helper with that implementation rather than returning to `node-pty` or treating stock `portable-pty` behavior as authoritative.
 
-The initial policy model should support:
+### 2. Environment + Remote Worker
 
-- read-only, workspace-write, and full-access style profiles
-- per-environment readable and writable roots
-- network permission state
-- environment-native cwd/path handling
-- explicit refusal rather than silently running unsandboxed when the selected backend cannot enforce a requested policy
+Current Codex has a separate `codex-exec-server` responsible for transport plus process and filesystem handlers. It supports local WebSocket use and remote environment registration while keeping the execution API stable.
 
-Windows sandboxing must be treated as less mature than the Linux path. Known platform limitations, such as locations writable by broad Windows ACLs, must be surfaced rather than hidden.
+The useful contract for CCM is:
+- `initialize` / `initialized` handshake with environment metadata
+- process start/read/write/terminate
+- asynchronous output/exited/closed state
+- sequence-based incremental reads with `maxBytes` and bounded wait
+- worker-owned filesystem and sandbox operations
 
-ChatGPT already applies a host-level safety review before some MCP operations reach CCM. That review is an additional outer layer, not part of CCM's sandbox contract.
+CCM should follow the same ownership split: the Controller routes by `environment_id`; the Remote Worker owns shell/PTY/process lifetime, sandbox enforcement, patch filesystem access, and image reads. The Controller host is not special: it also runs a Remote Worker and uses the same protocol over loopback/local transport.
 
-CCM auto-review is therefore not required for v1. The approval/reviewer architecture should remain pluggable, but model-based auto-review is P2. A future reviewer may use a dedicated model/provider or another host-supported mechanism. Sandbox enforcement must not depend on reviewer availability.
+The model-facing API may keep environment-native path strings. Internally, the Worker protocol may normalize paths to `file:` URIs, as Codex does, so Windows and POSIX paths remain unambiguous across the transport.
 
-If an operation requires an approval that CCM cannot safely obtain, a Goal run should checkpoint as blocked rather than bypassing policy.
+CCM should **not** copy Codex's Noise relay, AWS signing, rendezvous protocol, or forwarding machinery in the first release. Those solve deployment/authentication problems rather than the WCM performance problems CCM is targeting.
 
-Sandbox/permission enforcement is P0/P1 and is part of the native CCM worker design. Auto-review itself is later work.
-### Session and Turn runtime
+### 3. Editing
 
-Codex has a real Session/Turn execution loop; tool calls are only one part of it. CCM needs a lightweight equivalent for reliable Goal continuation and remote execution.
+Current Codex `apply_patch` resolves the selected `environment_id`, verifies the parsed patch against that environment's filesystem and sandbox policy, and only then executes it. CCM should preserve this separation: parse/verify centrally, execute against the selected Remote Worker filesystem, and fail before mutation when the patch is invalid or forbidden.
 
-A CCM session should track at least:
+Current Codex `view_image` is also environment-aware and validates image data before returning it. CCM should follow that behavior while adding an explicit media-size/preview budget so image results cannot reproduce WCM's oversized-response failures.
 
-- active mode and active goal
-- current environment selection
-- active process sessions
-- turn/run identifier
-- pending or steering input where supported
-- cancellation / interruption state
-- tool call events and terminal result state
-- checkpoint / recovery metadata
+### 4. Tool Architecture
 
-A scheduled Goal invocation is a new ChatGPT run, but it should attach to the same persistent CCM goal/session state where appropriate.
+Current Codex treats tool exposure as three independent model-facing surfaces: **Direct**, **Deferred**, and **Code Mode**. Its convenience states include Direct, Deferred, CodeModeOnly, DirectModelOnly, DeferredModelOnly, and Hidden.
 
-CCM should define explicit run termination reasons such as complete, blocked, user-input-required, budget-boundary, interrupted, and failed. These are more useful than relying on a model simply stopping.
+CCM should therefore avoid locking Milestone 4 to a rigid four-value enum. The durable representation should be exposure-surface flags/capabilities, with convenience labels derived from those flags.
 
-### Output budgets and context protection
+Codex also separates the complete executable registry from the finalized model-visible tool list. CCM should do the same: ToolRegistry owns all executable capabilities, while a routing/planning layer decides what is directly visible, discoverable through `tool_search`, or callable only from Code Mode.
 
-Codex tracks raw command output separately from model-facing output, including original token count and truncation. CCM should do the same.
+`tool_search` in CCM should be an ordinary MCP function with ordinary JSON arguments rather than depending on a host-specific tool-call payload type. Code Mode should follow the useful Codex pattern of a small public `exec` / `wait` surface dispatching nested registered capabilities.
 
-Execution results should preserve structured metadata such as:
+### Explicitly outside first-release parity
 
-- chunk id
-- wall time
-- exit code or live session id
-- original token count where available
-- omitted/truncated byte or token counts
-- bounded model-facing output
+The first release does not attempt to copy Codex's model loop, conversation/context ownership, Goal-like continuation, Plan Mode, Skills, MCP-resource aggregation, multi-agent runtime, model-based reviewer, or remote relay/auth infrastructure. These remain later options only when a concrete CCM workflow justifies them.
 
-Large output should be retained or pageable without flooding the model context. A hard byte cap alone is insufficient.
-### Project instructions and Skills
+## Performance-first implementation order
 
-Codex has two important instruction-discovery mechanisms that were missing from the first CCM plan.
+### First implementation round
 
-**Project instructions:** CCM should recognize scoped repository guidance such as `AGENTS.md`. Instructions should follow directory scope and more-specific nested guidance should override broader guidance.
+**Milestone 1 — Execution Core**
 
-**Skills:** CCM should eventually support progressively disclosed reusable workflows. A skill should have cheap discovery metadata, load its detailed instructions only when relevant, and optionally include scripts/references/assets.
+- `exec_command` and `write_stdin`
+- reliable PTY and long-running process sessions
+- ProcessManager lifecycle, cancellation, cleanup, and exit semantics
+- capture bounds, model-output truncation, incremental output, and final MCP response-size guards
+- permission profiles and native sandbox enforcement required for safe execution
+- regression coverage for pipe, PTY, long-running, nonzero-exit, sandbox, and oversized-output behavior
 
-This does not require copying Codex's exact on-disk implementation immediately, but the runtime architecture should leave a place for an Instruction/Skill resolver instead of putting all behavior into global prompts.
+**Milestone 2 — Environment + Remote Worker**
 
-Skills are P2 unless a concrete workflow needs them earlier.
+- Environment Registry with a default/session environment
+- per-operation `environment_id` override
+- one Remote Worker protocol for every execution environment, including the Controller host
+- Controller-side worker connection/routing layer; no separate Local Executor path
+- worker contract, health/capability metadata, reconnect/disconnect/error classification
+- native shell/path/cwd/process/sandbox semantics inside each Remote Worker
+- no cross-environment file-transfer feature
 
-### ToolRegistry namespace and provenance rules
+**Milestone 3 — Editing**
 
-The ToolRegistry must record more than a tool name and schema. It should track:
+- CCM-owned Codex-style `apply_patch`
+- `view_image` with bounded media output
+- selected-environment filesystem semantics
+- focused tests for patch application, failure modes, path handling, and image-size limits
 
-- provider / owner
-- namespace
-- exposure: Direct / Deferred / CodeModeOnly / Hidden
-- search metadata
-- immutable or dynamic schema source
-- environment requirements
-- destructive/open-world hints where applicable
+**Milestone 4 — Tool Architecture**
 
-Name collisions must fail predictably rather than silently overriding another provider. Core CCM tools should own their reserved identities; nested or external providers should retain provenance.
-### Events, observability, and recovery
+- stable small top-level MCP tool surface
+- ToolRegistry with independent Direct / Deferred / Code Mode exposure surfaces and derived convenience states
+- namespace, provider/provenance, collision rules, and environment requirements
+- `tool_search` / deferred capability discovery
+- Code Mode execution/wait path for nested capabilities
 
-CCM should expose or persist structured runtime events for debugging and scheduled continuation:
+Completion of Milestones 1-4 defines the first useful CCM release target.
 
-- run/turn started and completed
-- tool started and completed
-- process session created/ended
-- warning/error
-- approval requested/resolved
-- goal checkpoint written
-- worker connected/disconnected
+### Later, only if justified by real workflows
 
-The event log is not merely telemetry: it gives Goal continuation enough evidence to distinguish "a command ran" from "the phase was completed".
+- **Plan Mode:** runtime-enforced non-mutating mode
+- **Goal:** lightweight durable continuation using Goal Contract + Directive Ledger + Implementation Decisions + Checkpoint
+- **Extensions:** MCP resources/child MCP manager, Skills, specialized providers
+- **Advanced orchestration:** multi-agent lifecycle, pluggable reviewers/auto-review, richer policy integration
 
-Worker disconnects and controller restarts should not corrupt the GoalStore. Long-running process sessions may be non-resumable after a worker restart; CCM must mark that explicitly rather than pretending the session still exists.
-
-## Revised implementation order
-
-**Milestone 1 — Harness core:** Environment registry, `exec_command`, `write_stdin`, structured outputs, process/session manager, permission profiles, and the first native sandbox backend(s).
-
-**Milestone 2 — Editing and modes:** `apply_patch`, `view_image`, Plan Mode, session/turn state, repository instruction discovery.
-
-**Milestone 3 — Goal runtime:** persistent GoalStore, checkpoints, run termination reasons, scheduled-continuation contract, observability needed for reliable resume.
-
-**Milestone 4 — Tool architecture:** ToolRegistry, Code Mode `exec/wait`, deferred discovery / `tool_search`, namespace/provenance/collision handling.
-
-**Milestone 5 — Extensions:** MCP resources/child MCP manager, Skills, specialized CodeModeOnly providers.
-
-**Milestone 6 — Advanced orchestration:** multi-agent lifecycle, pluggable approval reviewers/auto-review, and richer policy integration.
-
-Image generation and web search remain intentionally outside CCM because ChatGPT already supplies them.
+Image generation, web search, full ChatGPT conversation persistence, and cross-environment file transfer remain intentionally outside CCM.

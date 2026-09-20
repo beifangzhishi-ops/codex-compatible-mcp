@@ -4,9 +4,18 @@
   "private": true,
   "type": "module",
   "description": "Codex-compatible MCP harness for GPT.",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
+    "build:native": "node scripts/build-native.mjs",
+    "prestart": "npm run build:native",
     "start": "node src/index.mjs",
+    "pretest": "npm run build:native",
     "test": "node --test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.6.5"
   }
 }
