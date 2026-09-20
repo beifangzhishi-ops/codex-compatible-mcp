@@ -48,6 +48,27 @@ test('workspace-write can write inside the workspace', async () => {
   }
 });
 
+test('workspace-write can reuse an existing sandbox workspace ACL', async () => {
+  const runtime = runtimeFor('workspace-write');
+  try {
+    const first = await runtime.processManager.execCommand({
+      cmd: 'Write-Output first',
+      yield_time_ms: 5000,
+    });
+    assert.equal(first.exit_code, 0);
+    assert.match(first.output, /first/);
+
+    const second = await runtime.processManager.execCommand({
+      cmd: 'Write-Output second',
+      yield_time_ms: 5000,
+    });
+    assert.equal(second.exit_code, 0);
+    assert.match(second.output, /second/);
+  } finally {
+    runtime.close();
+  }
+});
+
 test('read-only blocks writes inside the workspace', async () => {
   fs.mkdirSync(stateDir, { recursive: true });
   const target = path.join(stateDir, 'read-only-test.txt');

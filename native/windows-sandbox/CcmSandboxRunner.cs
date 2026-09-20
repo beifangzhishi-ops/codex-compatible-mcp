@@ -216,10 +216,30 @@ internal static class CcmSandboxRunner
         var rights = FileSystemRights.Modify |
             FileSystemRights.ReadAndExecute |
             FileSystemRights.Synchronize;
+        var inheritance = InheritanceFlags.ContainerInherit |
+            InheritanceFlags.ObjectInherit;
+        var existingRules = security.GetAccessRules(
+            true, false, typeof(SecurityIdentifier));
+        foreach (AuthorizationRule authorizationRule in existingRules)
+        {
+            var existing = authorizationRule as FileSystemAccessRule;
+            if (existing == null || existing.AccessControlType != AccessControlType.Allow)
+                continue;
+            var existingSid = existing.IdentityReference as SecurityIdentifier;
+            if (existingSid == null || !existingSid.Equals(sid))
+                continue;
+            if ((existing.FileSystemRights & rights) != rights)
+                continue;
+            if ((existing.InheritanceFlags & inheritance) != inheritance)
+                continue;
+            if (existing.PropagationFlags != PropagationFlags.None)
+                continue;
+            return;
+        }
         var rule = new FileSystemAccessRule(
             sid,
             rights,
-            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+            inheritance,
             PropagationFlags.None,
             AccessControlType.Allow);
         security.AddAccessRule(rule);
