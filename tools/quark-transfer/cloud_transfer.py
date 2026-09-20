@@ -45,6 +45,16 @@ def persistence_root() -> Path:
             "persistence")
 
 
+def account_config_path() -> Path:
+    return (Path(os.environ["LOCALAPPDATA"]) / "QuarkCloudDrive" / "User Data" /
+            "account.json")
+
+
+def cloud_indexeddb_dir() -> Path:
+    return (Path(os.environ["LOCALAPPDATA"]) / "QuarkCloudDrive" / "User Data" /
+            "Default" / "IndexedDB" / "uccd_cloud.quark_0.indexeddb.leveldb")
+
+
 class Wsg:
     def __init__(self, path: Path):
         if not path.is_file():
@@ -160,10 +170,10 @@ def _json_string_hits(raw: bytes, key: str, encoding: str) -> list[tuple[int, st
     return hits
 
 
-def find_uid_wsg(origin: str) -> str:
+def _find_legacy_uid_wsg(origin: str) -> set[str]:
     root = local_storage_dir()
     if not root.is_dir():
-        raise ToolError("未找到 Quark Local Storage")
+        return set()
     candidates: set[str] = set()
     files = [p for p in root.iterdir() if p.is_file() and p.suffix in {".ldb", ".log"}]
     files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
@@ -181,9 +191,80 @@ def find_uid_wsg(origin: str) -> str:
             if not any(mark in window for mark in origin_forms):
                 continue
             candidates.update(_uid_candidates_from_window(window, origin))
-    if len(candidates) != 1:
-        raise ToolError(f"当前账号映射不唯一（匹配数: {len(candidates)}），已安全中止")
-    return next(iter(candidates))
+    return candidates
+
+
+def _account_ids_from_config(path: Path | None = None) -> list[str]:
+    path = path or account_config_path()
+    try:
+        body = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return []
+    if not isinstance(body, dict):
+        return []
+    return [key for key in body
+            if isinstance(key, str) and key and len(key) <= 256]
+
+
+def _latest_cache_account(account_ids: list[str],
+                          roots: list[Path] | None = None) -> str | None:
+    if len(account_ids) == 1:
+        return account_ids[0]
+    if not account_ids:
+        return None
+    roots = roots or [local_storage_dir(), cloud_indexeddb_dir()]
+    root_winners: list[str] = []
+    for root in roots:
+        if not root.is_dir():
+            continue
+        try:
+            files = [p for p in root.iterdir()
+                     if p.is_file() and p.suffix == ".log"]
+            files.sort(key=lambda p: p.stat().st_mtime_ns, reverse=True)
+        except OSError:
+            continue
+        for path in files:
+            try:
+                raw = path.read_bytes()
+            except OSError:
+                continue
+            last_positions: dict[str, int] = {}
+            for account_id in account_ids:
+                markers = (
+                    f"response-cache:{account_id}".encode("utf-8"),
+                    f"home-card-cache:{account_id}".encode("utf-8"),
+                )
+                pos = max(raw.rfind(marker) for marker in markers)
+                if pos >= 0:
+                    last_positions[account_id] = pos
+            if not last_positions:
+                continue
+            newest_pos = max(last_positions.values())
+            winners = [account_id for account_id, pos in last_positions.items()
+                       if pos == newest_pos]
+            if len(winners) != 1:
+                return None
+            root_winners.append(winners[0])
+            break
+    if not root_winners:
+        return None
+    unique = set(root_winners)
+    if len(unique) != 1:
+        return None
+    return root_winners[0]
+
+
+def find_uid_wsg(origin: str) -> str:
+    legacy = _find_legacy_uid_wsg(origin)
+    if len(legacy) == 1:
+        return next(iter(legacy))
+    account_ids = _account_ids_from_config()
+    active = _latest_cache_account(account_ids)
+    if active:
+        return active
+    candidate_count = len(legacy) if legacy else len(account_ids)
+    raise ToolError(
+        f"当前账号映射无法唯一确认（候选数: {candidate_count}），已安全中止")
 
 
 def _all_positions(raw: bytes, needle: bytes) -> list[int]:
