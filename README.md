@@ -105,6 +105,45 @@ npm run worker
 
 The `preworker` script builds the native helper for the current platform first.
 
+## Windows scheduled-task operation
+
+CCM includes public Task Scheduler helpers for both Controller hosts and standalone Remote Workers. They run hidden under the current Windows user, start at logon, use `IgnoreNew` to avoid duplicate instances, and configure Task Scheduler restart-on-failure behavior. Each supervisor also restarts its own child process if that child exits unexpectedly.
+
+For a Controller machine that should run the Controller, its local Worker, and the OAuth sidecar as one service group:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-ccm-autostart.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\ccm-status.ps1
+```
+
+Remove it with:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\uninstall-ccm-autostart.ps1
+```
+
+For a standalone Windows Remote Worker, first create its ignored runtime config:
+
+```powershell
+Copy-Item .\config\worker.env.example .\config\worker.env
+notepad .\config\worker.env
+```
+
+Set at least `CCM_WORKER_HUB_CONNECT_HOST` and `CCM_WORKSPACE`; normally also give the Worker a stable `CCM_ENVIRONMENT_ID`. Then install and inspect the Worker task:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-ccm-worker-autostart.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\ccm-worker-status.ps1
+```
+
+Remove it with:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\uninstall-ccm-worker-autostart.ps1
+```
+
+The Remote Worker supervisor reads `config/worker.env` itself, builds the native helpers on startup, and launches `src/worker/agent.mjs`. The Worker agent owns connection retry/reconnect behavior, so temporary Controller/network loss does not cause a process restart. `config/worker.env`, PID files, and supervisor logs are local runtime state and are not committed.
+
 ## OAuth-protected public endpoint
 
 For ChatGPT/plugin use, expose the OAuth sidecar rather than the raw Controller.

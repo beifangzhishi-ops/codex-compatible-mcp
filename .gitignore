@@ -2,6 +2,7 @@ node_modules/
 .state/
 logs/
 config/ccm.env
+config/worker.env
 .env
 .env.*
 !.env.example
