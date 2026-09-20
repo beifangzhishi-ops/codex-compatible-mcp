@@ -10,3 +10,5 @@ Initial design goals:
 - MCP resource aggregation.
 
 The project is intentionally developed locally first. No Git remote is configured yet.
+
+See [PROJECT.md](PROJECT.md) for the current goals, architecture decisions, Codex parity notes, and implementation roadmap.
