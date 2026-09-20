@@ -36,6 +36,7 @@ function Log([string]$message){
 }
 function Listener([int]$port){
     Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue |
+        Where-Object { $_.LocalAddress -in @('127.0.0.1','0.0.0.0','::1','::') } |
         Select-Object -First 1
 }
 function WaitPort([int]$port,[int]$seconds){
