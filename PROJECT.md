@@ -141,13 +141,12 @@ A second comparison against the current Codex repository found several harness l
 
 ### Permission, sandbox, and approval policy
 
-CCM should carry a Codex-style sandbox backend instead of requiring Docker as the default isolation layer.
+CCM should carry a Codex-style native sandbox backend as a first-class part of the worker runtime.
 
 The model-facing permission semantics should stay close to Codex, while enforcement is platform-native inside each worker:
 
 - Linux: Landlock/seccomp for policies the native backend can enforce, with bubblewrap available for richer filesystem policies.
 - Windows: a restricted-token/AppContainer-style backend following Codex's Windows sandbox approach.
-- Docker/container isolation remains an optional fallback or defense-in-depth backend, not a prerequisite for a CCM worker.
 
 The initial policy model should support:
 
@@ -165,7 +164,7 @@ CCM auto-review is therefore not required for v1. The approval/reviewer architec
 
 If an operation requires an approval that CCM cannot safely obtain, a Goal run should checkpoint as blocked rather than bypassing policy.
 
-Sandbox/permission enforcement is P0/P1 because it enables native workers without requiring Docker. Auto-review itself is later work.
+Sandbox/permission enforcement is P0/P1 and is part of the native CCM worker design. Auto-review itself is later work.
 ### Session and Turn runtime
 
 Codex has a real Session/Turn execution loop; tool calls are only one part of it. CCM needs a lightweight equivalent for reliable Goal continuation and remote execution.
@@ -242,7 +241,7 @@ Worker disconnects and controller restarts should not corrupt the GoalStore. Lon
 
 ## Revised implementation order
 
-**Milestone 1 — Harness core:** Environment registry, `exec_command`, `write_stdin`, structured outputs, process/session manager, permission profiles, and the first native sandbox backend(s). Docker is optional fallback/defense-in-depth rather than a required worker dependency.
+**Milestone 1 — Harness core:** Environment registry, `exec_command`, `write_stdin`, structured outputs, process/session manager, permission profiles, and the first native sandbox backend(s).
 
 **Milestone 2 — Editing and modes:** `apply_patch`, `view_image`, Plan Mode, session/turn state, repository instruction discovery.
 
