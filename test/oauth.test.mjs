@@ -290,3 +290,55 @@ test('OAuth sidecar safely persists initialize data and recovers a stale upstrea
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test('OAuth sidecar declines legacy GET SSE instead of sharing one upstream stream', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-oauth-get-'));
+  const config = createConfig({
+    rootDir: root,
+    readEnvFile: false,
+    envValues: {
+      CCM_ISSUER: 'https://example.test/ccm',
+      CCM_RESOURCE: 'https://example.test/ccm/mcp',
+    },
+    port: 0,
+    allowEphemeral: true,
+    approvalSecret: 'A'.repeat(32),
+  });
+  const store = new OAuthStore(config.stateFile);
+  const client = store.registerClient(metadata());
+  const verifier = 'C'.repeat(64);
+  const code = store.createAuthorizationCode({
+    clientId: client.clientId,
+    redirectUri: metadata().redirect_uris[0],
+    codeChallenge: createPkceChallenge(verifier),
+    codeChallengeMethod: 'S256',
+    resource: config.resource,
+    scope: 'mcp',
+  });
+  const token = store.exchangeAuthorizationCode({
+    code,
+    clientId: client.clientId,
+    redirectUri: metadata().redirect_uris[0],
+    codeVerifier: verifier,
+    resource: config.resource,
+    tokenTtlSeconds: 3600,
+  }).accessToken;
+  const runtime = createCcmOAuthServer({ config, oauthStore: store });
+  try {
+    await listenCcmOAuthServer(runtime, 0);
+    const base = 'http://127.0.0.1:' + runtime.server.address().port;
+    const response = await fetch(base + '/ccm/mcp', {
+      method: 'GET',
+      headers: {
+        authorization: 'Bearer ' + token,
+        accept: 'text/event-stream',
+        'mcp-protocol-version': '2025-11-25',
+      },
+    });
+    assert.equal(response.status, 405);
+    assert.equal(response.headers.get('allow'), 'POST, DELETE');
+  } finally {
+    await closeCcmOAuthServer(runtime);
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

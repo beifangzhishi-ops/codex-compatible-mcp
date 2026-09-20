@@ -980,8 +980,16 @@ async function handleProtectedMcp(request, response, runtime, url) {
         sendUpstreamResponse(response, direct);
         return;
       }
-      const session = await runtime.upstreamSession.ensureSession();
-      proxyMcpStream(request, response, runtime, url, session.sessionId);
+      // The legacy sidecar multiplexes POST requests onto one upstream MCP
+      // session. Proxying multiple downstream GET/SSE streams onto that same
+      // session makes the upstream SDK reject concurrent clients with 409
+      // ("Only one SSE stream is allowed per session"). Streamable HTTP
+      // explicitly permits 405 when a server does not offer a GET SSE stream,
+      // and the SDK client treats that as a supported transport mode.
+      response.statusCode = 405;
+      response.setHeader('Allow', 'POST, DELETE');
+      setNoStore(response);
+      response.end();
       return;
     }
     const body = await readBody(request);
