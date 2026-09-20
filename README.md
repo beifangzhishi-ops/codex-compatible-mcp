@@ -105,6 +105,43 @@ npm run worker
 
 The `preworker` script builds the native helper for the current platform first.
 
+## OAuth-protected public endpoint
+
+For ChatGPT/plugin use, expose the OAuth sidecar rather than the raw Controller.
+
+CCM's OAuth gateway follows the same deployment pattern proven in WCM:
+
+- OAuth 2.0 authorization code flow with PKCE S256
+- dynamic public-client registration
+- Protected Resource Metadata and Authorization Server Metadata
+- bearer access tokens, refresh-token rotation, and revocation
+- a local approval secret required at consent time
+- only the OAuth sidecar is exposed through HTTPS ingress; the Controller and WorkerHub stay private
+
+Prepare a local deployment:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\ccm-enable-oauth.ps1 `
+  -PublicBaseUrl https://your-machine.your-tailnet.ts.net
+npm run public
+```
+
+The default local ports are:
+
+```text
+OAuth sidecar: 127.0.0.1:18208
+MCP Controller: 127.0.0.1:18209
+WorkerHub:      127.0.0.1:18301
+```
+
+For Tailscale Funnel, apply the path routes after the sidecar is healthy:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\configure-ccm-funnel.ps1 -Apply
+```
+
+The public MCP resource is `https://<host>/ccm/mcp`. Runtime OAuth configuration is stored in ignored `config/ccm.env`; OAuth tokens/state and the local approval secret remain under ignored `.state/`.
+
 ## Remote Worker example
 
 The WorkerHub has no authentication or transport encryption in v0.1. Keep it on loopback or a trusted/private network.
