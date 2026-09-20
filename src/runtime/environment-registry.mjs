@@ -88,7 +88,7 @@ export class EnvironmentRegistry {
 }
 
 export function createLocalEnvironmentRegistry({
-  id = process.env.CCM_ENVIRONMENT_ID || '6v1f',
+  id = process.env.CCM_ENVIRONMENT_ID || os.hostname(),
   cwd = process.env.CCM_WORKSPACE || process.cwd(),
   permissionProfile = process.env.CCM_PERMISSION_PROFILE || 'workspace-write',
 } = {}) {
@@ -100,6 +100,12 @@ export function createLocalEnvironmentRegistry({
     cwd,
     workspaceRoots: [cwd],
     permissionProfile,
+    capabilities: {
+      exec: true,
+      writeStdin: true,
+      applyPatch: true,
+      viewImage: true,
+    },
     backend: 'native',
   });
   return registry;

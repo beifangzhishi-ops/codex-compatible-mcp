@@ -26,6 +26,7 @@ function createProtocolServer(toolRegistry, maxToolResultBytes) {
     server.registerTool(tool.name, {
       description: tool.description,
       inputSchema: tool.inputSchema,
+      ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
     }, async (args, extra) => guardMcpToolResult(
       await tool.handler(args, { extra }),
       maxToolResultBytes,

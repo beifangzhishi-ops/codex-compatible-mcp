@@ -13,7 +13,9 @@ function send(socket, message) {
 export class WorkerHub extends EventEmitter {
   constructor({
     environmentRegistry,
-    host = process.env.CCM_WORKER_HUB_HOST || '127.0.0.1',
+    host = process.env.CCM_WORKER_HUB_BIND_HOST ||
+      process.env.CCM_WORKER_HUB_HOST ||
+      '127.0.0.1',
     port = Number(process.env.CCM_WORKER_HUB_PORT || 18301),
     requestTimeoutMs = 30_000,
   } = {}) {

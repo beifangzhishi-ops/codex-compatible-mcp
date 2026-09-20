@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Codex-compatible MCP harness for GPT.",
+  "description": "Codex-inspired MCP execution harness with remote workers, sandboxed process sessions, patching, and image reads.",
+  "license": "MIT",
   "engines": {
     "node": ">=20"
   },
@@ -11,6 +12,7 @@
     "build:native": "node scripts/build-native.mjs",
     "prestart": "npm run build:native",
     "start": "node src/index.mjs",
+    "preworker": "npm run build:native",
     "worker": "node src/worker/agent.mjs",
     "pretest": "npm run build:native",
     "test": "node --test"

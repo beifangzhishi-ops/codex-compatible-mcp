@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createWorkerRuntime } from '../src/runtime/index.mjs';
@@ -10,16 +13,24 @@ import { registerCoreTools } from '../src/tools/core-tools.mjs';
 import { createHttpController } from '../src/controller/mcp-http-server.mjs';
 
 test('MCP lists and calls tools through a Remote Worker', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-mcp-'));
   const runtime = createControllerRuntime({ workerPort: 0 });
-  const workerRuntime = createWorkerRuntime();
+  const workerRuntime = createWorkerRuntime({
+    environment: {
+      id: 'mcp-worker',
+      cwd: tempRoot,
+      permissionProfile: 'workspace-write',
+    },
+  });
   await runtime.start();
 
   const worker = new RemoteWorkerClient({
     runtime: workerRuntime,
+    workerId: 'mcp-worker',
     port: runtime.workerHub.address.port,
   });
   await worker.connect();
-  await runtime.workerHub.waitForEnvironment('6v1f');
+  await runtime.workerHub.waitForEnvironment('mcp-worker');
 
   const registry = registerCoreTools(new ToolRegistry(), runtime);
   const controller = createHttpController({ toolRegistry: registry, runtime, port: 0 });
@@ -34,19 +45,69 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     await client.connect(transport);
     const listed = await client.listTools();
     const names = listed.tools.map((tool) => tool.name).sort();
-    assert.deepEqual(names, ['exec_command', 'list_environments', 'write_stdin']);
+    assert.deepEqual(names, [
+      'apply_patch',
+      'exec_command',
+      'list_environments',
+      'view_image',
+      'write_stdin',
+    ]);
 
     const result = await client.callTool({
       name: 'exec_command',
-      arguments: { cmd: 'Write-Output MCP_OK' },
+      arguments: {
+        environment_id: 'mcp-worker',
+        cmd: 'Write-Output MCP_OK',
+      },
     });
     assert.equal(result.isError, undefined);
+    assert.equal(Object.hasOwn(result, 'resultType'), false);
     assert.match(result.content[0].text, /MCP_OK/);
+
+    const patchResult = await client.callTool({
+      name: 'apply_patch',
+      arguments: {
+        environment_id: 'mcp-worker',
+        patch: [
+          '*** Begin Patch',
+          '*** Add File: mcp.txt',
+          '+patched through MCP',
+          '*** End Patch',
+        ].join('\n'),
+      },
+    });
+    assert.equal(patchResult.isError, undefined);
+    assert.match(patchResult.content[0].text, /A mcp\.txt/);
+    assert.equal(
+      await fs.readFile(path.join(tempRoot, 'mcp.txt'), 'utf8'),
+      'patched through MCP\n',
+    );
+
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2F+QAAAAASUVORK5CYII=',
+      'base64',
+    );
+    await fs.writeFile(path.join(tempRoot, 'tiny.png'), png);
+    const imageResult = await client.callTool({
+      name: 'view_image',
+      arguments: {
+        environment_id: 'mcp-worker',
+        path: 'tiny.png',
+      },
+    });
+    assert.equal(imageResult.isError, undefined);
+    assert.equal(imageResult.content[0].type, 'image');
+    assert.equal(imageResult.content[0].mimeType, 'image/png');
+    assert.equal(
+      Buffer.from(imageResult.content[0].data, 'base64').length,
+      png.length,
+    );
   } finally {
     await client.close().catch(() => {});
     await worker.close().catch(() => {});
     workerRuntime.close();
     await controller.close();
+    await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
 

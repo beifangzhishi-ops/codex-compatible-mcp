@@ -32,6 +32,33 @@ function execResult(value) {
   };
 }
 
+function patchResult(value) {
+  return {
+    content: [{ type: 'text', text: value.output }],
+    structuredContent: {
+      workdir: value.workdir,
+      changes: value.changes,
+    },
+  };
+}
+
+function imageResult(value) {
+  return {
+    content: [{
+      type: 'image',
+      data: value.data,
+      mimeType: value.mime_type,
+    }],
+    structuredContent: {
+      path: value.path,
+      mime_type: value.mime_type,
+      width: value.width,
+      height: value.height,
+      byte_length: value.byte_length,
+    },
+  };
+}
+
 function toolError(error) {
   return {
     content: [{ type: 'text', text: String(error?.message || error) }],
@@ -57,7 +84,7 @@ export function registerCoreTools(registry, runtime) {
     provider: 'ccm-core',
     exposure: ToolExposure.DIRECT,
     description: [
-      'Runs a command in a PTY, returning output or a session ID for ongoing interaction.',
+      'Runs a command using plain pipes by default; set tty=true to allocate a PTY. Returns output or a session ID for ongoing interaction.',
       'On Windows, keep destructive filesystem operations in one shell and verify resolved targets before recursive deletes or moves.',
     ].join('\n\n'),
     inputSchema: {
@@ -96,6 +123,43 @@ export function registerCoreTools(registry, runtime) {
     handler: async (args) => {
       try {
         return execResult(await runtime.processManager.writeStdin(args));
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  });
+
+  registry.register({
+    name: 'apply_patch',
+    provider: 'ccm-core',
+    exposure: ToolExposure.DIRECT,
+    description: 'Apply a Codex-style Begin/End Patch against the selected Remote Worker filesystem.',
+    inputSchema: {
+      patch: z.string().min(1).describe('Codex-style patch text beginning with *** Begin Patch.'),
+      workdir: z.string().optional().describe('Working directory used to resolve relative patch paths.'),
+      environment_id: z.string().optional().describe('Environment id. May also be supplied by the patch preamble.'),
+    },
+    handler: async (args) => {
+      try {
+        return patchResult(await runtime.fileService.applyPatch(args));
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  });
+
+  registry.register({
+    name: 'view_image',
+    provider: 'ccm-core',
+    exposure: ToolExposure.DIRECT,
+    description: 'Read a bounded image from the selected Remote Worker and return it as MCP image content.',
+    inputSchema: {
+      path: z.string().min(1).describe('Image path relative to the environment cwd, or an absolute native path.'),
+      environment_id: z.string().optional().describe('Environment id. Omit to use the default environment.'),
+    },
+    handler: async (args) => {
+      try {
+        return imageResult(await runtime.fileService.viewImage(args));
       } catch (error) {
         return toolError(error);
       }

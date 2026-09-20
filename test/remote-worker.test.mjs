@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createControllerRuntime } from '../src/controller/runtime.mjs';
@@ -9,12 +11,15 @@ import { RemoteWorkerClient } from '../src/worker/remote-worker-client.mjs';
 
 const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 
-function workerRuntime(id) {
+function workerRuntime(
+  id,
+  { cwd = root, permissionProfile = 'full-access' } = {},
+) {
   return createWorkerRuntime({
     environment: {
       id,
-      cwd: root,
-      permissionProfile: 'full-access',
+      cwd,
+      permissionProfile,
     },
   });
 }
@@ -132,5 +137,60 @@ test('Worker disconnect unregisters its environment', async () => {
     await client?.close().catch(() => {});
     worker.close();
     await controller.close();
+  }
+});
+
+
+test('Remote Worker owns apply_patch and view_image filesystem work', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-worker-files-'));
+  const controller = createControllerRuntime({ workerPort: 0 });
+  const worker = workerRuntime('worker-files', {
+    cwd: tempRoot,
+    permissionProfile: 'workspace-write',
+  });
+  let client = null;
+
+  await controller.start();
+  try {
+    client = new RemoteWorkerClient({
+      runtime: worker,
+      workerId: 'worker-files',
+      port: controller.workerHub.address.port,
+    });
+    await client.connect();
+    assert.equal(await controller.workerHub.waitForEnvironment('worker-files'), true);
+
+    const patch = [
+      '*** Begin Patch',
+      '*** Environment ID: worker-files',
+      '*** Add File: remote.txt',
+      '+hello from worker',
+      '*** End Patch',
+    ].join('\n');
+    const patchResult = await controller.fileService.applyPatch({ patch });
+    assert.match(patchResult.output, /A remote\.txt/);
+    assert.equal(
+      await fs.readFile(path.join(tempRoot, 'remote.txt'), 'utf8'),
+      'hello from worker\n',
+    );
+
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2F+QAAAAASUVORK5CYII=',
+      'base64',
+    );
+    await fs.writeFile(path.join(tempRoot, 'tiny.png'), png);
+    const image = await controller.fileService.viewImage({
+      environment_id: 'worker-files',
+      path: 'tiny.png',
+    });
+    assert.equal(image.mime_type, 'image/png');
+    assert.equal(image.width, 1);
+    assert.equal(image.height, 1);
+    assert.equal(Buffer.from(image.data, 'base64').length, png.length);
+  } finally {
+    await client?.close().catch(() => {});
+    worker.close();
+    await controller.close();
+    await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });

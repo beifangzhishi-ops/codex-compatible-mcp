@@ -1,3 +1,7 @@
+// Copied from OpenAI Codex (Apache License 2.0).
+// Copyright 2025 OpenAI
+// See THIRD_PARTY_NOTICES.md and LICENSES/Apache-2.0.txt.
+
 /// Stateful normalizer for bytes written to a Windows pseudoconsole.
 ///
 /// ConPTY accepts UTF-8 input, but an Enter key is represented by a carriage

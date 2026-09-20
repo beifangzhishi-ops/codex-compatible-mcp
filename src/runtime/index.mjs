@@ -3,6 +3,7 @@ import { ExecutorRegistry } from './executors/executor-registry.mjs';
 import { NativeEnvironmentExecutor } from './executors/native-executor.mjs';
 import { ProcessManager } from './process-manager.mjs';
 import { NativeSandboxBackend } from './sandbox/native-sandbox.mjs';
+import { NativeFileService } from './filesystem/native-file-service.mjs';
 
 export function createWorkerRuntime(options = {}) {
   const environmentRegistry = options.environmentRegistry ||
@@ -22,12 +23,17 @@ export function createWorkerRuntime(options = {}) {
     environmentRegistry,
     executorRegistry,
   });
+  const fileService = options.fileService || new NativeFileService({
+    environmentRegistry,
+    maxViewImageBytes: options.maxViewImageBytes,
+  });
 
   return {
     environmentRegistry,
     executorRegistry,
     sandboxBackend,
     processManager,
+    fileService,
     close() {
       processManager.terminateAll();
     },

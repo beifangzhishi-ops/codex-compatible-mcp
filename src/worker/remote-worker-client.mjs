@@ -26,7 +26,9 @@ export class RemoteWorkerClient {
   constructor({
     runtime,
     workerId,
-    host = process.env.CCM_WORKER_HUB_HOST || '127.0.0.1',
+    host = process.env.CCM_WORKER_HUB_CONNECT_HOST ||
+      process.env.CCM_WORKER_HUB_HOST ||
+      '127.0.0.1',
     port = Number(process.env.CCM_WORKER_HUB_PORT || 18301),
   } = {}) {
     if (!runtime) throw new Error('RemoteWorkerClient requires a worker runtime.');
@@ -163,6 +165,10 @@ export class RemoteWorkerClient {
         return this.runtime.processManager.execCommand(params);
       case 'write_stdin':
         return this.runtime.processManager.writeStdin(params);
+      case 'apply_patch':
+        return this.runtime.fileService.applyPatch(params);
+      case 'view_image':
+        return this.runtime.fileService.viewImage(params);
       case 'terminate_session':
         return {
           terminated: this.runtime.processManager.terminateSession(

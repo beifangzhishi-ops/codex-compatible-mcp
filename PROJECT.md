@@ -19,7 +19,7 @@ Current implementation status:
 
 - **Milestone 1 / Execution Core: complete.** Native Windows sandbox, Rust/ConPTY PTY, interactive `write_stdin`, bounded capture/model output, and final MCP response guards are covered by regression tests.
 - **Milestone 2 / Environment + Remote Worker: complete.** Controller execution goes through the Remote Worker protocol, including the Controller host over loopback; per-operation environment routing, public session mapping, remote-native paths, disconnect cleanup, reconnecting worker agent behavior, and worker-transport size limits are implemented.
-- **Milestone 3 / Editing: next.**
+- **Milestone 3 / Editing: complete.** Codex-style patching and bounded image reads execute on the selected Remote Worker, with preflight validation, workspace/symlink protections, media structure checks, and MCP end-to-end coverage.
 - **Milestone 4 / Tool Architecture: planned; an initial registry skeleton already exists but does not yet implement the final exposure-surface model or Code Mode.**
 
 The earlier idea of keeping Desktop Commander tools as the main model-visible API is superseded. CCM may reuse implementation ideas, but GPT should primarily see CCM's smaller Codex-like execution surface.
@@ -64,7 +64,7 @@ Command output must be bounded before it is returned to the model. This is **out
 
 ## Environment and Remote Worker model
 
-Current environments include 6v1f and noha, but the design must support additional Remote Workers.
+CCM must support one or more Remote Workers without giving any particular machine a special execution path.
 
 CCM uses a single worker model. The Controller does not have a separate Local Worker or Local Executor execution path. The machine hosting the Controller runs a normal **Remote Worker** too; when both processes are on the same machine, the connection may use loopback/local transport, but the protocol and runtime semantics remain identical to every other worker.
 
@@ -140,13 +140,13 @@ Host-native features that ChatGPT already provides should generally stay outside
 
 ## Deployment direction
 
-Development is local-first on 6v1f at:
+The repository must remain self-contained and free of developer-machine paths or private deployment assumptions.
 
-`C:\Users\Songjx\Documents\ChatGPT\codex-compatible-mcp`
-
-No Git remote should be required during early development. When CCM is ready for external testing, it should receive its own Funnel path, currently planned as:
+The default MCP endpoint path is:
 
 `/ccm/mcp`
+
+The Controller and WorkerHub bind to loopback by default. Remote Worker exposure beyond the local host must be an explicit deployment choice and, until authenticated transport is implemented, should only be used on a trusted/private network.
 
 WCM remains a separate project and should not be modified as part of CCM development unless explicitly requested.
 ## Codex source alignment for the first release
@@ -236,7 +236,22 @@ The first release does not attempt to copy Codex's model loop, conversation/cont
 - `tool_search` / deferred capability discovery
 - Code Mode execution/wait path for nested capabilities
 
-Completion of Milestones 1-4 defines the first useful CCM release target.
+Completion of Milestones 1-4 defines CCM v0.1's first public release target. The repository should be publishable directly at that point rather than requiring a separate prototype-to-public hardening phase.
+
+### Public release gate
+
+Before v0.1 is tagged or published, all of the following must be true:
+
+- a clean clone can install dependencies, build native helpers, run the full test suite, and start the Controller/Remote Worker using documented commands
+- the repository contains no machine-specific secrets, credentials, private endpoints, generated binaries, build outputs, diagnostic state, or absolute developer paths that should not be public
+- README documents architecture, supported platforms, current limitations, environment variables, Controller/Worker startup, sandbox behavior, and the five stable direct tools
+- package metadata and repository metadata are suitable for public consumption, and an explicit root license is present
+- restricted execution fails closed on unsupported sandbox platforms; no public default silently falls back to unsandboxed execution
+- filesystem mutations such as `apply_patch` enforce workspace boundaries including symlink/junction escapes
+- command, Worker-protocol, image, and MCP-result sizes have hard upper bounds with compact failures
+- MCP returns remain standard protocol results; do not reintroduce custom wrappers such as WCM's historical `resultType` envelope
+- tests cover the public MCP path, Remote Worker routing, PTY/session lifecycle, sandboxing, oversized results, patch safety, image validation, disconnect cleanup, and a clean production bootstrap
+- `git diff --check`, dependency/audit checks, and repository secret/path scans pass immediately before the release commit
 
 ### Later, only if justified by real workflows
 

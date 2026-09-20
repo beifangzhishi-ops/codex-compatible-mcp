@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createControllerRuntime } from './controller/runtime.mjs';
 import { createHttpController } from './controller/mcp-http-server.mjs';
@@ -16,14 +17,19 @@ if (spawnLocalWorker) {
   localWorker = spawn(process.execPath, [agentPath], {
     env: {
       ...process.env,
-      CCM_WORKER_HUB_HOST: runtime.workerHub.host,
+      CCM_WORKER_HUB_CONNECT_HOST:
+        runtime.workerHub.host === '0.0.0.0'
+          ? '127.0.0.1'
+          : runtime.workerHub.host === '::'
+            ? '::1'
+            : runtime.workerHub.host,
       CCM_WORKER_HUB_PORT: String(hubAddress.port),
     },
     stdio: ['ignore', 'inherit', 'inherit'],
     windowsHide: true,
   });
 
-  const environmentId = process.env.CCM_ENVIRONMENT_ID || '6v1f';
+  const environmentId = process.env.CCM_ENVIRONMENT_ID || os.hostname();
   const connected = await runtime.workerHub.waitForEnvironment(environmentId, 10_000);
   if (!connected) {
     localWorker.kill();

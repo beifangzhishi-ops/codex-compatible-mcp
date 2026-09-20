@@ -1,5 +1,6 @@
 import { EnvironmentRegistry } from '../runtime/environment-registry.mjs';
 import { RemoteProcessManager } from '../runtime/remote-process-manager.mjs';
+import { RemoteFileService } from '../runtime/filesystem/remote-file-service.mjs';
 import { WorkerHub } from './worker-hub.mjs';
 
 export function createControllerRuntime(options = {}) {
@@ -14,11 +15,16 @@ export function createControllerRuntime(options = {}) {
     environmentRegistry,
     workerHub,
   });
+  const fileService = options.fileService || new RemoteFileService({
+    environmentRegistry,
+    workerHub,
+  });
 
   return {
     environmentRegistry,
     workerHub,
     processManager,
+    fileService,
     async start() {
       await workerHub.start();
     },

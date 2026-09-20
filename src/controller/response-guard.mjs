@@ -1,4 +1,4 @@
-export const DEFAULT_MAX_MCP_TOOL_RESULT_BYTES = 512 * 1024;
+export const DEFAULT_MAX_MCP_TOOL_RESULT_BYTES = 2 * 1024 * 1024;
 
 export function resolveMaxMcpToolResultBytes(value) {
   const parsed = Number(value || DEFAULT_MAX_MCP_TOOL_RESULT_BYTES);
