@@ -51,4 +51,20 @@ export class RemoteFileService {
       { timeoutMs: 30_000 },
     );
   }
+
+  async sendFile(args) {
+    const environment = this.environmentRegistry.resolve(args.environment_id);
+    if (!environment.capabilities?.sendFile) {
+      throw new Error(
+        'Environment does not support send_file: ' + environment.id,
+      );
+    }
+
+    return this.workerHub.call(
+      environment.id,
+      'send_file',
+      { ...args, environment_id: environment.id },
+      { timeoutMs: 60_000 },
+    );
+  }
 }

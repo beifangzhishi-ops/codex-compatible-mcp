@@ -33,6 +33,42 @@ function execResult(value, metadata = {}) {
   };
 }
 
+function fileResourceResult(value, environmentId) {
+  const uri = 'ccm-file:///' + encodeURIComponent(value.filename);
+  return {
+    content: [
+      {
+        type: 'text',
+        text: 'Attached ' + value.filename + ' from ' + environmentId +
+          ' (' + value.byte_length + ' bytes, sha256 ' + value.sha256 + ').',
+      },
+      {
+        type: 'resource',
+        resource: {
+          uri,
+          mimeType: value.mime_type,
+          blob: value.data,
+          _meta: {
+            filename: value.filename,
+            byte_length: value.byte_length,
+            sha256: value.sha256,
+            source_environment_id: environmentId,
+          },
+        },
+      },
+    ],
+    structuredContent: {
+      capability: 'send_file',
+      environment_id: environmentId,
+      path: value.path,
+      filename: value.filename,
+      mime_type: value.mime_type,
+      byte_length: value.byte_length,
+      sha256: value.sha256,
+    },
+  };
+}
+
 function psQuote(value) {
   return "'" + String(value).replaceAll("'", "''") + "'";
 }
@@ -66,6 +102,49 @@ async function run(runtime, args, command) {
 }
 
 export function registerSpecializedTools(registry, runtime) {
+  registry.register({
+    namespace: 'ccm-extra',
+    name: 'send_file',
+    provider: 'ccm-specialized',
+    provenance: 'ccm-native-file-transfer',
+    surfaces: { deferred: true, codeMode: true },
+    tags: ['file', 'attachment', 'preview', 'transfer', 'gpt'],
+    environmentRequirements: {
+      capabilities: ['sendFile'],
+    },
+    supportsParallel: true,
+    description: [
+      'Send a file from a CCM environment to the GPT client as an embedded binary resource for preview or download.',
+      'This preserves the original file bytes and does not use BMG or upload the file to ChatGPT Library.',
+      'Use this for Word, PDF, Excel, PowerPoint, archives, images, and other local files after locating the exact path.',
+    ].join('\n\n'),
+    inputSchema: {
+      path: z.string().min(1).describe(
+        'File path relative to the environment cwd, or an absolute native path.',
+      ),
+      environment_id: z.string().optional().describe(
+        'CCM environment that owns the file. Omit to use the default environment.',
+      ),
+    },
+    handler: async (args) => {
+      try {
+        const environment = runtime.environmentRegistry.resolve(args.environment_id);
+        if (!environment.capabilities?.sendFile) {
+          throw new Error(
+            'Environment does not support send_file: ' + environment.id,
+          );
+        }
+        const value = await runtime.fileService.sendFile({
+          environment_id: environment.id,
+          path: args.path,
+        });
+        return fileResourceResult(value, environment.id);
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  });
+
   registry.register({
     namespace: 'ccm-extra',
     name: 'quark_probe',

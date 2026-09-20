@@ -75,6 +75,7 @@ CCM deliberately does not embed a second JavaScript interpreter for Code Mode. T
 
 CCM ships optional Windows workflows ported from WCM without expanding the top-level MCP schema:
 
+- `ccm-extra.send_file` transfers an exact file from a selected CCM environment to the GPT client as an embedded resource for preview/download, without BMG or Library upload.
 - `ccm-extra.quark_probe` checks a locally running, already logged-in Quark Cloud Drive desktop client.
 - `ccm-extra.quark_upload` submits one or more files through that local Quark desktop session and can wait for verified completion.
 - `ccm-extra.bilibili_download_dash` downloads signed DASH video/audio URLs obtained from an authenticated browser session and remuxes them with `ffmpeg -c copy`.
@@ -235,8 +236,10 @@ The legacy `CCM_WORKER_HUB_HOST` variable is accepted as a fallback for both bin
 | `CCM_WORKER_ID` | environment id | Worker connection id. |
 | `CCM_WORKSPACE` | current directory | Worker cwd and default workspace root. |
 | `CCM_PERMISSION_PROFILE` | `workspace-write` | `read-only`, `workspace-write`, or `full-access`. |
-| `CCM_MAX_MCP_TOOL_RESULT_BYTES` | 2 MiB | Absolute serialized MCP tool-result limit. |
+| `CCM_MAX_MCP_TOOL_RESULT_BYTES` | 2 MiB | Serialized MCP tool-result limit for ordinary results. |
+| `CCM_MAX_MCP_FILE_RESULT_BYTES` | 24 MiB | Serialized MCP result limit when returning an embedded file resource. |
 | `CCM_MAX_VIEW_IMAGE_BYTES` | 1 MiB | Maximum raw image size returned by `view_image`. |
+| `CCM_MAX_SEND_FILE_BYTES` | 12 MiB | Maximum raw file size returned by `ccm-extra.send_file`. |
 | `CCM_WORKER_RECONNECT_MS` | 1000 ms | Worker reconnect delay. |
 
 ## Sandbox and platform support

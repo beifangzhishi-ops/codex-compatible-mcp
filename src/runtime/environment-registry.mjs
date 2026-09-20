@@ -46,6 +46,7 @@ export class EnvironmentRegistry {
         writeStdin: true,
         applyPatch: false,
         viewImage: false,
+        sendFile: false,
         ...(environment.capabilities || {}),
       },
       backend: environment.backend || 'native',
@@ -105,6 +106,7 @@ export function createLocalEnvironmentRegistry({
       writeStdin: true,
       applyPatch: true,
       viewImage: true,
+      sendFile: true,
     },
     backend: 'native',
   });

@@ -5,12 +5,17 @@ import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import {
   guardMcpToolResult,
+  resolveMaxMcpFileResultBytes,
   resolveMaxMcpToolResultBytes,
 } from './response-guard.mjs';
 
 const SERVER_INFO = { name: 'ccm', version: '0.1.0' };
 
-function createProtocolServer(toolRegistry, maxToolResultBytes) {
+function createProtocolServer(
+  toolRegistry,
+  maxToolResultBytes,
+  maxFileResultBytes,
+) {
   const server = new McpServer(SERVER_INFO, {
     capabilities: { tools: { listChanged: true } },
     instructions: [
@@ -35,6 +40,7 @@ function createProtocolServer(toolRegistry, maxToolResultBytes) {
     }, async (args, extra) => guardMcpToolResult(
       await tool.handler(args, { extra }),
       maxToolResultBytes,
+      maxFileResultBytes,
     ));
   }
   return server;
@@ -48,6 +54,9 @@ export function createHttpController({
   mcpPath = process.env.CCM_MCP_PATH || '/ccm/mcp',
   maxToolResultBytes = resolveMaxMcpToolResultBytes(
     process.env.CCM_MAX_MCP_TOOL_RESULT_BYTES,
+  ),
+  maxFileResultBytes = resolveMaxMcpFileResultBytes(
+    process.env.CCM_MAX_MCP_FILE_RESULT_BYTES,
   ),
 } = {}) {
   const app = createMcpExpressApp();
@@ -80,6 +89,7 @@ export function createHttpController({
         const protocolServer = createProtocolServer(
           toolRegistry,
           maxToolResultBytes,
+          maxFileResultBytes,
         );
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),

@@ -26,6 +26,7 @@ export function createWorkerRuntime(options = {}) {
   const fileService = options.fileService || new NativeFileService({
     environmentRegistry,
     maxViewImageBytes: options.maxViewImageBytes,
+    maxSendFileBytes: options.maxSendFileBytes,
   });
 
   return {

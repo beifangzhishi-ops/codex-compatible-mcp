@@ -166,6 +166,34 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       png.length,
     );
 
+    const docBytes = Buffer.alloc(3 * 1024 * 1024, 0x61);
+    await fs.writeFile(path.join(tempRoot, 'preview.docx'), docBytes);
+    const sendFileResult = await client.callTool({
+      name: 'exec',
+      arguments: {
+        calls: [{
+          tool: 'ccm-extra.send_file',
+          arguments: {
+            environment_id: 'mcp-worker',
+            path: 'preview.docx',
+          },
+        }],
+        yield_time_ms: 1000,
+      },
+    });
+    assert.equal(sendFileResult.isError, undefined);
+    const resource = sendFileResult.content.find((item) => item.type === 'resource');
+    assert.ok(resource);
+    assert.equal(
+      resource.resource.mimeType,
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    );
+    assert.deepEqual(Buffer.from(resource.resource.blob, 'base64'), docBytes);
+    assert.equal(
+      sendFileResult.structuredContent.calls[0].result.content[1].data_omitted,
+      true,
+    );
+
     registry.register({
       name: 'late_echo',
       namespace: 'dynamic',

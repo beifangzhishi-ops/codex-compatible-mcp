@@ -45,26 +45,54 @@ function compactStructured(value, maxStringChars) {
 }
 
 function compactToolResult(result, maxTokens) {
+  const passthroughContent = Array.isArray(result?.content)
+    ? result.content.filter((item) => item?.type === 'resource')
+    : [];
+  const sizeSafeResult = result && typeof result === 'object'
+    ? {
+        ...result,
+        content: Array.isArray(result.content)
+          ? result.content.map((item) => {
+              if (item?.type !== 'resource') return item;
+              return {
+                type: 'resource',
+                resource: {
+                  uri: item.resource?.uri,
+                  mimeType: item.resource?.mimeType,
+                  _meta: item.resource?._meta,
+                  blob_omitted: true,
+                },
+              };
+            })
+          : result.content,
+      }
+    : result;
   let incomingBytes;
   try {
-    incomingBytes = Buffer.byteLength(JSON.stringify(result ?? {}), 'utf8');
+    incomingBytes = Buffer.byteLength(JSON.stringify(sizeSafeResult ?? {}), 'utf8');
   } catch {
     return {
-      is_error: true,
-      content: [{
-        type: 'text',
-        text: 'Nested tool returned a result that could not be serialized.',
-      }],
+      compact: {
+        is_error: true,
+        content: [{
+          type: 'text',
+          text: 'Nested tool returned a result that could not be serialized.',
+        }],
+      },
+      passthroughContent: [],
     };
   }
 
   if (incomingBytes > MAX_NESTED_RESULT_BYTES) {
     return {
-      is_error: true,
-      content: [{
-        type: 'text',
-        text: 'Nested tool result exceeded the 1 MiB Code Mode input limit.',
-      }],
+      compact: {
+        is_error: true,
+        content: [{
+          type: 'text',
+          text: 'Nested tool result exceeded the 1 MiB Code Mode input limit.',
+        }],
+      },
+      passthroughContent: [],
     };
   }
 
@@ -87,6 +115,17 @@ function compactToolResult(result, maxTokens) {
             type: 'image',
             mime_type: item.mimeType,
             byte_length: Buffer.from(item.data || '', 'base64').length,
+            data_omitted: true,
+          };
+        }
+        if (item?.type === 'resource') {
+          return {
+            type: 'resource',
+            uri: item.resource?.uri,
+            mime_type: item.resource?.mimeType,
+            byte_length: item.resource?.blob
+              ? Buffer.from(item.resource.blob, 'base64').length
+              : undefined,
             data_omitted: true,
           };
         }
@@ -118,7 +157,7 @@ function compactToolResult(result, maxTokens) {
     delete compact.structured_content;
     compact.structured_content_omitted = true;
   }
-  return compact;
+  return { compact, passthroughContent };
 }
 
 function liveSessionFrom(event) {
@@ -145,6 +184,8 @@ export class CodeModeManager {
   #format(job, { running, maxOutputTokens }) {
     const newEvents = job.events.slice(job.delivered);
     job.delivered = job.events.length;
+    const newContent = job.contentItems.slice(job.deliveredContent);
+    job.deliveredContent = job.contentItems.length;
 
     const liveSessions = job.events
       .map(liveSessionFrom)
@@ -176,7 +217,7 @@ export class CodeModeManager {
       maxOutputTokens,
     ).output;
 
-    return { payload, text };
+    return { payload, text, content: newContent };
   }
   #prepareCalls(calls, parallel) {
     if (!Array.isArray(calls) || calls.length === 0) {
@@ -235,11 +276,15 @@ export class CodeModeManager {
       };
     }
 
+    const compacted = compactToolResult(result, maxTokens);
     return {
-      call_index: prepared.callIndex,
-      tool: prepared.tool.qualifiedName,
-      wall_time_seconds: (Date.now() - startedAt) / 1000,
-      result: compactToolResult(result, maxTokens),
+      event: {
+        call_index: prepared.callIndex,
+        tool: prepared.tool.qualifiedName,
+        wall_time_seconds: (Date.now() - startedAt) / 1000,
+        result: compacted.compact,
+      },
+      passthroughContent: compacted.passthroughContent,
     };
   }
 
@@ -251,16 +296,18 @@ export class CodeModeManager {
     if (parallel) {
       await Promise.all(
         preparedCalls.map((prepared) =>
-          this.#invoke(prepared, perCallTokens).then((event) => {
-            job.events.push(event);
-            if (event.result.is_error) job.hasErrors = true;
+          this.#invoke(prepared, perCallTokens).then((invocation) => {
+            job.events.push(invocation.event);
+            job.contentItems.push(...invocation.passthroughContent);
+            if (invocation.event.result.is_error) job.hasErrors = true;
           })),
       );
     } else {
       for (const prepared of preparedCalls) {
-        const event = await this.#invoke(prepared, perCallTokens);
-        job.events.push(event);
-        if (event.result.is_error) {
+        const invocation = await this.#invoke(prepared, perCallTokens);
+        job.events.push(invocation.event);
+        job.contentItems.push(...invocation.passthroughContent);
+        if (invocation.event.result.is_error) {
           job.hasErrors = true;
           if (!continueOnError) break;
         }
@@ -311,6 +358,8 @@ export class CodeModeManager {
       hasErrors: false,
       events: [],
       delivered: 0,
+      contentItems: [],
+      deliveredContent: 0,
       donePromise: null,
     };
 

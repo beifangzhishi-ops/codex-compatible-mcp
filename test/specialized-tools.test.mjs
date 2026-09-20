@@ -26,6 +26,19 @@ function fakeRuntime() {
         };
       },
     },
+    fileService: {
+      async sendFile(args) {
+        calls.push({ sendFile: args });
+        return {
+          path: args.path,
+          filename: 'report.docx',
+          mime_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          byte_length: 4,
+          sha256: 'test-sha256',
+          data: Buffer.from('test').toString('base64'),
+        };
+      },
+    },
   };
 }
 
@@ -44,6 +57,7 @@ test('specialized WCM-derived tools are deferred and searchable', () => {
       'ccm-extra.bilibili_download_dash',
       'ccm-extra.quark_probe',
       'ccm-extra.quark_upload',
+      'ccm-extra.send_file',
     ],
   );
   assert.equal(
@@ -54,6 +68,37 @@ test('specialized WCM-derived tools are deferred and searchable', () => {
     registry.searchDeferred('quark upload', { limit: 5 })[0].qualified_name,
     'ccm-extra.quark_upload',
   );
+  assert.equal(
+    registry.searchDeferred('send file', { limit: 5 })[0].qualified_name,
+    'ccm-extra.send_file',
+  );
+});
+
+test('send_file returns an embedded resource without changing the direct tool surface', async () => {
+  const runtime = fakeRuntime();
+  runtime.environmentRegistry.resolve = (environmentId) => ({
+    id: environmentId || 'windows-worker',
+    platform: 'windows',
+    capabilities: { sendFile: true },
+  });
+  const registry = new ToolRegistry();
+  registerSpecializedTools(registry, runtime);
+
+  const result = await registry.get('ccm-extra.send_file').handler({
+    environment_id: 'worker-a',
+    path: 'C:\\docs\\report.docx',
+  });
+  assert.equal(result.isError, undefined);
+  assert.equal(result.content[1].type, 'resource');
+  assert.equal(
+    result.content[1].resource.mimeType,
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  );
+  assert.equal(
+    Buffer.from(result.content[1].resource.blob, 'base64').toString(),
+    'test',
+  );
+  assert.equal(result.structuredContent.filename, 'report.docx');
 });
 
 test('quark deferred tools route through the selected Remote Worker', async () => {

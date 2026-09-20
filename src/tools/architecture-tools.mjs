@@ -1,12 +1,15 @@
 import * as z from 'zod/v4';
 import { CodeModeManager } from './code-mode-manager.mjs';
 
-function jsonResult(value, text = null) {
+function jsonResult(value, text = null, extraContent = []) {
   return {
-    content: [{
-      type: 'text',
-      text: text ?? JSON.stringify(value, null, 2),
-    }],
+    content: [
+      {
+        type: 'text',
+        text: text ?? JSON.stringify(value, null, 2),
+      },
+      ...extraContent,
+    ],
     structuredContent: value,
   };
 }
@@ -99,7 +102,7 @@ export function registerArchitectureTools(
     handler: async (args) => {
       try {
         const result = await codeModeManager.exec(args);
-        return jsonResult(result.payload, result.text);
+        return jsonResult(result.payload, result.text, result.content);
       } catch (error) {
         return toolError(error);
       }
@@ -129,7 +132,7 @@ export function registerArchitectureTools(
     handler: async (args) => {
       try {
         const result = await codeModeManager.wait(args);
-        return jsonResult(result.payload, result.text);
+        return jsonResult(result.payload, result.text, result.content);
       } catch (error) {
         return toolError(error);
       }

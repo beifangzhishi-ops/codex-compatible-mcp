@@ -169,6 +169,8 @@ export class RemoteWorkerClient {
         return this.runtime.fileService.applyPatch(params);
       case 'view_image':
         return this.runtime.fileService.viewImage(params);
+      case 'send_file':
+        return this.runtime.fileService.sendFile(params);
       case 'terminate_session':
         return {
           terminated: this.runtime.processManager.terminateSession(

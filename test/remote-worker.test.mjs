@@ -181,7 +181,7 @@ test('Worker disconnect unregisters its environment', async () => {
 });
 
 
-test('Remote Worker owns apply_patch and view_image filesystem work', async () => {
+test('Remote Worker owns apply_patch, view_image, and send_file filesystem work', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-worker-files-'));
   const controller = createControllerRuntime({ workerPort: 0 });
   const worker = workerRuntime('worker-files', {
@@ -227,6 +227,19 @@ test('Remote Worker owns apply_patch and view_image filesystem work', async () =
     assert.equal(image.width, 1);
     assert.equal(image.height, 1);
     assert.equal(Buffer.from(image.data, 'base64').length, png.length);
+
+    const docBytes = Buffer.from('fake-docx-content');
+    await fs.writeFile(path.join(tempRoot, 'sample.docx'), docBytes);
+    const file = await controller.fileService.sendFile({
+      environment_id: 'worker-files',
+      path: 'sample.docx',
+    });
+    assert.equal(file.filename, 'sample.docx');
+    assert.equal(
+      file.mime_type,
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    );
+    assert.deepEqual(Buffer.from(file.data, 'base64'), docBytes);
   } finally {
     await client?.close().catch(() => {});
     worker.close();
