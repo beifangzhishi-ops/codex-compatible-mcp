@@ -119,8 +119,8 @@ export function registerArchitectureTools(
     ].join('\n\n'),
     inputSchema: {
       cell_id: z.string().min(1).describe('Running cell identifier returned by exec.'),
-      yield_time_ms: z.number().int().min(0).max(300_000).optional().describe(
-        'Wait before yielding again. Defaults to 60000 ms.',
+      yield_time_ms: z.number().int().min(0).max(30_000).optional().describe(
+        'Wait before yielding again. Defaults to 5000 ms.',
       ),
       max_output_tokens: z.number().int().min(256).max(20_000).optional().describe(
         'Approximate output budget for newly delivered nested results.',

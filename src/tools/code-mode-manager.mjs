@@ -3,10 +3,10 @@ import { boundOutput } from '../runtime/output-budget.mjs';
 import { ToolSurface } from './tool-registry.mjs';
 
 const DEFAULT_EXEC_YIELD_MS = 10_000;
-const DEFAULT_WAIT_YIELD_MS = 60_000;
+const DEFAULT_WAIT_YIELD_MS = 5_000;
 const DEFAULT_MAX_OUTPUT_TOKENS = 10_000;
 const MAX_EXEC_YIELD_MS = 30_000;
-const MAX_WAIT_YIELD_MS = 300_000;
+const MAX_WAIT_YIELD_MS = 30_000;
 const MAX_CALLS_PER_EXEC = 32;
 const MAX_ACTIVE_JOBS = 32;
 const MAX_NESTED_RESULT_BYTES = 1024 * 1024;

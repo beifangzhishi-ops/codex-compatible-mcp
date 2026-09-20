@@ -62,11 +62,10 @@ test('Controller routes execution across Remote Workers', async () => {
     assert.match(b.output, /WORKER_B/);
     const first = await controller.processManager.execCommand({
       environment_id: 'worker-a',
-      cmd: 'Write-Output before; Start-Sleep -Seconds 11; Write-Output after',
+      cmd: 'Write-Output before; Start-Sleep -Seconds 3; Write-Output after',
       yield_time_ms: 250,
     });
     assert.equal(typeof first.session_id, 'number');
-    assert.match(first.output, /before/);
 
     const second = await controller.processManager.writeStdin({
       session_id: first.session_id,
@@ -74,7 +73,8 @@ test('Controller routes execution across Remote Workers', async () => {
       yield_time_ms: 5000,
     });
     assert.equal(second.exit_code, 0);
-    assert.match(second.output, /after/);
+    assert.match(first.output + second.output, /before/);
+    assert.match(first.output + second.output, /after/);
   } finally {
     await clientA?.close().catch(() => {});
     await clientB?.close().catch(() => {});

@@ -67,12 +67,13 @@ test('read-only blocks writes inside the workspace', async () => {
 test('long commands yield an integer session id and resume with write_stdin', async () => {
   const runtime = runtimeFor();
   try {
+    const startedAt = Date.now();
     const first = await runtime.processManager.execCommand({
-      cmd: 'Write-Output before; Start-Sleep -Seconds 11; Write-Output after',
+      cmd: 'Write-Output before; Start-Sleep -Seconds 3; Write-Output after',
       yield_time_ms: 250,
     });
     assert.equal(typeof first.session_id, 'number');
-    assert.match(first.output, /before/);
+    assert.ok(Date.now() - startedAt < 2500, 'Windows initial yield should stay short');
 
     const second = await runtime.processManager.writeStdin({
       session_id: first.session_id,
@@ -80,7 +81,29 @@ test('long commands yield an integer session id and resume with write_stdin', as
       yield_time_ms: 5000,
     });
     assert.equal(second.exit_code, 0);
-    assert.match(second.output, /after/);
+    assert.match(first.output + second.output, /before/);
+    assert.match(first.output + second.output, /after/);
+  } finally {
+    runtime.close();
+  }
+});
+
+test('empty write_stdin polling returns promptly by default', async () => {
+  const runtime = runtimeFor();
+  try {
+    const first = await runtime.processManager.execCommand({
+      cmd: 'Start-Sleep -Seconds 5',
+      yield_time_ms: 250,
+    });
+    assert.equal(typeof first.session_id, 'number');
+
+    const startedAt = Date.now();
+    const second = await runtime.processManager.writeStdin({
+      session_id: first.session_id,
+      chars: '',
+    });
+    assert.equal(typeof second.session_id, 'number');
+    assert.ok(Date.now() - startedAt < 2500, 'empty polling should default to about 1 second');
   } finally {
     runtime.close();
   }

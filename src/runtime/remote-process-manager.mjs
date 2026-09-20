@@ -79,7 +79,7 @@ export class RemoteProcessManager {
 
     const timeoutMs = Math.max(
       35_000,
-      Number(args.yield_time_ms || 10_000) + 10_000,
+      Number(args.yield_time_ms ?? 2_000) + 10_000,
     );
     const result = await this.workerHub.call(
       environment.id,
@@ -106,7 +106,7 @@ export class RemoteProcessManager {
 
     const empty = !(args.chars || '').length;
     const requestedYield = Number(
-      args.yield_time_ms ?? (empty ? 5_000 : 250),
+      args.yield_time_ms ?? (empty ? 1_000 : 250),
     );
     const timeoutMs = Math.max(15_000, requestedYield + 10_000);
     const result = await this.workerHub.call(

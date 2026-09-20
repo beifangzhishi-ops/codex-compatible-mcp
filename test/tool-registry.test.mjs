@@ -293,6 +293,54 @@ test('exec rejects unsafe parallelization and reports live nested sessions clear
   assert.match(live.structuredContent.message, /still running/);
 });
 
+test('wait defaults to a short poll and rejects waits above 30 seconds', async () => {
+  const registry = new ToolRegistry();
+  registry.register(textTool({
+    name: 'slow_wait',
+    namespace: 'demo',
+    surfaces: { codeMode: true },
+    supportsParallel: true,
+    inputSchema: { delay_ms: z.number().int().min(1).max(10_000) },
+    handler: async ({ delay_ms: delayMs }) => {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      return { content: [{ type: 'text', text: 'done' }] };
+    },
+  }));
+
+  const { codeModeManager } = registerArchitectureTools(registry);
+  try {
+    const exec = registry.get('exec');
+    const wait = registry.get('wait');
+    assert.throws(
+      () => registry.validateArguments(wait, {
+        cell_id: 'test-cell',
+        yield_time_ms: 30_001,
+      }),
+      /30000/,
+    );
+
+    const yielded = await exec.handler({
+      calls: [{ tool: 'demo.slow_wait', arguments: { delay_ms: 6000 } }],
+      yield_time_ms: 0,
+    });
+    const startedAt = Date.now();
+    const polled = await wait.handler({
+      cell_id: yielded.structuredContent.cell_id,
+    });
+    const elapsed = Date.now() - startedAt;
+    assert.equal(polled.structuredContent.state, 'running');
+    assert.ok(elapsed >= 4500 && elapsed < 5800, 'default wait should be about 5 seconds');
+
+    const completed = await wait.handler({
+      cell_id: yielded.structuredContent.cell_id,
+      yield_time_ms: 2000,
+    });
+    assert.equal(completed.structuredContent.state, 'completed');
+  } finally {
+    codeModeManager.close();
+  }
+});
+
 
 test('exec bounds oversized nested tool results before MCP transport', async () => {
   const registry = new ToolRegistry();

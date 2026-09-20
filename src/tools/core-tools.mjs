@@ -120,7 +120,7 @@ export function registerCoreTools(registry, runtime) {
       cmd: z.string().min(1).describe('Shell command to execute.'),
       workdir: z.string().optional().describe('Working directory for the command. Defaults to the environment cwd.'),
       tty: z.boolean().optional().describe('True allocates a PTY; false or omitted uses plain pipes.'),
-      yield_time_ms: z.number().int().nonnegative().optional().describe('Wait before yielding output. Defaults to 10000 ms. Windows effective range is 10000-30000 ms.'),
+      yield_time_ms: z.number().int().nonnegative().optional().describe('Wait before yielding output. Defaults to 2000 ms. Windows effective range is 1000-30000 ms.'),
       max_output_tokens: z.number().int().positive().optional().describe('Output token budget. Defaults to 10000 tokens.'),
       shell: z.string().optional().describe("Shell binary to launch. Defaults to the environment's default shell."),
       environment_id: z.string().optional().describe('Environment id. Omit to use the primary environment.'),
@@ -175,7 +175,7 @@ export function registerCoreTools(registry, runtime) {
     inputSchema: {
       session_id: z.number().int().describe('Identifier of the running unified exec session.'),
       chars: z.string().optional().describe('Bytes to write to stdin. Defaults to empty, which polls without writing.'),
-      yield_time_ms: z.number().int().nonnegative().optional().describe('Non-empty writes default to 250 ms and cap at 30000 ms; empty polls default to at least 5000 ms and may wait up to 300000 ms.'),
+      yield_time_ms: z.number().int().max(30_000).nonnegative().optional().describe('Non-empty writes default to 250 ms; empty polls default to 1000 ms. All write_stdin waits cap at 30000 ms.'),
       max_output_tokens: z.number().int().positive().optional().describe('Output token budget. Defaults to 10000 tokens.'),
     },
     outputSchema: UNIFIED_EXEC_OUTPUT_SCHEMA,
