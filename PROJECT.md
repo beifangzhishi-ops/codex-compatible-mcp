@@ -139,22 +139,33 @@ WCM remains a separate project and should not be modified as part of CCM develop
 
 A second comparison against the current Codex repository found several harness layers that are important enough to add to CCM's roadmap.
 
-### Permission, approval, and sandbox policy
+### Permission, sandbox, and approval policy
 
-Codex does not treat `exec_command` and `apply_patch` as unrestricted execution primitives. Commands are evaluated against an execution policy, sandbox profile, requested additional permissions, trust state, and approval policy.
+CCM should carry a Codex-style sandbox backend instead of requiring Docker as the default isolation layer.
 
-CCM therefore needs an explicit policy layer rather than embedding safety decisions inside individual tools. The initial design should support:
+The model-facing permission semantics should stay close to Codex, while enforcement is platform-native inside each worker:
 
-- per-environment read/write roots
+- Linux: Landlock/seccomp for policies the native backend can enforce, with bubblewrap available for richer filesystem policies.
+- Windows: a restricted-token/AppContainer-style backend following Codex's Windows sandbox approach.
+- Docker/container isolation remains an optional fallback or defense-in-depth backend, not a prerequisite for a CCM worker.
+
+The initial policy model should support:
+
+- read-only, workspace-write, and full-access style profiles
+- per-environment readable and writable roots
 - network permission state
-- command risk / policy evaluation
-- destructive-action classification
-- approval-required / allowed / forbidden outcomes
-- persisted or reusable narrowly scoped allow rules where practical
+- environment-native cwd/path handling
+- explicit refusal rather than silently running unsandboxed when the selected backend cannot enforce a requested policy
 
-Interactive approvals cannot be assumed to behave exactly like native Codex UI approvals through MCP. If an approval cannot be obtained safely inside the current ChatGPT interaction, a Goal run should checkpoint as blocked rather than silently bypass policy.
+Windows sandboxing must be treated as less mature than the Linux path. Known platform limitations, such as locations writable by broad Windows ACLs, must be surfaced rather than hidden.
 
-This layer is P0/P1 because Remote execution without a coherent permission model will become difficult to reason about.
+ChatGPT already applies a host-level safety review before some MCP operations reach CCM. That review is an additional outer layer, not part of CCM's sandbox contract.
+
+CCM auto-review is therefore not required for v1. The approval/reviewer architecture should remain pluggable, but model-based auto-review is P2. A future reviewer may use a dedicated model/provider or another host-supported mechanism. Sandbox enforcement must not depend on reviewer availability.
+
+If an operation requires an approval that CCM cannot safely obtain, a Goal run should checkpoint as blocked rather than bypassing policy.
+
+Sandbox/permission enforcement is P0/P1 because it enables native workers without requiring Docker. Auto-review itself is later work.
 ### Session and Turn runtime
 
 Codex has a real Session/Turn execution loop; tool calls are only one part of it. CCM needs a lightweight equivalent for reliable Goal continuation and remote execution.
@@ -231,7 +242,7 @@ Worker disconnects and controller restarts should not corrupt the GoalStore. Lon
 
 ## Revised implementation order
 
-**Milestone 1 — Harness core:** Environment registry, `exec_command`, `write_stdin`, structured outputs, process/session manager, basic policy enforcement.
+**Milestone 1 — Harness core:** Environment registry, `exec_command`, `write_stdin`, structured outputs, process/session manager, permission profiles, and the first native sandbox backend(s). Docker is optional fallback/defense-in-depth rather than a required worker dependency.
 
 **Milestone 2 — Editing and modes:** `apply_patch`, `view_image`, Plan Mode, session/turn state, repository instruction discovery.
 
@@ -241,6 +252,6 @@ Worker disconnects and controller restarts should not corrupt the GoalStore. Lon
 
 **Milestone 5 — Extensions:** MCP resources/child MCP manager, Skills, specialized CodeModeOnly providers.
 
-**Milestone 6 — Advanced orchestration:** multi-agent lifecycle and richer approvals/sandbox integration.
+**Milestone 6 — Advanced orchestration:** multi-agent lifecycle, pluggable approval reviewers/auto-review, and richer policy integration.
 
 Image generation and web search remain intentionally outside CCM because ChatGPT already supplies them.
