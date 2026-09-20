@@ -6,7 +6,10 @@ import { ApprovalManager } from './approval-manager.mjs';
 
 export function createControllerRuntime(options = {}) {
   const environmentRegistry = options.environmentRegistry ||
-    new EnvironmentRegistry({ resolvePaths: false });
+    new EnvironmentRegistry({
+      defaultEnvironmentId: options.defaultEnvironmentId || null,
+      resolvePaths: false,
+    });
   const workerHub = options.workerHub || new WorkerHub({
     environmentRegistry,
     host: options.workerHost,

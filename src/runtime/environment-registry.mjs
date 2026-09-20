@@ -58,7 +58,7 @@ export class EnvironmentRegistry {
 
   unregister(environmentId) {
     const removed = this.environments.delete(environmentId);
-    if (this.defaultEnvironmentId === environmentId) {
+    if (removed && this.defaultEnvironmentId === environmentId) {
       this.defaultEnvironmentId = this.environments.keys().next().value || null;
     }
     return removed;

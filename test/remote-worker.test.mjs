@@ -100,6 +100,46 @@ test('Controller preserves remote-native path syntax', () => {
   assert.deepEqual(environment.workspaceRoots, ['/srv/project', '/opt/shared']);
 });
 
+test('Controller can reserve a stable default environment before workers connect', async () => {
+  const controller = createControllerRuntime({
+    workerPort: 0,
+    defaultEnvironmentId: 'worker-local',
+  });
+  const remoteFirst = workerRuntime('worker-remote');
+  const localSecond = workerRuntime('worker-local');
+  let remoteClient = null;
+  let localClient = null;
+
+  await controller.start();
+  const port = controller.workerHub.address.port;
+  try {
+    remoteClient = new RemoteWorkerClient({
+      runtime: remoteFirst,
+      workerId: 'worker-remote',
+      port,
+    });
+    localClient = new RemoteWorkerClient({
+      runtime: localSecond,
+      workerId: 'worker-local',
+      port,
+    });
+    await remoteClient.connect();
+    await localClient.connect();
+    assert.equal(
+      await controller.workerHub.waitForEnvironment('worker-local'),
+      true,
+    );
+    assert.equal(controller.environmentRegistry.defaultEnvironmentId, 'worker-local');
+    assert.equal(controller.environmentRegistry.resolve().id, 'worker-local');
+  } finally {
+    await remoteClient?.close().catch(() => {});
+    await localClient?.close().catch(() => {});
+    remoteFirst.close();
+    localSecond.close();
+    await controller.close();
+  }
+});
+
 
 test('Worker disconnect unregisters its environment', async () => {
   const controller = createControllerRuntime({ workerPort: 0 });

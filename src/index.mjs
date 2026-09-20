@@ -5,7 +5,10 @@ import { createControllerRuntime } from './controller/runtime.mjs';
 import { createHttpController } from './controller/mcp-http-server.mjs';
 import { createToolRegistry } from './tools/index.mjs';
 
-const runtime = createControllerRuntime();
+const localEnvironmentId = process.env.CCM_ENVIRONMENT_ID || os.hostname();
+const runtime = createControllerRuntime({
+  defaultEnvironmentId: localEnvironmentId,
+});
 await runtime.start();
 
 let localWorker = null;
@@ -28,12 +31,14 @@ if (spawnLocalWorker) {
     windowsHide: true,
   });
 
-  const environmentId = process.env.CCM_ENVIRONMENT_ID || os.hostname();
-  const connected = await runtime.workerHub.waitForEnvironment(environmentId, 10_000);
+  const connected = await runtime.workerHub.waitForEnvironment(localEnvironmentId, 10_000);
   if (!connected) {
     localWorker.kill();
     await runtime.close();
-    throw new Error('Local Remote Worker failed to register environment ' + environmentId + '.');
+    throw new Error(
+      'Local Remote Worker failed to register environment ' +
+      localEnvironmentId + '.',
+    );
   }
 }
 
