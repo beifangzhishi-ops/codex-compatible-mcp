@@ -27,7 +27,7 @@ function wirePipeChild(child, onData, onExit) {
   };
 }
 
-export class LocalEnvironmentExecutor {
+export class NativeEnvironmentExecutor {
   constructor({ sandboxBackend, ptyProxyPath = DEFAULT_PTY_PROXY_PATH }) {
     this.sandboxBackend = sandboxBackend;
     this.ptyProxyPath = ptyProxyPath;

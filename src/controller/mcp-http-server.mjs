@@ -139,7 +139,7 @@ export function createHttpController({
       return httpServer;
     },
     async close() {
-      runtime.close();
+      await runtime.close();
       for (const transport of transports.values()) {
         await transport.close().catch(() => {});
       }
@@ -150,6 +150,12 @@ export function createHttpController({
       httpServer = null;
       await new Promise((resolve) => server.close(() => resolve()));
     },
-    endpoint: `http://${host}:${port}${mcpPath}`,
+    get endpoint() {
+      const address = httpServer?.address();
+      const actualPort = typeof address === 'object' && address
+        ? address.port
+        : port;
+      return `http://${host}:${actualPort}${mcpPath}`;
+    },
   };
 }

@@ -15,6 +15,13 @@ The first implementation round is intentionally narrow and performance-oriented:
 
 The first round ends after these four areas are working and tested. Plan Mode, Goal, MCP resource aggregation, Skills, multi-agent orchestration, and reviewer/auto-review features are later work unless a concrete workflow proves they are needed earlier.
 
+Current implementation status:
+
+- **Milestone 1 / Execution Core: complete.** Native Windows sandbox, Rust/ConPTY PTY, interactive `write_stdin`, bounded capture/model output, and final MCP response guards are covered by regression tests.
+- **Milestone 2 / Environment + Remote Worker: complete.** Controller execution goes through the Remote Worker protocol, including the Controller host over loopback; per-operation environment routing, public session mapping, remote-native paths, disconnect cleanup, reconnecting worker agent behavior, and worker-transport size limits are implemented.
+- **Milestone 3 / Editing: next.**
+- **Milestone 4 / Tool Architecture: planned; an initial registry skeleton already exists but does not yet implement the final exposure-surface model or Code Mode.**
+
 The earlier idea of keeping Desktop Commander tools as the main model-visible API is superseded. CCM may reuse implementation ideas, but GPT should primarily see CCM's smaller Codex-like execution surface.
 
 ## Core design principles

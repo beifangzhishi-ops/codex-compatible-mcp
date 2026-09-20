@@ -194,13 +194,21 @@ export class ProcessManager {
     return result;
   }
 
-  terminateAll() {
-    for (const record of this.sessions.values()) {
-      if (record.exited) continue;
+  terminateSession(sessionId) {
+    const record = this.sessions.get(sessionId);
+    if (!record) return false;
+    this.sessions.delete(sessionId);
+    if (!record.exited) {
       try {
         record.child.kill();
       } catch {}
     }
-    this.sessions.clear();
+    return true;
+  }
+
+  terminateAll() {
+    for (const sessionId of [...this.sessions.keys()]) {
+      this.terminateSession(sessionId);
+    }
   }
 }

@@ -15,9 +15,13 @@ function defaultShell(platform) {
 }
 
 export class EnvironmentRegistry {
-  constructor({ defaultEnvironmentId = null } = {}) {
+  constructor({
+    defaultEnvironmentId = null,
+    resolvePaths = true,
+  } = {}) {
     this.environments = new Map();
     this.defaultEnvironmentId = defaultEnvironmentId;
+    this.resolvePaths = resolvePaths;
   }
 
   register(environment) {
@@ -30,9 +34,11 @@ export class EnvironmentRegistry {
       id: String(environment.id),
       name: String(environment.name || environment.id),
       platform,
-      cwd: path.resolve(environment.cwd || process.cwd()),
+      cwd: this.resolvePaths
+        ? path.resolve(environment.cwd || process.cwd())
+        : String(environment.cwd || ''),
       workspaceRoots: (environment.workspaceRoots || [environment.cwd || process.cwd()])
-        .map((root) => path.resolve(root)),
+        .map((root) => this.resolvePaths ? path.resolve(root) : String(root)),
       shell: environment.shell || defaultShell(platform),
       permissionProfile: environment.permissionProfile || 'workspace-write',
       capabilities: {
@@ -42,12 +48,20 @@ export class EnvironmentRegistry {
         viewImage: false,
         ...(environment.capabilities || {}),
       },
-      backend: environment.backend || 'local',
+      backend: environment.backend || 'native',
       metadata: { ...(environment.metadata || {}) },
     };
     this.environments.set(normalized.id, normalized);
     if (!this.defaultEnvironmentId) this.defaultEnvironmentId = normalized.id;
     return normalized;
+  }
+
+  unregister(environmentId) {
+    const removed = this.environments.delete(environmentId);
+    if (this.defaultEnvironmentId === environmentId) {
+      this.defaultEnvironmentId = this.environments.keys().next().value || null;
+    }
+    return removed;
   }
 
   resolve(environmentId = null) {
@@ -56,6 +70,7 @@ export class EnvironmentRegistry {
     if (!environment) throw new Error(`Unknown environment: ${id || '(none)'}`);
     return environment;
   }
+
   listPublic() {
     return [...this.environments.values()].map((environment) => ({
       id: environment.id,
@@ -85,7 +100,7 @@ export function createLocalEnvironmentRegistry({
     cwd,
     workspaceRoots: [cwd],
     permissionProfile,
-    backend: 'local',
+    backend: 'native',
   });
   return registry;
 }

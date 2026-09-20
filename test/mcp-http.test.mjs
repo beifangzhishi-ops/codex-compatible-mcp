@@ -2,25 +2,32 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { createRuntime } from '../src/runtime/index.mjs';
+import { createWorkerRuntime } from '../src/runtime/index.mjs';
+import { createControllerRuntime } from '../src/controller/runtime.mjs';
+import { RemoteWorkerClient } from '../src/worker/remote-worker-client.mjs';
 import { ToolRegistry } from '../src/tools/tool-registry.mjs';
 import { registerCoreTools } from '../src/tools/core-tools.mjs';
 import { createHttpController } from '../src/controller/mcp-http-server.mjs';
 
-test('MCP lists and calls the stable execution tools', async () => {
-  const runtime = createRuntime();
-  const registry = registerCoreTools(new ToolRegistry(), runtime);
-  const controller = createHttpController({
-    toolRegistry: registry,
-    runtime,
-    port: 0,
+test('MCP lists and calls tools through a Remote Worker', async () => {
+  const runtime = createControllerRuntime({ workerPort: 0 });
+  const workerRuntime = createWorkerRuntime();
+  await runtime.start();
+
+  const worker = new RemoteWorkerClient({
+    runtime: workerRuntime,
+    port: runtime.workerHub.address.port,
   });
+  await worker.connect();
+  await runtime.workerHub.waitForEnvironment('6v1f');
+
+  const registry = registerCoreTools(new ToolRegistry(), runtime);
+  const controller = createHttpController({ toolRegistry: registry, runtime, port: 0 });
   await controller.start();
 
-  const port = controller.address.port;
   const client = new Client({ name: 'ccm-test-client', version: '0.1.0' });
   const transport = new StreamableHTTPClientTransport(
-    new URL('http://127.0.0.1:' + port + '/ccm/mcp'),
+    new URL('http://127.0.0.1:' + controller.address.port + '/ccm/mcp'),
   );
 
   try {
@@ -37,13 +44,15 @@ test('MCP lists and calls the stable execution tools', async () => {
     assert.match(result.content[0].text, /MCP_OK/);
   } finally {
     await client.close().catch(() => {});
+    await worker.close().catch(() => {});
+    workerRuntime.close();
     await controller.close();
   }
 });
 
 
 test('MCP blocks oversized tool results before transport', async () => {
-  const runtime = createRuntime();
+  const runtime = createWorkerRuntime();
   const registry = new ToolRegistry();
   registry.register({
     name: 'oversized_test',
