@@ -24,6 +24,7 @@ function createProtocolServer(
       'Use list_environments when environment selection is unclear.',
       'Use tool_search to discover deferred capabilities without expanding the top-level MCP schema.',
       'Use exec/wait for structured nested capability dispatch; host Code Mode remains responsible for JavaScript/control flow.',
+      'For multi-step CCM work, prefer one exec call containing Code Mode-enabled core tools such as list_environments, exec_command, write_stdin, and apply_patch (plus deferred tools when needed). This reduces repeated host MCP initialization round trips. Use parallel=true only for independent calls.',
       'Commands run under the selected environment permission profile.',
       'If exec_command with sandbox_permissions=require_escalated returns approval_required, do not continue or approve it yourself. Show the environment, command, requested full-access scope, and justification to the user, then wait for an explicit user reply.',
       'Only after an explicit user approval, call respond_to_escalation with decision=approve, then retry the exact same exec_command with the returned approval_id. Approval is one-shot and changing the command or execution context requires a new request.',

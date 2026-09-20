@@ -78,13 +78,14 @@ export function registerArchitectureTools(
     tags: ['tools', 'code-mode', 'orchestration', 'batch'],
     description: [
       'Execute one or more ToolRegistry capabilities through CCM nested dispatch.',
+      'Prefer one exec call for multi-step CCM work when the required tools are available on the Code Mode surface. Core tools such as list_environments, exec_command, write_stdin, and apply_patch can be nested here alongside deferred ccm-extra tools. This avoids repeated host MCP connection/initialization round trips.',
       'This is a structured dispatcher, not a JavaScript interpreter. Use the host Code Mode for loops, branching, and data processing.',
       'Set parallel=true only for independent calls; CCM rejects parallel execution for tools that do not declare parallel-call support.',
       'If this returns state=running, resume the outer cell with wait. If it returns live_sessions, the nested runner is finished but those process sessions must be continued with write_stdin.',
     ].join('\n\n'),
     inputSchema: {
       calls: z.array(nestedCallSchema).min(1).max(32).describe(
-        'Nested capability calls to execute.',
+        'Nested capability calls to execute. These may include Code Mode-enabled core tools (for example list_environments, exec_command, write_stdin, apply_patch) and discovered deferred capabilities.',
       ),
       parallel: z.boolean().optional().describe(
         'Run independent calls concurrently. Defaults to false.',
