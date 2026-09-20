@@ -76,6 +76,7 @@ CCM deliberately does not embed a second JavaScript interpreter for Code Mode. T
 CCM ships optional Windows workflows ported from WCM without expanding the top-level MCP schema:
 
 - `ccm-extra.send_file` transfers an exact file from a selected CCM environment to the GPT client as an embedded resource for preview/download, without BMG or Library upload.
+- `ccm-extra.bmg_call` optionally delegates allowlisted browser operations to an independently installed Browser MCP Gateway (BMG) and its dedicated hidden GPT workspace.
 - `ccm-extra.quark_probe` checks a locally running, already logged-in Quark Cloud Drive desktop client.
 - `ccm-extra.quark_upload` submits one or more files through that local Quark desktop session and can wait for verified completion.
 - `ccm-extra.bilibili_download_dash` downloads signed DASH video/audio URLs obtained from an authenticated browser session and remuxes them with `ffmpeg -c copy`.
@@ -83,6 +84,8 @@ CCM ships optional Windows workflows ported from WCM without expanding the top-l
 Discover them with `tool_search` (for example, `quark upload` or `bilibili`) and invoke them through `exec`. Long uploads/downloads may return a live process session; continue that session with the top-level `write_stdin` tool.
 
 The Quark helper reuses only the login state of the local Quark desktop client and does not export account credentials. The Bilibili helper intentionally leaves authenticated `playurl` discovery to the browser/BMG layer and accepts only the resulting short-lived signed media URLs; it does not export cookies or attempt to bypass account/quality restrictions.
+
+BMG is an optional external dependency of `ccm-extra.bmg_call`, not a dependency of CCM itself. If BMG is absent, that one deferred capability reports an installation/configuration error while CCM core and every other capability continue to work normally. Install BMG separately and either expose `bmgctl` on PATH or set `CCM_BMG_CLIENT` to its `bmgctl.cmd` executable. CCM never reads BMG's OAuth/token state, approval secret, or repository files directly.
 
 ## Requirements
 

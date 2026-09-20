@@ -73,6 +73,27 @@ function psQuote(value) {
   return "'" + String(value).replaceAll("'", "''") + "'";
 }
 
+const BMG_BROWSER_TOOLS = [
+  'get_windows_and_tabs',
+  'chrome_navigate',
+  'chrome_get_web_content',
+  'chrome_get_interactive_elements',
+  'chrome_click_element',
+  'chrome_fill_or_select',
+  'chrome_keyboard',
+  'chrome_screenshot',
+  'chrome_go_back_or_forward',
+  'chrome_network_debugger_start',
+  'chrome_network_debugger_stop',
+  'chrome_network_capture_start',
+  'chrome_network_capture_stop',
+  'chrome_inject_script',
+  'chrome_send_command_to_inject_script',
+  'chrome_console',
+  'bmg_show_workspace',
+  'bmg_hide_workspace',
+];
+
 function resolveWindowsEnvironment(runtime, environmentId) {
   const environment = runtime.environmentRegistry.resolve(environmentId);
   if (environment.platform !== 'windows') {
@@ -250,6 +271,65 @@ export function registerSpecializedTools(registry, runtime) {
           environment_id: environment.id,
           capability: 'quark_upload',
           destination: 'Quark system manual_upload',
+        });
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  });
+
+  registry.register({
+    namespace: 'ccm-extra',
+    name: 'bmg_call',
+    provider: 'ccm-external-adapter',
+    provenance: 'optional-external-bmg-cli',
+    surfaces: { deferred: true, codeMode: true },
+    tags: ['bmg', 'browser', 'gpt', 'chatgpt', 'plugin', 'oauth', 'windows'],
+    environmentRequirements: {
+      platform: 'windows',
+      capabilities: ['exec'],
+      localSoftware: ['BMG (optional)'],
+    },
+    description: [
+      'Invoke an allowlisted browser operation through the optional external Browser MCP Gateway (BMG) client.',
+      'BMG owns the authenticated browser account state and routes page operations into its dedicated hidden GPT workspace. CCM does not read browser cookies, BMG OAuth state, local approval secrets, or BMG repository files.',
+      'If BMG is not installed/configured, only this capability fails; all other CCM tools remain available. Set CCM_BMG_CLIENT to the bmgctl executable when it is not on PATH.',
+      'Use bmg_show_workspace only when human login, consent, CAPTCHA, or verification is required; use bmg_hide_workspace afterwards.',
+    ].join('\n\n'),
+    inputSchema: {
+      tool: z.enum(BMG_BROWSER_TOOLS).describe(
+        'BMG browser operation to execute in the dedicated GPT workspace.',
+      ),
+      arguments: z.record(z.string(), z.unknown()).optional().describe(
+        'Arguments forwarded to the selected BMG browser tool.',
+      ),
+      environment_id: z.string().optional().describe(
+        'Windows Remote Worker that has BMG installed. Omit to use the default environment.',
+      ),
+      yield_time_ms: z.number().int().min(0).max(30_000).optional(),
+      max_output_tokens: z.number().int().min(256).max(10_000).optional(),
+    },
+    handler: async (args) => {
+      try {
+        const environment = resolveWindowsEnvironment(
+          runtime,
+          args.environment_id,
+        );
+        const encodedArguments = Buffer.from(
+          JSON.stringify(args.arguments || {}),
+          'utf8',
+        ).toString('base64');
+        const command = [
+          '$client=$env:CCM_BMG_CLIENT',
+          "if(-not $client){$resolved=Get-Command bmgctl.cmd -ErrorAction SilentlyContinue | Select-Object -First 1; if(-not $resolved){$resolved=Get-Command bmgctl -ErrorAction SilentlyContinue | Select-Object -First 1}; if($resolved){$client=$resolved.Source}}",
+          "if(-not $client){throw 'BMG is not installed or configured for this worker. Install browser-mcp-gateway and set CCM_BMG_CLIENT to bmgctl.cmd. Other CCM tools do not require BMG.'}",
+          '& $client call ' + psQuote(args.tool) +
+            ' --args-base64 ' + psQuote(encodedArguments),
+        ].join('; ');
+        return execResult(await run(runtime, args, command), {
+          environment_id: environment.id,
+          capability: 'bmg_call',
+          bmg_tool: args.tool,
         });
       } catch (error) {
         return toolError(error);
