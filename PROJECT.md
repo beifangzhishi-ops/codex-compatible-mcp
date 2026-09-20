@@ -20,7 +20,7 @@ Current implementation status:
 - **Milestone 1 / Execution Core: complete.** Native Windows sandbox, Rust/ConPTY PTY, interactive `write_stdin`, bounded capture/model output, and final MCP response guards are covered by regression tests.
 - **Milestone 2 / Environment + Remote Worker: complete.** Controller execution goes through the Remote Worker protocol, including the Controller host over loopback; per-operation environment routing, public session mapping, remote-native paths, disconnect cleanup, reconnecting worker agent behavior, and worker-transport size limits are implemented.
 - **Milestone 3 / Editing: complete.** Codex-style patching and bounded image reads execute on the selected Remote Worker, with preflight validation, workspace/symlink protections, media structure checks, and MCP end-to-end coverage.
-- **Milestone 4 / Tool Architecture: planned; an initial registry skeleton already exists but does not yet implement the final exposure-surface model or Code Mode.**
+- **Milestone 4 / Tool Architecture: complete.** ToolRegistry uses independent Direct / Deferred / Code Mode surfaces with derived exposure states, namespaced provenance/collision rules, `tool_search`, and bounded nested `exec/wait` dispatch. Deferred capabilities can be registered without changing the top-level MCP schema.
 
 The earlier idea of keeping Desktop Commander tools as the main model-visible API is superseded. CCM may reuse implementation ideas, but GPT should primarily see CCM's smaller Codex-like execution surface.
 
@@ -109,7 +109,7 @@ Normal interactive CCM sessions should not require a Goal. Goal exists only for 
 
 ## Code Mode and extensibility
 
-Code Mode is a major design target, not an optional decoration.
+Code Mode is implemented as a registry-backed nested dispatch path rather than a second JavaScript runtime inside CCM.
 
 CCM should own a ToolRegistry where model exposure is represented by independent surfaces:
 
@@ -123,7 +123,7 @@ The stable top-level MCP surface should not grow every time CCM gains a speciali
 
 This is also the preferred solution to the plugin-refresh problem: new nested capabilities can become usable without requiring ChatGPT to register a brand-new top-level MCP function.
 
-A `tool_search`-style capability should search the current registry and expose relevant deferred/nested capabilities to the model.
+`tool_search` searches deferred registry capabilities and returns their qualified name, schema, provenance, exposure surfaces, and environment requirements. `exec` and `wait` dispatch Code Mode-capable registry entries. The host Code Mode owns JavaScript/control flow; CCM owns bounded capability dispatch and continuation state.
 ## Later extension: MCP resources
 
 MCP resource aggregation is explicitly outside the first release. If a later workflow justifies it, CCM may add Codex-style resource helpers and a child-MCP connection manager without changing the first-release execution ABI.
@@ -244,7 +244,7 @@ Before v0.1 is tagged or published, all of the following must be true:
 
 - a clean clone can install dependencies, build native helpers, run the full test suite, and start the Controller/Remote Worker using documented commands
 - the repository contains no machine-specific secrets, credentials, private endpoints, generated binaries, build outputs, diagnostic state, or absolute developer paths that should not be public
-- README documents architecture, supported platforms, current limitations, environment variables, Controller/Worker startup, sandbox behavior, and the five stable direct tools
+- README documents architecture, supported platforms, current limitations, environment variables, Controller/Worker startup, sandbox behavior, and the stable direct execution/editing plus Tool Architecture surface
 - package metadata and repository metadata are suitable for public consumption, and an explicit root license is present
 - restricted execution fails closed on unsupported sandbox platforms; no public default silently falls back to unsandboxed execution
 - filesystem mutations such as `apply_patch` enforce workspace boundaries including symlink/junction escapes

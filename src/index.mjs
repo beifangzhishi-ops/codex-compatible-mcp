@@ -3,8 +3,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createControllerRuntime } from './controller/runtime.mjs';
 import { createHttpController } from './controller/mcp-http-server.mjs';
-import { ToolRegistry } from './tools/tool-registry.mjs';
-import { registerCoreTools } from './tools/core-tools.mjs';
+import { createToolRegistry } from './tools/index.mjs';
 
 const runtime = createControllerRuntime();
 await runtime.start();
@@ -38,7 +37,7 @@ if (spawnLocalWorker) {
   }
 }
 
-const toolRegistry = registerCoreTools(new ToolRegistry(), runtime);
+const { registry: toolRegistry, codeModeManager } = createToolRegistry(runtime);
 const controller = createHttpController({ toolRegistry, runtime });
 await controller.start();
 
@@ -53,6 +52,7 @@ async function shutdown() {
   if (stopping) return;
   stopping = true;
   if (localWorker && !localWorker.killed) localWorker.kill();
+  codeModeManager.close();
   await controller.close();
   process.exit(0);
 }

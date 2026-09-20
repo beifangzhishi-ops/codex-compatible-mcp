@@ -1,5 +1,4 @@
 import * as z from 'zod/v4';
-import { ToolExposure } from './tool-registry.mjs';
 
 const UNIFIED_EXEC_OUTPUT_SCHEMA = {
   chunk_id: z.string().optional(),
@@ -70,7 +69,9 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'list_environments',
     provider: 'ccm-core',
-    exposure: ToolExposure.DIRECT,
+    surfaces: { direct: true, codeMode: true },
+    tags: ['environment', 'worker', 'capabilities'],
+    supportsParallel: true,
     description: 'List CCM execution environments and their native shell, workspace, permissions, and capabilities.',
     inputSchema: {},
     handler: async () => jsonResult({
@@ -82,7 +83,10 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'exec_command',
     provider: 'ccm-core',
-    exposure: ToolExposure.DIRECT,
+    surfaces: { direct: true, codeMode: true },
+    tags: ['shell', 'process', 'terminal', 'command'],
+    environmentRequirements: { capabilities: ['exec'] },
+    supportsParallel: true,
     description: [
       'Runs a command using plain pipes by default; set tty=true to allocate a PTY. Returns output or a session ID for ongoing interaction.',
       'On Windows, keep destructive filesystem operations in one shell and verify resolved targets before recursive deletes or moves.',
@@ -111,7 +115,8 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'write_stdin',
     provider: 'ccm-core',
-    exposure: ToolExposure.DIRECT,
+    surfaces: { direct: true, codeMode: true },
+    tags: ['process', 'terminal', 'session', 'stdin'],
     description: 'Writes characters to an existing unified exec session and returns recent output.',
     inputSchema: {
       session_id: z.number().int().describe('Identifier of the running unified exec session.'),
@@ -132,7 +137,9 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'apply_patch',
     provider: 'ccm-core',
-    exposure: ToolExposure.DIRECT,
+    surfaces: { direct: true, codeMode: true },
+    tags: ['edit', 'patch', 'filesystem'],
+    environmentRequirements: { capabilities: ['applyPatch'] },
     description: 'Apply a Codex-style Begin/End Patch against the selected Remote Worker filesystem.',
     inputSchema: {
       patch: z.string().min(1).describe('Codex-style patch text beginning with *** Begin Patch.'),
@@ -151,7 +158,10 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'view_image',
     provider: 'ccm-core',
-    exposure: ToolExposure.DIRECT,
+    surfaces: { direct: true },
+    tags: ['image', 'filesystem', 'media'],
+    environmentRequirements: { capabilities: ['viewImage'] },
+    supportsParallel: true,
     description: 'Read a bounded image from the selected Remote Worker and return it as MCP image content.',
     inputSchema: {
       path: z.string().min(1).describe('Image path relative to the environment cwd, or an absolute native path.'),

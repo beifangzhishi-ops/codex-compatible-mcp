@@ -17,6 +17,8 @@ function createProtocolServer(toolRegistry, maxToolResultBytes) {
       'CCM is a Codex-compatible execution harness.',
       'Use exec_command for shell/repository work and write_stdin for live sessions.',
       'Use list_environments when environment selection is unclear.',
+      'Use tool_search to discover deferred capabilities without expanding the top-level MCP schema.',
+      'Use exec/wait for structured nested capability dispatch; host Code Mode remains responsible for JavaScript/control flow.',
       'Commands run under the selected environment permission profile.',
       'Treat transient network failures carefully: a single timeout, DNS failure, connection reset, HTTP 502, or target-site 403/404/challenge does not mean a CCM environment is offline. Distinguish CCM transport, worker connectivity, command runtime, and target-site failures; verify environment health and retry transient network operations 2-3 times when appropriate.',
     ].join('\n'),

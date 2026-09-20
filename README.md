@@ -11,7 +11,7 @@ CCM is currently targeting **v0.1** as its first public release.
 - Milestone 1 — Execution Core: implemented and regression-tested.
 - Milestone 2 — Environment + Remote Worker: implemented and regression-tested.
 - Milestone 3 — Editing (`apply_patch`, `view_image`): implemented and regression-tested.
-- Milestone 4 — Tool Architecture / Code Mode: next.
+- Milestone 4 — Tool Architecture / Code Mode: implemented and regression-tested.
 
 The v0.1 release gate is defined in [PROJECT.md](PROJECT.md). v0.1 is intended to be directly publishable rather than a private prototype.
 
@@ -51,8 +51,25 @@ Environment selection is per operation. A session may use a default environment,
 | `write_stdin` | Write to or poll a live process session returned by `exec_command`. |
 | `apply_patch` | Apply Codex-style `*** Begin Patch` / `*** End Patch` edits on the selected Worker. |
 | `view_image` | Read and validate a bounded PNG/JPEG/GIF/WebP image from the selected Worker. |
+| `tool_search` | Discover deferred ToolRegistry capabilities without expanding the top-level MCP schema. |
+| `exec` | Dispatch one or more nested registered capabilities, sequentially or safely in parallel. |
+| `wait` | Resume a nested `exec` cell that yielded before completion. |
 
 Normal repository inspection, search, Git, builds, tests, and diagnostics should usually go through `exec_command`.
+
+## ToolRegistry and Code Mode
+
+CCM stores capability exposure as three independent surfaces:
+
+- **Direct** — included in MCP `tools/list`.
+- **Deferred** — omitted from the initial schema and discoverable through `tool_search`.
+- **Code Mode** — callable as a nested capability through `exec`.
+
+Convenience states such as Direct, Deferred, CodeModeOnly, DirectModelOnly, DeferredModelOnly, and Hidden are derived from those surfaces rather than stored as one rigid enum.
+
+The current stable direct MCP surface contains the five execution/editing tools plus the three architecture tools above. Registering a new deferred capability does not change `tools/list`; it becomes discoverable immediately through `tool_search` and callable through `exec`.
+
+CCM deliberately does not embed a second JavaScript interpreter for Code Mode. The host application remains responsible for loops, branching, and data processing. CCM's `exec/wait` pair is a bounded structured dispatcher over ToolRegistry capabilities. If a nested `exec_command` finishes the outer cell while leaving a live process session, the result explicitly directs the caller to continue that session with `write_stdin`.
 
 ## Requirements
 
