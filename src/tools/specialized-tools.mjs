@@ -1,4 +1,4 @@
-﻿import * as z from 'zod/v4';
+import * as z from 'zod/v4';
 
 function toolError(error) {
   return {
@@ -197,6 +197,8 @@ export function registerSpecializedTools(registry, runtime) {
       try {
         const environment = runtime.environmentRegistry.resolve(args.environment_id);
         if (!environment.capabilities?.exec) throw new Error('Environment does not support exec: ' + environment.id);
+        if (!args.output_path || !String(args.output_path).trim()) throw new Error('output_path is required. Export location must be explicit.');
+        if (!String(args.output_path).includes('\\') && !String(args.output_path).includes('/')) throw new Error('output_path must include a directory. Refusing to write into the worker current directory.');
         const command = [
           toolPath('tools\\chatgpt-share-export\\export.py'),
           "$python=(Get-Command python.exe -ErrorAction SilentlyContinue | Select-Object -First 1).Source",
@@ -212,6 +214,7 @@ export function registerSpecializedTools(registry, runtime) {
         return execResult(await run(runtime, args, command), {
           environment_id: environment.id,
           capability: 'chatgpt_share_export',
+          requested_output_path: args.output_path,
         });
       } catch (error) { return toolError(error); }
     },
