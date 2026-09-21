@@ -11,6 +11,43 @@ def fetch(url):
     if p.returncode: raise RuntimeError(p.stderr.decode('utf-8','replace').strip() or f'curl failed: {p.returncode}')
     return p.stdout.decode('utf-8','replace')
 
+def resolve_indexed(D, value, cache=None, stack=None):
+    cache={} if cache is None else cache
+    stack=set() if stack is None else stack
+    if isinstance(value,int):
+        if value<0:return None if value==-5 else value
+        if value in cache:return cache[value]
+        if value>=len(D) or value in stack:return None
+        resolved=resolve_indexed(D,D[value],cache,stack|{value})
+        cache[value]=resolved
+        return resolved
+    if isinstance(value,list):
+        return [resolve_indexed(D,x,cache,stack) for x in value]
+    if isinstance(value,dict):
+        out={}
+        for k,x in value.items():
+            key=resolve_indexed(D,int(k[1:]),cache,stack) if isinstance(k,str) and k.startswith('_') and k[1:].isdigit() else k
+            out[str(key)]=resolve_indexed(D,x,cache,stack)
+        return out
+    return value
+
+def share_loader_error(D):
+    if not isinstance(D,list):return None
+    for raw in D:
+        if not isinstance(raw,dict):continue
+        for k,v in raw.items():
+            if not (isinstance(k,str) and k.startswith('_') and k[1:].isdigit()):continue
+            ki=int(k[1:])
+            if ki>=len(D) or D[ki]!='serverResponse':continue
+            response=resolve_indexed(D,v)
+            if not isinstance(response,dict) or response.get('type')!='error':continue
+            message=response.get('toastMessage') or response.get('error') or response.get('message')
+            if response.get('showInaccessibleToast') or (isinstance(message,str) and 'deleted' in message.lower()):
+                return 'ChatGPT Share conversation has been deleted or is inaccessible.'
+            if isinstance(message,str) and message.strip():
+                return f'ChatGPT Share returned an error: {message.strip()}'
+    return None
+
 def extract_payload(html):
     marker='streamController.enqueue("'
     start=html.find(marker)
@@ -25,6 +62,10 @@ def extract_payload(html):
                 try:
                     decoded=json.loads('"'+raw+'"'); data=json.loads(decoded)
                     if isinstance(data,list) and 'mapping' in data: return data
+                    loader_error=share_loader_error(data)
+                    if loader_error: raise RuntimeError(loader_error)
+                except RuntimeError:
+                    raise
                 except Exception: pass
                 break
             j+=1

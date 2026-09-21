@@ -6,6 +6,27 @@ spec=importlib.util.spec_from_file_location('share_export',P)
 e=importlib.util.module_from_spec(spec); spec.loader.exec_module(e)
 
 class ParserTests(unittest.TestCase):
+ def test_deleted_share_loader_error_is_reported_clearly(self):
+  D=[
+   {'_1':2},
+   'loaderData',
+   {'_3':4},
+   'serverResponse',
+   {'_5':6,'_7':8,'_9':10},
+   'type',
+   'error',
+   'showInaccessibleToast',
+   True,
+   'toastMessage',
+   'Conversation has been deleted. Start a new chat.',
+  ]
+  self.assertEqual(
+   e.share_loader_error(D),
+   'ChatGPT Share conversation has been deleted or is inaccessible.',
+  )
+ def test_normal_payload_does_not_report_loader_error(self):
+  D=['mapping',{},'Conversation has been deleted. Start a new chat.']
+  self.assertIsNone(e.share_loader_error(D))
  def test_flattened_numeric_primitive_is_not_double_dereferenced(self):
   D=['mapping',{'_2':3},'node',{'_4':5},'width',1080]
   self.assertEqual(e.unpack(D)['node']['width'],1080)
