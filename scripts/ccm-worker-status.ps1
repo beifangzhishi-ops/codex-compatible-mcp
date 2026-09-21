@@ -75,5 +75,18 @@ if(Test-Path $pidFile){
     Write-Output 'worker pid file: missing'
 }
 
+Write-Output '=== Worker health ==='
+$healthFile=Join-Path $repoRoot '.state\ccm-worker-health.json'
+if(Test-Path -LiteralPath $healthFile){
+    try {
+        $health=Get-Content -LiteralPath $healthFile -Raw | ConvertFrom-Json
+        Write-Output ("health pid={0}; state={1}; updated={2}; controller={3}:{4}" -f $health.pid,$health.state,$health.updated_at,$health.controller_host,$health.controller_port)
+    } catch {
+        Write-Output 'worker health: invalid'
+    }
+} else {
+    Write-Output 'worker health: missing'
+}
+
 Write-Output '=== Recent supervisor log ==='
 Get-Content (Join-Path $repoRoot 'logs\ccm-worker-supervisor.log') -Tail 15

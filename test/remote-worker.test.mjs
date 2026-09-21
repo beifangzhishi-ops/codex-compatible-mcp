@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { EventEmitter } from 'node:events';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,6 +26,57 @@ function workerRuntime(
     },
   });
 }
+
+test('Remote Worker connect rejects when the socket closes before hello_ack', async () => {
+  const runtime = workerRuntime('worker-close-before-ack');
+  const server = net.createServer((socket) => {
+    socket.once('data', () => socket.destroy());
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const client = new RemoteWorkerClient({
+    runtime,
+    workerId: 'worker-close-before-ack',
+    port: server.address().port,
+    handshakeTimeoutMs: 1_000,
+  });
+  try {
+    await assert.rejects(
+      client.connect(),
+      /connection closed before hello_ack/i,
+    );
+  } finally {
+    await client.close().catch(() => {});
+    runtime.close();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('Remote Worker connect times out when hello_ack never arrives', async () => {
+  const runtime = workerRuntime('worker-hello-timeout');
+  const sockets = new Set();
+  const server = net.createServer((socket) => {
+    sockets.add(socket);
+    socket.on('close', () => sockets.delete(socket));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const client = new RemoteWorkerClient({
+    runtime,
+    workerId: 'worker-hello-timeout',
+    port: server.address().port,
+    handshakeTimeoutMs: 50,
+  });
+  try {
+    await assert.rejects(
+      client.connect(),
+      /hello_ack timed out after 50 ms/i,
+    );
+  } finally {
+    await client.close().catch(() => {});
+    for (const socket of sockets) socket.destroy();
+    runtime.close();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
 
 test('Controller routes execution across Remote Workers', async () => {
   const controller = createControllerRuntime({ workerPort: 0 });

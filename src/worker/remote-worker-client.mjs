@@ -30,6 +30,9 @@ export class RemoteWorkerClient {
       process.env.CCM_WORKER_HUB_HOST ||
       '127.0.0.1',
     port = Number(process.env.CCM_WORKER_HUB_PORT || 18301),
+    handshakeTimeoutMs = Number(
+      process.env.CCM_WORKER_HANDSHAKE_TIMEOUT_MS || 10_000,
+    ),
   } = {}) {
     if (!runtime) throw new Error('RemoteWorkerClient requires a worker runtime.');
     this.runtime = runtime;
@@ -37,6 +40,7 @@ export class RemoteWorkerClient {
     this.workerId = String(workerId || process.env.CCM_WORKER_ID || environment.id);
     this.host = host;
     this.port = port;
+    this.handshakeTimeoutMs = handshakeTimeoutMs;
     this.socket = null;
     this.buffer = '';
     this.connected = false;
@@ -58,12 +62,22 @@ export class RemoteWorkerClient {
       socket.setKeepAlive(true, 10_000);
       socket.setEncoding('utf8');
 
-      const fail = (error) => {
+      const finish = (callback, value) => {
         if (!settled) {
           settled = true;
-          reject(error);
+          clearTimeout(handshakeTimer);
+          callback(value);
         }
       };
+      const fail = (error) => finish(reject, error);
+      const succeed = () => finish(resolve);
+      const handshakeTimer = setTimeout(() => {
+        fail(new Error(
+          'Remote Worker hello_ack timed out after ' +
+          this.handshakeTimeoutMs + ' ms.',
+        ));
+        socket.destroy();
+      }, this.handshakeTimeoutMs);
       socket.on('connect', () => {
         send(socket, {
           type: 'hello',
@@ -76,10 +90,7 @@ export class RemoteWorkerClient {
         this.#consume(chunk, (message) => {
           if (message?.type === 'hello_ack') {
             this.connected = true;
-            if (!settled) {
-              settled = true;
-              resolve();
-            }
+            succeed();
             return;
           }
           if (message?.type === 'hello_error') {
@@ -93,6 +104,9 @@ export class RemoteWorkerClient {
       socket.on('error', fail);
       socket.on('close', () => {
         this.connected = false;
+        if (!settled) {
+          fail(new Error('Remote Worker connection closed before hello_ack.'));
+        }
         this.closedResolve?.();
       });
     });

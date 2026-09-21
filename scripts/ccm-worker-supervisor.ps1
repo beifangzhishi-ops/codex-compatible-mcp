@@ -10,6 +10,7 @@ $workerScript=Join-Path $repoRoot 'src\worker\agent.mjs'
 $buildScript=Join-Path $repoRoot 'scripts\build-native.mjs'
 $node=(Get-Command node.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 $supervisorLog=Join-Path $logDir 'ccm-worker-supervisor.log'
+$workerHealthFile=Join-Path $stateDir 'ccm-worker-health.json'
 
 if(-not $ConfigPath){
     $ConfigPath=Join-Path $repoRoot 'config\worker.env'
@@ -48,6 +49,21 @@ function Import-WorkerEnv([string]$path){
 }
 
 Import-WorkerEnv $ConfigPath
+
+$healthTimeoutMs=30000
+if($env:CCM_WORKER_HEALTH_TIMEOUT_MS){
+    $parsedHealthTimeout=0
+    if([int]::TryParse($env:CCM_WORKER_HEALTH_TIMEOUT_MS,[ref]$parsedHealthTimeout) -and $parsedHealthTimeout -ge 5000){
+        $healthTimeoutMs=$parsedHealthTimeout
+    }
+}
+$healthStaleMs=15000
+if($env:CCM_WORKER_HEALTH_INTERVAL_MS){
+    $parsedHealthInterval=0
+    if([int]::TryParse($env:CCM_WORKER_HEALTH_INTERVAL_MS,[ref]$parsedHealthInterval) -and $parsedHealthInterval -gt 0){
+        $healthStaleMs=[Math]::Max(15000,$parsedHealthInterval*3)
+    }
+}
 
 if(-not $env:CCM_WORKER_HUB_CONNECT_HOST){
     throw 'CCM_WORKER_HUB_CONNECT_HOST is required in config\worker.env.'
@@ -104,6 +120,28 @@ function StopTree($proc){
         & taskkill.exe /PID $proc.Id /T /F *> $null
     }
 }
+function WorkerHealth($worker){
+    if(-not (Test-Path -LiteralPath $workerHealthFile)){
+        return @{ Healthy=$false; Reason='health file missing' }
+    }
+    try {
+        $health=Get-Content -LiteralPath $workerHealthFile -Raw | ConvertFrom-Json
+        if([int]$health.pid -ne [int]$worker.Id){
+            return @{ Healthy=$false; Reason=("health pid mismatch: {0}" -f $health.pid) }
+        }
+        if([string]$health.state -ne 'connected'){
+            return @{ Healthy=$false; Reason=("health state={0}" -f $health.state) }
+        }
+        $updated=[DateTimeOffset]::Parse([string]$health.updated_at)
+        $ageMs=([DateTimeOffset]::Now-$updated).TotalMilliseconds
+        if($ageMs -gt $healthStaleMs){
+            return @{ Healthy=$false; Reason=("health heartbeat stale ageMs={0:N0}" -f $ageMs) }
+        }
+        return @{ Healthy=$true; Reason='connected' }
+    } catch {
+        return @{ Healthy=$false; Reason=('invalid health file: ' + $_.Exception.Message) }
+    }
+}
 
 $workerPidFile=Join-Path $stateDir 'ccm-worker.pid'
 try {
@@ -111,6 +149,7 @@ try {
         if(-not (LauncherAlive)){ return }
         $worker=$null
         try {
+            Remove-Item $workerHealthFile -Force -ErrorAction SilentlyContinue
             $quotedWorker='"' + $workerScript + '"'
             $worker=StartHidden $node $quotedWorker
             Set-Content $workerPidFile $worker.Id -Encoding ASCII
@@ -123,19 +162,38 @@ try {
                 $(if($env:CCM_PERMISSION_PROFILE){$env:CCM_PERMISSION_PROFILE}else{'workspace-write'})
             )
 
+            $unhealthySince=[DateTimeOffset]::Now
             while(-not $worker.HasExited){
                 if(-not (LauncherAlive)){
                     Log 'scheduled-task launcher exited'
                     return
                 }
+                $health=WorkerHealth $worker
+                if($health.Healthy){
+                    $unhealthySince=$null
+                } else {
+                    if($null -eq $unhealthySince){ $unhealthySince=[DateTimeOffset]::Now }
+                    $unhealthyMs=([DateTimeOffset]::Now-$unhealthySince).TotalMilliseconds
+                    if($unhealthyMs -ge $healthTimeoutMs){
+                        Log ("worker unhealthy for {0:N0} ms ({1}); forcing restart" -f $unhealthyMs,$health.Reason)
+                        StopTree $worker
+                        break
+                    }
+                }
                 Start-Sleep -Seconds 2
             }
-            Log ("worker exited code={0}; restarting in 5 seconds" -f $worker.ExitCode)
+            if(-not $worker.HasExited){ $worker.WaitForExit(5000) | Out-Null }
+            if($worker.HasExited){
+                Log ("worker exited code={0}; restarting in 5 seconds" -f $worker.ExitCode)
+            } else {
+                Log 'worker did not exit after forced stop; restarting supervisor loop in 5 seconds'
+            }
         } catch {
             Log ('error: ' + $_.Exception.Message)
         } finally {
             StopTree $worker
             Remove-Item $workerPidFile -Force -ErrorAction SilentlyContinue
+            Remove-Item $workerHealthFile -Force -ErrorAction SilentlyContinue
         }
         Start-Sleep -Seconds 5
     }
