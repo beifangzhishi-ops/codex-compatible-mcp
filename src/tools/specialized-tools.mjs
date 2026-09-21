@@ -184,7 +184,7 @@ export function registerSpecializedTools(registry, runtime) {
     ].join('\n\n'),
     inputSchema: {
       share_url: z.string().url().describe('Public https://chatgpt.com/share/... URL.'),
-      output_path: z.string().min(1).describe('Required output path on the selected CCM environment. Must include a directory.'),
+      output_path: z.string().min(1).describe('Required output path on the selected CCM environment.'),
       format: z.enum(['md', 'json']).optional().describe('Export format. Defaults to md.'),
       branch: z.enum(['active', 'all']).optional().describe('active reconstructs the final branch; all exports every mapping node.'),
       mode: z.enum(['text', 'full']).optional().describe('text exports visible user/assistant濮濓絾鏋?only; full preserves all available branch records including system/tool messages and message payload metadata. Defaults to text.'),
@@ -484,3 +484,4 @@ export function registerSpecializedTools(registry, runtime) {
 
   return registry;
 }
+
