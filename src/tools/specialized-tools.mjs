@@ -441,17 +441,20 @@ export function registerSpecializedTools(registry, runtime) {
 
   registry.register({
     namespace: 'ccm-extra',
-    name: 'oauth_key_link',
+    name: 'one_time_key_link',
     provider: 'ccm-specialized',
-    provenance: 'ccm-local-one-time-approval',
+    provenance: 'ccm-local-one-time-key',
     surfaces: { deferred: true, codeMode: true },
-    tags: ['ccm', 'oauth', 'approval', 'secret', 'one-time', 'connector'],
+    tags: ['key', 'secret', 'file', 'one-time', 'share'],
     environmentRequirements: { platform: 'windows', capabilities: ['exec'] },
     description: [
-      'Create a short-lived, single-reveal HTTPS page for copying the local CCM OAuth approval secret to another device.',
-      'The secret remains on the worker until the user explicitly presses Reveal once. The result also returns the CCM MCP endpoint and reminds callers to use that /ccm/mcp URL when configuring a ChatGPT connector.',
+      'Create a short-lived, single-reveal HTTPS page containing the complete text of a local file.',
+      'Pass only a local file path; do not pass the key or secret itself. The file content remains on the worker until the user explicitly presses Reveal once.',
     ].join('\n\n'),
     inputSchema: {
+      file_path: z.string().min(1).describe(
+        'Path to the local text file whose complete contents should be revealed once.',
+      ),
       ttl_seconds: z.number().int().min(30).max(900).optional().describe(
         'Lifetime in seconds. Defaults to 300.',
       ),
@@ -467,31 +470,27 @@ export function registerSpecializedTools(registry, runtime) {
         const ttl = Number(args.ttl_seconds || 300);
         const command = [
           toolPath('tools\\ccm-once\\start.ps1'),
-          '& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $tool -TtlSeconds ' + ttl,
+          '& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $tool -FilePath ' +
+            psQuote(args.file_path) + ' -TtlSeconds ' + ttl,
         ].join('; ');
         const result = await run(runtime, args, command);
         const oneTimeUrl = String(result.output || '').trim().split(/\r?\n/).filter(Boolean).at(-1);
         if (!/^https:\/\//i.test(oneTimeUrl || '')) {
-          throw new Error('CCM OAuth key helper did not return an HTTPS URL.');
+          throw new Error('One-time key helper did not return an HTTPS URL.');
         }
-        const mcpUrl = oneTimeUrl.replace(/\/ccm-once\/.*$/, '/ccm/mcp');
         return {
           content: [{
             type: 'text',
             text: [
-              'One-time approval URL: ' + oneTimeUrl,
+              'One-time key URL: ' + oneTimeUrl,
               'Expires in: ' + ttl + ' seconds',
-              'CCM MCP endpoint: ' + mcpUrl,
-              'Reminder: configure the ChatGPT plugin/connector with the /ccm/mcp endpoint, not the /ccm base URL.',
             ].join('\n'),
           }],
           structuredContent: {
             environment_id: environment.id,
-            capability: 'oauth_key_link',
+            capability: 'one_time_key_link',
             one_time_url: oneTimeUrl,
             expires_in_seconds: ttl,
-            mcp_url: mcpUrl,
-            reminder: 'Use mcp_url (/ccm/mcp) when configuring the ChatGPT plugin/connector.',
           },
         };
       } catch (error) {

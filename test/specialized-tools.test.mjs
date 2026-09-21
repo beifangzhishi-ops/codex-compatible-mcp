@@ -59,7 +59,7 @@ test('specialized WCM-derived tools are deferred and searchable', () => {
       'ccm-extra.bmg_call',
       'ccm-extra.chatgpt_share_export',
       'ccm-extra.gmail',
-      'ccm-extra.oauth_key_link',
+      'ccm-extra.one_time_key_link',
       'ccm-extra.quark_probe',
       'ccm-extra.quark_upload',
       'ccm-extra.refresh_chatgpt_schema',
@@ -201,7 +201,7 @@ test('BMG adapter allowlists trusted page refs and computer input for schema ref
   assert.ok(schema.tool.options.includes('chrome_computer'));
 });
 
-test('OAuth key link returns the MCP endpoint reminder without exposing the secret', async () => {
+test('one-time key link accepts a file path without exposing file contents', async () => {
   const runtime = fakeRuntime();
   const registry = new ToolRegistry();
   registerSpecializedTools(registry, runtime);
@@ -213,16 +213,16 @@ test('OAuth key link returns the MCP endpoint reminder without exposing the secr
       exit_code: 0,
     };
   };
-  const result = await registry.get('ccm-extra.oauth_key_link').handler({
+  const result = await registry.get('ccm-extra.one_time_key_link').handler({
     environment_id: 'worker-b',
+    file_path: 'C:\\secrets\\api-key.txt',
     ttl_seconds: 180,
   });
   assert.equal(result.isError, undefined);
   assert.equal(result.structuredContent.one_time_url, 'https://ccm.example.test/ccm-once/random-token');
-  assert.equal(result.structuredContent.mcp_url, 'https://ccm.example.test/ccm/mcp');
   assert.equal(result.structuredContent.expires_in_seconds, 180);
-  assert.match(result.content[0].text, /\/ccm\/mcp/);
   assert.match(runtime.calls[0].cmd, /ccm-once\\start\.ps1/);
+  assert.match(runtime.calls[0].cmd, /-FilePath 'C:\\secrets\\api-key\.txt'/);
   assert.match(runtime.calls[0].cmd, /-TtlSeconds 180/);
 });
 

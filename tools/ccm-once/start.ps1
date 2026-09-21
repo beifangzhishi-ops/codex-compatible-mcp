@@ -1,9 +1,11 @@
-param([int]$TtlSeconds = 300)
+param(
+  [Parameter(Mandatory=$true)][string]$FilePath,
+  [int]$TtlSeconds = 300
+)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$state = Join-Path $root '.state'
-$secret = Join-Path $state 'ccm-approval-secret.txt'
-if (-not (Test-Path -LiteralPath $secret)) { throw 'CCM approval secret is unavailable.' }
+$secret = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($FilePath)
+if (-not (Test-Path -LiteralPath $secret -PathType Leaf)) { throw 'Key text file is unavailable.' }
 
 $bytes = New-Object byte[] 32
 $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
