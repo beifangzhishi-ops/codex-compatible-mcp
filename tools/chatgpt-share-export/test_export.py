@@ -6,6 +6,15 @@ spec=importlib.util.spec_from_file_location('share_export',P)
 e=importlib.util.module_from_spec(spec); spec.loader.exec_module(e)
 
 class ParserTests(unittest.TestCase):
+ def test_default_output_uses_gitignored_cache(self):
+  out=e.resolve_output_path('https://chatgpt.com/share/abc',None,'md','active','text',Path('C:/repo'))
+  self.assertEqual(out,Path('C:/repo/.cache/chatgpt-share-export/abc.active.text.md').resolve())
+ def test_relative_output_uses_gitignored_cache(self):
+  out=e.resolve_output_path('https://chatgpt.com/share/abc','nested/session.json','json','active','full',Path('C:/repo'))
+  self.assertEqual(out,Path('C:/repo/.cache/chatgpt-share-export/nested/session.json').resolve())
+ def test_relative_output_cannot_escape_cache(self):
+  with self.assertRaises(ValueError):
+   e.resolve_output_path('https://chatgpt.com/share/abc','../../outside.md','md','active','text',Path('C:/repo'))
  def test_deleted_share_loader_error_is_reported_clearly(self):
   D=[
    {'_1':2},

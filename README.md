@@ -82,7 +82,7 @@ Supported features:
 - ranch=active: follows the current Share branch when available.
 - ranch=all: exports all mapping nodes for debugging or archival.
 - Markdown and JSON output formats.
-- `output_path` is required; callers explicitly choose the destination path.
+- `output_path` is optional. Omitted or relative paths are written under the Git-ignored `.cache/chatgpt-share-export/` directory; absolute paths are honored directly.
 - Non-text messages such as image-only messages are retained rather than silently dropped.
 
 The exporter only recovers information present in the public Share payload. Information removed upstream by ChatGPT is not recoverable.

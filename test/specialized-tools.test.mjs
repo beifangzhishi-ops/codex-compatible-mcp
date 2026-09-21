@@ -91,6 +91,21 @@ test('ChatGPT Share export dispatches through CCM exec without BMG', async () =>
   assert.equal(runtime.calls[0].cmd.includes('bmgctl'), false);
 });
 
+test('ChatGPT Share export can use the default Git-ignored cache output', async () => {
+  const runtime = fakeRuntime();
+  runtime.environmentRegistry.resolve = (environmentId) => ({
+    id: environmentId || 'windows-worker', platform: 'windows', capabilities: { exec: true },
+  });
+  const registry = new ToolRegistry();
+  registerSpecializedTools(registry, runtime);
+  const result = await registry.get('ccm-extra.chatgpt_share_export').handler({
+    environment_id: 'worker-a',
+    share_url: 'https://chatgpt.com/share/test-id',
+  });
+  assert.equal(result.isError, undefined);
+  assert.equal(runtime.calls[0].cmd.includes(' --output '), false);
+});
+
 test('one-time key link accepts a file path without exposing file contents', async () => {
   const runtime = fakeRuntime();
   const registry = new ToolRegistry();

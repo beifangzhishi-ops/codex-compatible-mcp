@@ -2,6 +2,7 @@ node_modules/
 __pycache__/
 *.py[cod]
 .state/
+.cache/
 logs/
 config/ccm.env
 config/worker.env
