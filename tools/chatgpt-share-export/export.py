@@ -104,14 +104,16 @@ def title_from_html(html):
     return 'ChatGPT Shared Conversation'
 
 def main():
-    ap=argparse.ArgumentParser(); ap.add_argument('share_url'); ap.add_argument('--output'); ap.add_argument('--format',choices=['md','json'],default='md'); ap.add_argument('--branch',choices=['active','all'],default='active'); ap.add_argument('--mode',choices=['text','full'],default='text'); ap.add_argument('--json-summary',action='store_true'); a=ap.parse_args()
+    ap=argparse.ArgumentParser(); ap.add_argument('share_url'); ap.add_argument('--output',required=True); ap.add_argument('--format',choices=['md','json'],default='md'); ap.add_argument('--branch',choices=['active','all'],default='active'); ap.add_argument('--mode',choices=['text','full'],default='text'); ap.add_argument('--json-summary',action='store_true'); a=ap.parse_args()
+    if len(Path(a.output).parts) < 2:
+        raise ValueError('output_path must include a directory. Refusing to write into the current working directory.')
     html=fetch(a.share_url); D=extract_payload(html); nodes=unpack(D); meta=conversation_meta(D); current_node=meta.get('current_node')
     ids=active_branch(nodes,current_node) if a.branch=='active' else sorted(nodes,key=lambda k:(message_record(k,nodes[k]) or {}).get('create_time') or 0)
     recs=[message_record(i,nodes[i]) for i in ids]; recs=[r for r in recs if r]
     if a.mode=='text':
         recs=[r for r in recs if r['role'] in ('user','assistant') and r['visible_text'] and r['text']!='Original custom instructions no longer available' and r['text']!='The output of this plugin was redacted.']
     title=meta.get('title') or meta.get('og_title') or title_from_html(html); turns=sum(r['role']=='user' for r in recs)
-    out=Path(a.output) if a.output else Path(re.sub(r'[<>:"/\\|?*]+','_',title)+('_all' if a.branch=='all' else '')+'.'+a.format)
+    out=Path(a.output)
     if a.format=='json': out.write_text(json.dumps({'title':title,'share_url':a.share_url,'branch':a.branch,'mode':a.mode,'total_nodes':len(nodes),'messages':recs if a.mode=='full' else [{'id':r['id'],'role':r['role'],'create_time':r['create_time'],'text':r['visible_text']} for r in recs]},ensure_ascii=False,indent=2),encoding='utf-8')
     else:
         lines=["# ChatGPT Share export","","> exported conversation",""]; turn=0
