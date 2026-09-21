@@ -57,6 +57,9 @@ test('specialized WCM-derived tools are deferred and searchable', () => {
     [
       'ccm-extra.bilibili_download_dash',
       'ccm-extra.bmg_call',
+      'ccm-extra.chatgpt_share_export',
+      'ccm-extra.gmail',
+      'ccm-extra.one_time_approval_link',
       'ccm-extra.quark_probe',
       'ccm-extra.quark_upload',
       'ccm-extra.refresh_chatgpt_schema',
@@ -82,6 +85,14 @@ test('specialized WCM-derived tools are deferred and searchable', () => {
   assert.equal(
     registry.searchDeferred('refresh chatgpt schema', { limit: 5 })[0].qualified_name,
     'ccm-extra.refresh_chatgpt_schema',
+  );
+  assert.equal(
+    registry.searchDeferred('chatgpt share export', { limit: 5 })[0].qualified_name,
+    'ccm-extra.chatgpt_share_export',
+  );
+  assert.equal(
+    registry.searchDeferred('gmail email read', { limit: 5 })[0].qualified_name,
+    'ccm-extra.gmail',
   );
 });
 
@@ -110,6 +121,27 @@ test('send_file returns an embedded resource without changing the direct tool su
     'test',
   );
   assert.equal(result.structuredContent.filename, 'report.docx');
+});
+
+
+test('ChatGPT Share export dispatches through CCM exec without BMG', async () => {
+  const runtime = fakeRuntime();
+  runtime.environmentRegistry.resolve = (environmentId) => ({
+    id: environmentId || 'windows-worker', platform: 'windows', capabilities: { exec: true },
+  });
+  const registry = new ToolRegistry();
+  registerSpecializedTools(registry, runtime);
+  const result = await registry.get('ccm-extra.chatgpt_share_export').handler({
+    environment_id: 'worker-a',
+    share_url: 'https://chatgpt.com/share/test-id',
+    output_path: 'C:\\tmp\\share.md',
+    format: 'md', branch: 'active', mode: 'full', proxy: 'http://127.0.0.1:7890',
+  });
+  assert.equal(result.isError, undefined);
+  assert.equal(result.structuredContent.capability, 'chatgpt_share_export');
+  assert.match(runtime.calls[0].cmd, /chatgpt-share-export/);
+  assert.match(runtime.calls[0].cmd, /127\.0\.0\.1:7890/);
+  assert.equal(runtime.calls[0].cmd.includes('bmgctl'), false);
 });
 
 test('quark deferred tools route through the selected Remote Worker', async () => {
@@ -167,6 +199,31 @@ test('BMG adapter allowlists trusted page refs and computer input for schema ref
   const schema = registry.get('ccm-extra.bmg_call').inputSchema;
   assert.ok(schema.tool.options.includes('chrome_read_page'));
   assert.ok(schema.tool.options.includes('chrome_computer'));
+});
+
+test('one-time approval link returns the MCP endpoint reminder without exposing the secret', async () => {
+  const runtime = fakeRuntime();
+  const registry = new ToolRegistry();
+  registerSpecializedTools(registry, runtime);
+  runtime.calls.length = 0;
+  runtime.processManager.execCommand = async (args) => {
+    runtime.calls.push(args);
+    return {
+      output: 'https://ccm.example.test/ccm-once/random-token\r\n',
+      exit_code: 0,
+    };
+  };
+  const result = await registry.get('ccm-extra.one_time_approval_link').handler({
+    environment_id: 'worker-b',
+    ttl_seconds: 180,
+  });
+  assert.equal(result.isError, undefined);
+  assert.equal(result.structuredContent.one_time_url, 'https://ccm.example.test/ccm-once/random-token');
+  assert.equal(result.structuredContent.mcp_url, 'https://ccm.example.test/ccm/mcp');
+  assert.equal(result.structuredContent.expires_in_seconds, 180);
+  assert.match(result.content[0].text, /\/ccm\/mcp/);
+  assert.match(runtime.calls[0].cmd, /ccm-once\\start\.ps1/);
+  assert.match(runtime.calls[0].cmd, /-TtlSeconds 180/);
 });
 
 test('ChatGPT schema refresh keeps CCM approval credentials local to the worker', async () => {
