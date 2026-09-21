@@ -2,7 +2,6 @@
 
 This optional Windows helper is ported from WCM and is exposed by CCM as deferred capabilities:
 
-- `ccm-extra.quark_probe`
 - `ccm-extra.quark_upload`
 
 Requirements:

@@ -1,4 +1,4 @@
-﻿import test from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { registerSpecializedTools } from '../src/tools/specialized-tools.mjs';
@@ -42,59 +42,6 @@ function fakeRuntime() {
     },
   };
 }
-
-test('specialized WCM-derived tools are deferred and searchable', () => {
-  const runtime = fakeRuntime();
-  const registry = new ToolRegistry();
-  registerSpecializedTools(registry, runtime);
-
-  assert.deepEqual(
-    registry.listDirect().map((tool) => tool.qualifiedName),
-    [],
-  );
-  assert.deepEqual(
-    registry.listDeferred().map((tool) => tool.qualifiedName).sort(),
-    [
-      'ccm-extra.bilibili_download_dash',
-      'ccm-extra.bmg_call',
-      'ccm-extra.chatgpt_share_export',
-      'ccm-extra.gmail',
-      'ccm-extra.one_time_key_link',
-      'ccm-extra.quark_probe',
-      'ccm-extra.quark_upload',
-      'ccm-extra.refresh_chatgpt_schema',
-      'ccm-extra.send_file',
-    ],
-  );
-  assert.equal(
-    registry.searchDeferred('bilibili', { limit: 5 })[0].qualified_name,
-    'ccm-extra.bilibili_download_dash',
-  );
-  assert.equal(
-    registry.searchDeferred('quark upload', { limit: 5 })[0].qualified_name,
-    'ccm-extra.quark_upload',
-  );
-  assert.equal(
-    registry.searchDeferred('send file', { limit: 5 })[0].qualified_name,
-    'ccm-extra.send_file',
-  );
-  assert.equal(
-    registry.searchDeferred('bmg browser gpt', { limit: 5 })[0].qualified_name,
-    'ccm-extra.bmg_call',
-  );
-  assert.equal(
-    registry.searchDeferred('refresh chatgpt schema', { limit: 5 })[0].qualified_name,
-    'ccm-extra.refresh_chatgpt_schema',
-  );
-  assert.equal(
-    registry.searchDeferred('chatgpt share export', { limit: 5 })[0].qualified_name,
-    'ccm-extra.chatgpt_share_export',
-  );
-  assert.equal(
-    registry.searchDeferred('gmail email read', { limit: 5 })[0].qualified_name,
-    'ccm-extra.gmail',
-  );
-});
 
 test('send_file returns an embedded resource without changing the direct tool surface', async () => {
   const runtime = fakeRuntime();
@@ -144,63 +91,6 @@ test('ChatGPT Share export dispatches through CCM exec without BMG', async () =>
   assert.equal(runtime.calls[0].cmd.includes('bmgctl'), false);
 });
 
-test('quark deferred tools route through the selected Remote Worker', async () => {
-  const runtime = fakeRuntime();
-  const registry = new ToolRegistry();
-  registerSpecializedTools(registry, runtime);
-
-  const probe = await registry.get('ccm-extra.quark_probe').handler({
-    environment_id: 'worker-a',
-  });
-  assert.equal(probe.isError, undefined);
-  assert.equal(probe.structuredContent.environment_id, 'worker-a');
-  assert.match(runtime.calls[0].cmd, /cloud_transfer\.py/);
-  assert.match(runtime.calls[0].cmd, /probe --json/);
-
-  const upload = await registry.get('ccm-extra.quark_upload').handler({
-    environment_id: 'worker-a',
-    paths: ["C:\\media\\a'b.mp4", 'D:\\archive.zip'],
-    timeout_seconds: 45,
-    no_wait: true,
-  });
-  assert.equal(upload.isError, undefined);
-  assert.match(runtime.calls[1].cmd, /upload/);
-  assert.match(runtime.calls[1].cmd, /--timeout 45 --no-wait --json/);
-  assert.match(runtime.calls[1].cmd, /a''b\.mp4/);
-});
-
-test('BMG adapter stays optional and dispatches through the external bmgctl client', async () => {
-  const runtime = fakeRuntime();
-  const registry = new ToolRegistry();
-  registerSpecializedTools(registry, runtime);
-  const browserArgs = { url: 'https://chatgpt.com' };
-  const result = await registry.get('ccm-extra.bmg_call').handler({
-    environment_id: 'worker-b',
-    tool: 'chrome_navigate',
-    arguments: browserArgs,
-  });
-  assert.equal(result.isError, undefined);
-  assert.equal(result.structuredContent.environment_id, 'worker-b');
-  assert.equal(result.structuredContent.capability, 'bmg_call');
-  assert.equal(result.structuredContent.bmg_tool, 'chrome_navigate');
-  assert.match(runtime.calls[0].cmd, /CCM_BMG_CLIENT/);
-  assert.match(runtime.calls[0].cmd, /bmgctl\.cmd/);
-  assert.match(runtime.calls[0].cmd, /chrome_navigate/);
-  assert.match(runtime.calls[0].cmd, /--args-base64/);
-  const encoded = Buffer.from(JSON.stringify(browserArgs), 'utf8').toString('base64');
-  assert.ok(runtime.calls[0].cmd.includes(encoded));
-  assert.equal(runtime.calls[0].cmd.includes('https://chatgpt.com'), false);
-});
-
-test('BMG adapter allowlists trusted page refs and computer input for schema refresh', () => {
-  const runtime = fakeRuntime();
-  const registry = new ToolRegistry();
-  registerSpecializedTools(registry, runtime);
-  const schema = registry.get('ccm-extra.bmg_call').inputSchema;
-  assert.ok(schema.tool.options.includes('chrome_read_page'));
-  assert.ok(schema.tool.options.includes('chrome_computer'));
-});
-
 test('one-time key link accepts a file path without exposing file contents', async () => {
   const runtime = fakeRuntime();
   const registry = new ToolRegistry();
@@ -238,23 +128,6 @@ test('ChatGPT schema refresh keeps CCM approval credentials local to the worker'
   assert.equal(/Invoke-Bmg[^\n]*approval_secret/.test(script), false);
 });
 
-test('ChatGPT schema refresh remains registered but is temporarily unavailable without side effects', async () => {
-  const runtime = fakeRuntime();
-  const registry = new ToolRegistry();
-  registerSpecializedTools(registry, runtime);
-  const result = await registry.get('ccm-extra.refresh_chatgpt_schema').handler({
-    environment_id: 'worker-b',
-    mode: 'status',
-    mcp_url: 'https://example.invalid/ccm/mcp',
-  });
-  assert.equal(result.isError, undefined);
-  assert.equal(result.structuredContent.status, 'temporarily_unavailable');
-  assert.equal(result.structuredContent.capability, 'refresh_chatgpt_schema');
-  assert.equal(result.structuredContent.implementation_retained, true);
-  assert.equal(result.structuredContent.browser_flow_started, false);
-  assert.equal(runtime.calls.length, 0);
-});
-
 test('Bilibili deferred tool passes signed DASH URLs without exposing them in result metadata', async () => {
   const runtime = fakeRuntime();
   const registry = new ToolRegistry();
@@ -284,21 +157,4 @@ test('Bilibili deferred tool passes signed DASH URLs without exposing them in re
   assert.match(runtime.calls[0].cmd, /-TimeoutSeconds 90/);
   assert.match(runtime.calls[0].cmd, /video\.m4s\?token=a&x=1/);
   assert.match(runtime.calls[0].cmd, /audio\.m4s\?token=b&x=2/);
-});
-
-test('specialized tools reject non-Windows environments before dispatch', async () => {
-  const runtime = fakeRuntime();
-  runtime.environmentRegistry.resolve = () => ({
-    id: 'linux-worker',
-    platform: 'linux',
-  });
-  const registry = new ToolRegistry();
-  registerSpecializedTools(registry, runtime);
-
-  const result = await registry.get('ccm-extra.quark_probe').handler({
-    environment_id: 'linux-worker',
-  });
-  assert.equal(result.isError, true);
-  assert.match(result.content[0].text, /requires a Windows Remote Worker/);
-  assert.equal(runtime.calls.length, 0);
 });

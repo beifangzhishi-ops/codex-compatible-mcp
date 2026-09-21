@@ -1,4 +1,4 @@
-﻿# CCM — Codex-Compatible MCP
+# CCM — Codex-Compatible MCP
 
 CCM is a Codex-inspired execution harness for MCP clients. It focuses on a small, stable coding/execution surface, persistent process sessions, Remote Workers, native sandboxing, bounded tool output, patching, and image reads.
 
@@ -76,9 +76,6 @@ CCM deliberately does not embed a second JavaScript interpreter for Code Mode. T
 CCM ships optional Windows workflows ported from WCM without expanding the top-level MCP schema:
 
 - `ccm-extra.send_file` transfers an exact file from a selected CCM environment to the GPT client as an embedded resource for preview/download, without BMG or Library upload.
-- `ccm-extra.bmg_call` optionally delegates allowlisted browser operations to an independently installed Browser MCP Gateway (BMG) and its dedicated hidden GPT workspace.
-- `ccm-extra.refresh_chatgpt_schema` is temporarily unavailable while BMG browser interaction reliability is being repaired. The capability remains registered and returns an explicit `temporarily_unavailable` status without starting browser automation or modifying connector registrations. Its implementation is retained for later re-enablement.
-- `ccm-extra.quark_probe` checks a locally running, already logged-in Quark Cloud Drive desktop client.
 - `ccm-extra.quark_upload` submits one or more files through that local Quark desktop session and can wait for verified completion.
 - `ccm-extra.bilibili_download_dash` downloads signed DASH video/audio URLs obtained from an authenticated browser session and remuxes them with `ffmpeg -c copy`.
 
@@ -86,9 +83,7 @@ Discover them with `tool_search` (for example, `quark upload` or `bilibili`) and
 
 The Quark helper reuses only the login state of the local Quark desktop client and does not export account credentials. The Bilibili helper intentionally leaves authenticated `playurl` discovery to the browser/BMG layer and accepts only the resulting short-lived signed media URLs; it does not export cookies or attempt to bypass account/quality restrictions.
 
-BMG is an optional external dependency of `ccm-extra.bmg_call`, not a dependency of CCM itself. If BMG is absent, that one deferred capability reports an installation/configuration error while CCM core and every other capability continue to work normally. Install BMG separately and either expose `bmgctl` on PATH or set `CCM_BMG_CLIENT` to its `bmgctl.cmd` executable. CCM never reads BMG's OAuth/token state, approval secret, or repository files directly.
 
-`ccm-extra.refresh_chatgpt_schema` currently short-circuits before BMG startup or any ChatGPT connector mutation. The retained implementation remains fail-closed and will be re-enabled only after the BMG browser interaction path is verified stable again.
 
 ## Requirements
 
