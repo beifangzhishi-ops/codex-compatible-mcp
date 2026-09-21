@@ -1,4 +1,4 @@
-import * as z from 'zod/v4';
+﻿import * as z from 'zod/v4';
 
 function toolError(error) {
   return {
@@ -180,14 +180,14 @@ export function registerSpecializedTools(registry, runtime) {
     description: [
       'Export a public ChatGPT Share conversation directly from its chatgpt.com/share URL without BMG or browser automation.',
       'Fetches the Share HTML, decodes the indexed React Router payload, reconstructs the active parent/child branch, and exports visible user/assistant messages to Markdown or JSON.',
-      'Use branch=all for forensic/debug export of all mapping nodes. Use mode=text for readable姝ｆ枃 only, or mode=full to preserve every available message record and tool/internal payload exposed by the Share data.',
+      'Use branch=all for forensic/debug export of all mapping nodes. Use mode=text for readable濮濓絾鏋?only, or mode=full to preserve every available message record and tool/internal payload exposed by the Share data.',
     ].join('\n\n'),
     inputSchema: {
       share_url: z.string().url().describe('Public https://chatgpt.com/share/... URL.'),
       output_path: z.string().min(1).optional().describe('Output path on the selected CCM environment.'),
       format: z.enum(['md', 'json']).optional().describe('Export format. Defaults to md.'),
       branch: z.enum(['active', 'all']).optional().describe('active reconstructs the final branch; all exports every mapping node.'),
-      mode: z.enum(['text', 'full']).optional().describe('text exports visible user/assistant姝ｆ枃 only; full preserves all available branch records including system/tool messages and message payload metadata. Defaults to text.'),
+      mode: z.enum(['text', 'full']).optional().describe('text exports visible user/assistant濮濓絾鏋?only; full preserves all available branch records including system/tool messages and message payload metadata. Defaults to text.'),
       proxy: z.string().url().optional().describe('Optional HTTP(S) proxy URL, for example http://127.0.0.1:7890.'),
       environment_id: z.string().optional().describe('CCM environment used for network fetch and output.'),
       yield_time_ms: z.number().int().min(0).max(30_000).optional(),
@@ -268,52 +268,7 @@ export function registerSpecializedTools(registry, runtime) {
     },
   });
 
-  registry.register({
-    namespace: 'ccm-extra',
-    name: 'quark_probe',
-    provider: 'ccm-specialized',
-    provenance: 'ported-from-wcm/tools/quark-transfer',
-    surfaces: { deferred: true, codeMode: true },
-    tags: ['quark', 'cloud', 'upload', 'probe', 'windows'],
-    environmentRequirements: {
-      platform: 'windows',
-      capabilities: ['exec'],
-      localSoftware: ['QuarkCloudDrive'],
-    },
-    supportsParallel: true,
-    description: [
-      'Probe the local Quark Cloud Drive desktop client on a Windows Remote Worker.',
-      'Uses only the login state already held by the local Quark desktop client. It checks the Desktop service, WSG component, current-account mapping, and upload task database without exporting cookies or credentials.',
-    ].join('\n\n'),
-    inputSchema: {
-      environment_id: z.string().optional().describe(
-        'Windows Remote Worker environment. Omit to use the default environment.',
-      ),
-      yield_time_ms: z.number().int().min(0).max(30_000).optional(),
-      max_output_tokens: z.number().int().min(256).max(10_000).optional(),
-    },
-    handler: async (args) => {
-      try {
-        const environment = resolveWindowsEnvironment(
-          runtime,
-          args.environment_id,
-        );
-        const command = [
-          toolPath('tools\\quark-transfer\\cloud_transfer.py'),
-          "$python=(Get-Command python.exe -ErrorAction SilentlyContinue | Select-Object -First 1).Source",
-          "if(-not $python){throw 'Python is required for the bundled Quark transfer tool.'}",
-          "$env:PYTHONUTF8='1'",
-          '& $python $tool probe --json',
-        ].join('; ');
-        return execResult(await run(runtime, args, command), {
-          environment_id: environment.id,
-          capability: 'quark_probe',
-        });
-      } catch (error) {
-        return toolError(error);
-      }
-    },
-  });
+
 
   registry.register({
     namespace: 'ccm-extra',
@@ -380,64 +335,7 @@ export function registerSpecializedTools(registry, runtime) {
     },
   });
 
-  registry.register({
-    namespace: 'ccm-extra',
-    name: 'bmg_call',
-    provider: 'ccm-external-adapter',
-    provenance: 'optional-external-bmg-cli',
-    surfaces: { deferred: true, codeMode: true },
-    tags: ['bmg', 'browser', 'gpt', 'chatgpt', 'plugin', 'oauth', 'windows'],
-    environmentRequirements: {
-      platform: 'windows',
-      capabilities: ['exec'],
-      localSoftware: ['BMG (optional)'],
-    },
-    description: [
-      'Invoke an allowlisted browser operation through the optional external Browser MCP Gateway (BMG) client.',
-      'BMG owns the authenticated browser account state and routes page operations into its dedicated hidden GPT workspace. CCM does not read browser cookies, BMG OAuth state, local approval secrets, or BMG repository files.',
-      'If BMG is not installed/configured, only this capability fails; all other CCM tools remain available. Set CCM_BMG_CLIENT to the bmgctl executable when it is not on PATH.',
-      'Use bmg_show_workspace only when human login, consent, CAPTCHA, or verification is required; use bmg_hide_workspace afterwards.',
-    ].join('\n\n'),
-    inputSchema: {
-      tool: z.enum(BMG_BROWSER_TOOLS).describe(
-        'BMG browser operation to execute in the dedicated GPT workspace.',
-      ),
-      arguments: z.record(z.string(), z.unknown()).optional().describe(
-        'Arguments forwarded to the selected BMG browser tool.',
-      ),
-      environment_id: z.string().optional().describe(
-        'Windows Remote Worker that has BMG installed. Omit to use the default environment.',
-      ),
-      yield_time_ms: z.number().int().min(0).max(30_000).optional(),
-      max_output_tokens: z.number().int().min(256).max(10_000).optional(),
-    },
-    handler: async (args) => {
-      try {
-        const environment = resolveWindowsEnvironment(
-          runtime,
-          args.environment_id,
-        );
-        const encodedArguments = Buffer.from(
-          JSON.stringify(args.arguments || {}),
-          'utf8',
-        ).toString('base64');
-        const command = [
-          '$client=$env:CCM_BMG_CLIENT',
-          "if(-not $client){$resolved=Get-Command bmgctl.cmd -ErrorAction SilentlyContinue | Select-Object -First 1; if(-not $resolved){$resolved=Get-Command bmgctl -ErrorAction SilentlyContinue | Select-Object -First 1}; if($resolved){$client=$resolved.Source}}",
-          "if(-not $client){throw 'BMG is not installed or configured for this worker. Install browser-mcp-gateway and set CCM_BMG_CLIENT to bmgctl.cmd. Other CCM tools do not require BMG.'}",
-          '& $client call ' + psQuote(args.tool) +
-            ' --args-base64 ' + psQuote(encodedArguments),
-        ].join('; ');
-        return execResult(await run(runtime, args, command), {
-          environment_id: environment.id,
-          capability: 'bmg_call',
-          bmg_tool: args.tool,
-        });
-      } catch (error) {
-        return toolError(error);
-      }
-    },
-  });
+
 
   registry.register({
     namespace: 'ccm-extra',
@@ -499,71 +397,7 @@ export function registerSpecializedTools(registry, runtime) {
     },
   });
 
-  registry.register({
-    namespace: 'ccm-extra',
-    name: 'refresh_chatgpt_schema',
-    provider: 'ccm-external-adapter',
-    provenance: 'ccm-bmg-chatgpt-schema-refresh',
-    surfaces: { deferred: true, codeMode: true },
-    tags: [
-      'bmg',
-      'chatgpt',
-      'plugin',
-      'connector',
-      'schema',
-      'oauth',
-      'refresh',
-      'windows',
-    ],
-    environmentRequirements: {
-      platform: 'windows',
-      capabilities: ['exec'],
-      localSoftware: ['BMG (optional)'],
-    },
-    description: [
-      'TEMPORARILY UNAVAILABLE: ChatGPT CCM connector rebuild/refresh is paused while BMG browser interaction reliability is being repaired.',
-      'The capability remains registered so callers receive an explicit unavailable status instead of silently losing the tool. It does not start BMG, modify connector registrations, rename CCM, create a new connector, or run OAuth while paused.',
-      'The implementation is retained for later re-enablement after BMG runtime verification. CCM core and other specialized tools remain usable.',
-    ].join('\n\n'),
-    inputSchema: {
-      mode: z.enum(['refresh', 'status']).optional().describe(
-        'refresh performs or resumes the workflow; status only inspects ChatGPT UI state.',
-      ),
-      mcp_url: z.string().url().optional().describe(
-        'CCM MCP endpoint. Omit to resolve CCM_RESOURCE from the worker CCM configuration.',
-      ),
-      current_name: z.string().min(1).optional().describe(
-        'Fresh connector name. Defaults to CCM.',
-      ),
-      old_name: z.string().min(1).optional().describe(
-        'Preserved old connector name. Defaults to CCM Old.',
-      ),
-      keep_workspace_visible: z.boolean().optional().describe(
-        'Keep the BMG workspace visible after the browser-side flow. Defaults to false.',
-      ),
-      environment_id: z.string().optional().describe(
-        'Windows Remote Worker with BMG installed. Omit to use the default environment.',
-      ),
-      yield_time_ms: z.number().int().min(0).max(30_000).optional(),
-      max_output_tokens: z.number().int().min(256).max(10_000).optional(),
-    },
-    handler: async (args) => {
-      return {
-        content: [{
-          type: 'text',
-          text: 'refresh_chatgpt_schema is temporarily unavailable while BMG browser interaction reliability is being repaired.',
-        }],
-        structuredContent: {
-          status: 'temporarily_unavailable',
-          capability: 'refresh_chatgpt_schema',
-          reason: 'bmg_browser_interaction_reliability',
-          implementation_retained: true,
-          browser_flow_started: false,
-          requested_mode: args.mode || 'refresh',
-        },
-      };
-    },
-  });
+
 
   registry.register({
     namespace: 'ccm-extra',
