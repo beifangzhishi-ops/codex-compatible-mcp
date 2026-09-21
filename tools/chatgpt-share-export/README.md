@@ -18,8 +18,10 @@ Pure CCM helper for exporting a public `chatgpt.com/share/...` conversation. It 
 Example:
 
 ```powershell
-python tools/chatgpt-share-export/export.py "https://chatgpt.com/share/..." --mode text --format md
+python tools/chatgpt-share-export/export.py "https://chatgpt.com/share/..." --mode text --format md --output conversation.md
 python tools/chatgpt-share-export/export.py "https://chatgpt.com/share/..." --mode full --format json --output conversation.full.json
 ```
+
+`--output` is required. It may be a bare filename resolved from the current working directory or an explicit relative/absolute path.
 
 Network fetching uses finite curl connect/overall timeouts and honors `HTTP_PROXY` / `HTTPS_PROXY` from the CCM environment.

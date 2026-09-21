@@ -146,8 +146,6 @@ def title_from_html(html):
 
 def main():
     ap=argparse.ArgumentParser(); ap.add_argument('share_url'); ap.add_argument('--output',required=True); ap.add_argument('--format',choices=['md','json'],default='md'); ap.add_argument('--branch',choices=['active','all'],default='active'); ap.add_argument('--mode',choices=['text','full'],default='text'); ap.add_argument('--json-summary',action='store_true'); a=ap.parse_args()
-    if len(Path(a.output).parts) < 2:
-        raise ValueError('output_path must include a directory. Refusing to write into the current working directory.')
     html=fetch(a.share_url); D=extract_payload(html); nodes=unpack(D); meta=conversation_meta(D); current_node=meta.get('current_node')
     ids=active_branch(nodes,current_node) if a.branch=='active' else sorted(nodes,key=lambda k:(message_record(k,nodes[k]) or {}).get('create_time') or 0)
     recs=[message_record(i,nodes[i]) for i in ids]; recs=[r for r in recs if r]
