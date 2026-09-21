@@ -181,7 +181,7 @@ test('ChatGPT schema refresh keeps CCM approval credentials local to the worker'
   assert.equal(/Invoke-Bmg[^\n]*approval_secret/.test(script), false);
 });
 
-test('ChatGPT schema refresh stays deferred and fail-closed pending host verification', async () => {
+test('ChatGPT schema refresh remains registered but is temporarily unavailable without side effects', async () => {
   const runtime = fakeRuntime();
   const registry = new ToolRegistry();
   registerSpecializedTools(registry, runtime);
@@ -191,12 +191,11 @@ test('ChatGPT schema refresh stays deferred and fail-closed pending host verific
     mcp_url: 'https://example.invalid/ccm/mcp',
   });
   assert.equal(result.isError, undefined);
-  assert.equal(result.structuredContent.environment_id, 'worker-b');
+  assert.equal(result.structuredContent.status, 'temporarily_unavailable');
   assert.equal(result.structuredContent.capability, 'refresh_chatgpt_schema');
-  assert.match(runtime.calls[0].cmd, /chatgpt-schema-refresh\\refresh\.ps1/);
-  assert.match(runtime.calls[0].cmd, /-Mode 'status'/);
-  assert.match(runtime.calls[0].cmd, /-McpUrl 'https:\/\/example\.invalid\/ccm\/mcp'/);
-  assert.equal(runtime.calls[0].cmd.includes('ccm-approval-secret'), false);
+  assert.equal(result.structuredContent.implementation_retained, true);
+  assert.equal(result.structuredContent.browser_flow_started, false);
+  assert.equal(runtime.calls.length, 0);
 });
 
 test('Bilibili deferred tool passes signed DASH URLs without exposing them in result metadata', async () => {

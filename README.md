@@ -1,4 +1,4 @@
-# CCM — Codex-Compatible MCP
+﻿# CCM — Codex-Compatible MCP
 
 CCM is a Codex-inspired execution harness for MCP clients. It focuses on a small, stable coding/execution surface, persistent process sessions, Remote Workers, native sandboxing, bounded tool output, patching, and image reads.
 
@@ -77,7 +77,7 @@ CCM ships optional Windows workflows ported from WCM without expanding the top-l
 
 - `ccm-extra.send_file` transfers an exact file from a selected CCM environment to the GPT client as an embedded resource for preview/download, without BMG or Library upload.
 - `ccm-extra.bmg_call` optionally delegates allowlisted browser operations to an independently installed Browser MCP Gateway (BMG) and its dedicated hidden GPT workspace.
-- `ccm-extra.refresh_chatgpt_schema` preserves the current ChatGPT CCM connector as `CCM Old`, creates/resumes a fresh `CCM` registration through BMG, and intentionally stops at `host_verification_required` until ChatGPT proves the exact fresh connector instance is callable.
+- `ccm-extra.refresh_chatgpt_schema` is temporarily unavailable while BMG browser interaction reliability is being repaired. The capability remains registered and returns an explicit `temporarily_unavailable` status without starting browser automation or modifying connector registrations. Its implementation is retained for later re-enablement.
 - `ccm-extra.quark_probe` checks a locally running, already logged-in Quark Cloud Drive desktop client.
 - `ccm-extra.quark_upload` submits one or more files through that local Quark desktop session and can wait for verified completion.
 - `ccm-extra.bilibili_download_dash` downloads signed DASH video/audio URLs obtained from an authenticated browser session and remuxes them with `ffmpeg -c copy`.
@@ -88,7 +88,7 @@ The Quark helper reuses only the login state of the local Quark desktop client a
 
 BMG is an optional external dependency of `ccm-extra.bmg_call`, not a dependency of CCM itself. If BMG is absent, that one deferred capability reports an installation/configuration error while CCM core and every other capability continue to work normally. Install BMG separately and either expose `bmgctl` on PATH or set `CCM_BMG_CLIENT` to its `bmgctl.cmd` executable. CCM never reads BMG's OAuth/token state, approval secret, or repository files directly.
 
-`ccm-extra.refresh_chatgpt_schema` has the same optional BMG dependency. It is deliberately fail-closed: seeing a new connector in ChatGPT or seeing CCM Old tools still work is not treated as proof that the fresh CCM is connected. The refresh workflow connects the fresh registration through the dedicated BMG workspace and, when CCM OAuth consent is reached, resolves the approval secret from CCM's own configuration and posts it locally only to the validated CCM consent endpoint. The secret is not sent as a BMG argument, echoed in output, or written to logs. Final verification must be performed by the outer ChatGPT host against the fresh connector namespace/app instance with a successful read-only tool call. The workflow never deletes `CCM Old`.
+`ccm-extra.refresh_chatgpt_schema` currently short-circuits before BMG startup or any ChatGPT connector mutation. The retained implementation remains fail-closed and will be re-enabled only after the BMG browser interaction path is verified stable again.
 
 ## Requirements
 

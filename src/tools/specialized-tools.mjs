@@ -361,11 +361,9 @@ export function registerSpecializedTools(registry, runtime) {
       localSoftware: ['BMG (optional)'],
     },
     description: [
-      'Refresh ChatGPT\'s CCM connector registration so ChatGPT can rediscover the current CCM MCP schema.',
-      'The workflow preserves the old registration as CCM Old, creates a fresh CCM registration, connects the fresh account through the dedicated BMG workspace, completes CCM OAuth consent locally, and never deletes CCM Old.',
-      'This tool is fail-closed: ChatGPT UI state is not sufficient to declare success. The final state is host_verification_required until the outer ChatGPT host exposes the fresh CCM namespace/app instance and successfully calls a read-only tool from that exact new instance.',
-      'The CCM approval secret is resolved from CCM\'s own configuration and is submitted only by the local worker directly to the validated CCM consent endpoint; it is not passed through BMG arguments or returned to the model.',
-      'BMG is optional for CCM overall. If BMG is absent, only this capability fails; all other CCM tools remain usable.',
+      'TEMPORARILY UNAVAILABLE: ChatGPT CCM connector rebuild/refresh is paused while BMG browser interaction reliability is being repaired.',
+      'The capability remains registered so callers receive an explicit unavailable status instead of silently losing the tool. It does not start BMG, modify connector registrations, rename CCM, create a new connector, or run OAuth while paused.',
+      'The implementation is retained for later re-enablement after BMG runtime verification. CCM core and other specialized tools remain usable.',
     ].join('\n\n'),
     inputSchema: {
       mode: z.enum(['refresh', 'status']).optional().describe(
@@ -390,27 +388,20 @@ export function registerSpecializedTools(registry, runtime) {
       max_output_tokens: z.number().int().min(256).max(10_000).optional(),
     },
     handler: async (args) => {
-      try {
-        const environment = resolveWindowsEnvironment(
-          runtime,
-          args.environment_id,
-        );
-        const command = [
-          toolPath('tools\\chatgpt-schema-refresh\\refresh.ps1'),
-          '& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $tool' +
-            ' -Mode ' + psQuote(args.mode || 'refresh') +
-            (args.mcp_url ? ' -McpUrl ' + psQuote(args.mcp_url) : '') +
-            ' -CurrentName ' + psQuote(args.current_name || 'CCM') +
-            ' -OldName ' + psQuote(args.old_name || 'CCM Old') +
-            (args.keep_workspace_visible ? ' -KeepWorkspaceVisible' : ''),
-        ].join('; ');
-        return execResult(await run(runtime, args, command), {
-          environment_id: environment.id,
+      return {
+        content: [{
+          type: 'text',
+          text: 'refresh_chatgpt_schema is temporarily unavailable while BMG browser interaction reliability is being repaired.',
+        }],
+        structuredContent: {
+          status: 'temporarily_unavailable',
           capability: 'refresh_chatgpt_schema',
-        });
-      } catch (error) {
-        return toolError(error);
-      }
+          reason: 'bmg_browser_interaction_reliability',
+          implementation_retained: true,
+          browser_flow_started: false,
+          requested_mode: args.mode || 'refresh',
+        },
+      };
     },
   });
 
