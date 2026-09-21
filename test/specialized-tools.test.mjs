@@ -1,4 +1,4 @@
-import test from 'node:test';
+﻿import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { registerSpecializedTools } from '../src/tools/specialized-tools.mjs';
@@ -59,7 +59,7 @@ test('specialized WCM-derived tools are deferred and searchable', () => {
       'ccm-extra.bmg_call',
       'ccm-extra.chatgpt_share_export',
       'ccm-extra.gmail',
-      'ccm-extra.one_time_approval_link',
+      'ccm-extra.oauth_key_link',
       'ccm-extra.quark_probe',
       'ccm-extra.quark_upload',
       'ccm-extra.refresh_chatgpt_schema',
@@ -201,7 +201,7 @@ test('BMG adapter allowlists trusted page refs and computer input for schema ref
   assert.ok(schema.tool.options.includes('chrome_computer'));
 });
 
-test('one-time approval link returns the MCP endpoint reminder without exposing the secret', async () => {
+test('OAuth key link returns the MCP endpoint reminder without exposing the secret', async () => {
   const runtime = fakeRuntime();
   const registry = new ToolRegistry();
   registerSpecializedTools(registry, runtime);
@@ -213,7 +213,7 @@ test('one-time approval link returns the MCP endpoint reminder without exposing 
       exit_code: 0,
     };
   };
-  const result = await registry.get('ccm-extra.one_time_approval_link').handler({
+  const result = await registry.get('ccm-extra.oauth_key_link').handler({
     environment_id: 'worker-b',
     ttl_seconds: 180,
   });

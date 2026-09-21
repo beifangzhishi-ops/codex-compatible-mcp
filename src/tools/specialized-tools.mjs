@@ -1,4 +1,4 @@
-import * as z from 'zod/v4';
+﻿import * as z from 'zod/v4';
 
 function toolError(error) {
   return {
@@ -180,14 +180,14 @@ export function registerSpecializedTools(registry, runtime) {
     description: [
       'Export a public ChatGPT Share conversation directly from its chatgpt.com/share URL without BMG or browser automation.',
       'Fetches the Share HTML, decodes the indexed React Router payload, reconstructs the active parent/child branch, and exports visible user/assistant messages to Markdown or JSON.',
-      'Use branch=all for forensic/debug export of all mapping nodes. Use mode=text for readable正文 only, or mode=full to preserve every available message record and tool/internal payload exposed by the Share data.',
+      'Use branch=all for forensic/debug export of all mapping nodes. Use mode=text for readable姝ｆ枃 only, or mode=full to preserve every available message record and tool/internal payload exposed by the Share data.',
     ].join('\n\n'),
     inputSchema: {
       share_url: z.string().url().describe('Public https://chatgpt.com/share/... URL.'),
       output_path: z.string().min(1).optional().describe('Output path on the selected CCM environment.'),
       format: z.enum(['md', 'json']).optional().describe('Export format. Defaults to md.'),
       branch: z.enum(['active', 'all']).optional().describe('active reconstructs the final branch; all exports every mapping node.'),
-      mode: z.enum(['text', 'full']).optional().describe('text exports visible user/assistant正文 only; full preserves all available branch records including system/tool messages and message payload metadata. Defaults to text.'),
+      mode: z.enum(['text', 'full']).optional().describe('text exports visible user/assistant姝ｆ枃 only; full preserves all available branch records including system/tool messages and message payload metadata. Defaults to text.'),
       proxy: z.string().url().optional().describe('Optional HTTP(S) proxy URL, for example http://127.0.0.1:7890.'),
       environment_id: z.string().optional().describe('CCM environment used for network fetch and output.'),
       yield_time_ms: z.number().int().min(0).max(30_000).optional(),
@@ -441,7 +441,7 @@ export function registerSpecializedTools(registry, runtime) {
 
   registry.register({
     namespace: 'ccm-extra',
-    name: 'one_time_approval_link',
+    name: 'oauth_key_link',
     provider: 'ccm-specialized',
     provenance: 'ccm-local-one-time-approval',
     surfaces: { deferred: true, codeMode: true },
@@ -472,7 +472,7 @@ export function registerSpecializedTools(registry, runtime) {
         const result = await run(runtime, args, command);
         const oneTimeUrl = String(result.output || '').trim().split(/\r?\n/).filter(Boolean).at(-1);
         if (!/^https:\/\//i.test(oneTimeUrl || '')) {
-          throw new Error('CCM one-time approval helper did not return an HTTPS URL.');
+          throw new Error('CCM OAuth key helper did not return an HTTPS URL.');
         }
         const mcpUrl = oneTimeUrl.replace(/\/ccm-once\/.*$/, '/ccm/mcp');
         return {
@@ -487,7 +487,7 @@ export function registerSpecializedTools(registry, runtime) {
           }],
           structuredContent: {
             environment_id: environment.id,
-            capability: 'one_time_approval_link',
+            capability: 'oauth_key_link',
             one_time_url: oneTimeUrl,
             expires_in_seconds: ttl,
             mcp_url: mcpUrl,
