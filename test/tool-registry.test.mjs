@@ -313,10 +313,12 @@ test('exec rejects unsafe parallelization and reports live nested sessions clear
     yield_time_ms: 1000,
   });
   assert.equal(live.isError, undefined);
-  assert.equal(live.structuredContent.state, 'completed');
+  assert.equal(live.structuredContent.state, 'awaiting_io');
   assert.equal(live.structuredContent.live_sessions[0].session_id, 77);
   assert.equal(live.structuredContent.next_operation, 'write_stdin');
   assert.match(live.structuredContent.message, /still running/);
+
+  assert.notEqual(live.structuredContent.state, 'completed');
 });
 
 test('wait defaults to a short poll and rejects waits above 30 seconds', async () => {

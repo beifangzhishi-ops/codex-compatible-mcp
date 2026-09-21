@@ -69,7 +69,7 @@ Convenience states such as Direct, Deferred, CodeModeOnly, DirectModelOnly, Defe
 
 The current stable direct MCP surface contains six execution/approval/editing tools plus the three architecture tools above. Registering a new deferred capability does not change `tools/list`; it becomes discoverable immediately through `tool_search` and callable through `exec`.
 
-CCM deliberately does not embed a second JavaScript interpreter for Code Mode. The host application remains responsible for loops, branching, and data processing. CCM's `exec/wait` pair is a bounded structured dispatcher over ToolRegistry capabilities. If a nested `exec_command` finishes the outer cell while leaving a live process session, the result explicitly directs the caller to continue that session with `write_stdin`.
+CCM deliberately does not embed a second JavaScript interpreter for Code Mode. The host application remains responsible for loops, branching, and data processing. CCM's `exec/wait` pair is a bounded structured dispatcher over ToolRegistry capabilities. `state=completed` is terminal. If nested dispatch has finished but an `exec_command` leaves a live process session, CCM returns `state=awaiting_io` with `next_operation=write_stdin` until those process sessions are continued separately.
 
 ### Bundled specialized deferred capabilities
 

@@ -190,9 +190,14 @@ export class CodeModeManager {
     const liveSessions = job.events
       .map(liveSessionFrom)
       .filter(Boolean);
+    const state = running
+      ? 'running'
+      : liveSessions.length > 0
+        ? 'awaiting_io'
+        : 'completed';
 
     const payload = {
-      state: running ? 'running' : 'completed',
+      state,
       has_errors: job.hasErrors,
       calls: newEvents,
       live_sessions: liveSessions,
