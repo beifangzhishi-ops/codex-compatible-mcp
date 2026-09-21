@@ -71,6 +71,21 @@ The current stable direct MCP surface contains six execution/approval/editing to
 
 CCM deliberately does not embed a second JavaScript interpreter for Code Mode. The host application remains responsible for loops, branching, and data processing. CCM's `exec/wait` pair is a bounded structured dispatcher over ToolRegistry capabilities. `state=completed` is terminal. If nested dispatch has finished but an `exec_command` leaves a live process session, CCM returns `state=awaiting_io` with `next_operation=write_stdin` until those process sessions are continued separately.
 
+### ChatGPT Share conversation export
+
+`ccm-extra.chatgpt_share_export` exports public ChatGPT Share conversations without BMG or browser automation.
+
+Supported features:
+
+- `mode=text`: readable user/assistant conversation export.
+- `mode=full`: preserves all message records exposed by the Share payload, including system/tool records and message metadata.
+- ranch=active: follows the current Share branch when available.
+- ranch=all: exports all mapping nodes for debugging or archival.
+- Markdown and JSON output formats.
+- Non-text messages such as image-only messages are retained rather than silently dropped.
+
+The exporter only recovers information present in the public Share payload. Information removed upstream by ChatGPT is not recoverable.
+
 ### Bundled specialized deferred capabilities
 
 CCM ships optional Windows workflows ported from WCM without expanding the top-level MCP schema:
