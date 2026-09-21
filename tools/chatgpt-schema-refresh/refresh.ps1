@@ -23,18 +23,61 @@ function Resolve-BmgClient {
     throw 'BMG is not installed or configured. Install Browser MCP Gateway and expose bmgctl on PATH or set CCM_BMG_CLIENT. Other CCM tools do not require BMG.'
 }
 
-function Resolve-McpUrl([string]$Value) {
-    if($Value){ return $Value }
-    if($env:CCM_RESOURCE){ return $env:CCM_RESOURCE }
-    $repoRoot=Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+function Resolve-CcmRoot {
+    return Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+}
+
+function ConvertFrom-CcmEnvValue([string]$Value) {
+    $text=$Value.Trim()
+    if($text.Length -lt 2){ return $text }
+    if($text.StartsWith('"') -and $text.EndsWith('"')){
+        try { return [string]($text | ConvertFrom-Json) } catch { return $text.Substring(1,$text.Length-2) }
+    }
+    if($text.StartsWith("'") -and $text.EndsWith("'")){
+        return $text.Substring(1,$text.Length-2)
+    }
+    return $text
+}
+
+function Resolve-CcmConfigValue([string]$Name,[string]$Default='') {
+    $environmentValue=[Environment]::GetEnvironmentVariable($Name)
+    if($environmentValue){ return $environmentValue }
+    $repoRoot=Resolve-CcmRoot
     $envFile=Join-Path $repoRoot 'config\ccm.env'
     if(Test-Path -LiteralPath $envFile){
+        $pattern='^' + [regex]::Escape($Name) + '\s*='
         $line=Get-Content -LiteralPath $envFile |
-            Where-Object { $_ -match '^CCM_RESOURCE=' } |
+            ForEach-Object { $_.Trim() } |
+            Where-Object { $_ -match $pattern } |
             Select-Object -First 1
-        if($line){ return ($line -replace '^CCM_RESOURCE=','').Trim() }
+        if($line){
+            return ConvertFrom-CcmEnvValue ($line.Substring($line.IndexOf('=') + 1))
+        }
     }
+    return $Default
+}
+
+function Resolve-McpUrl([string]$Value) {
+    if($Value){ return $Value }
+    $configured=Resolve-CcmConfigValue 'CCM_RESOURCE'
+    if($configured){ return $configured }
     throw 'MCP URL was not supplied and CCM_RESOURCE could not be resolved.'
+}
+
+function Resolve-ApprovalSecret {
+    $repoRoot=Resolve-CcmRoot
+    $configured=Resolve-CcmConfigValue 'CCM_APPROVAL_SECRET_FILE' '.state/ccm-approval-secret.txt'
+    $path=if([IO.Path]::IsPathRooted($configured)){
+        [IO.Path]::GetFullPath($configured)
+    } else {
+        [IO.Path]::GetFullPath((Join-Path $repoRoot $configured))
+    }
+    if(-not (Test-Path -LiteralPath $path)){
+        throw 'CCM approval secret file is unavailable. Configure CCM_APPROVAL_SECRET_FILE or initialize CCM first.'
+    }
+    $secret=[IO.File]::ReadAllText($path,[Text.Encoding]::UTF8).Trim()
+    if($secret.Length -lt 16){ throw 'CCM approval secret is missing or too short.' }
+    return $secret
 }
 
 $script:BmgClient=Resolve-BmgClient
@@ -106,6 +149,28 @@ function Click([string]$Selector,[bool]$WaitForNavigation=$false) {
     })
 }
 
+function Click-Element([object]$Element,[bool]$WaitForNavigation=$false) {
+    if($Element.selector){
+        try {
+            Click ([string]$Element.selector) $WaitForNavigation
+            return
+        } catch {
+            if($null -eq $Element.coordinates -or
+               $null -eq $Element.coordinates.x -or
+               $null -eq $Element.coordinates.y){
+                throw
+            }
+        }
+    }
+    [void](Invoke-Bmg 'chrome_click_element' @{
+        coordinates=@{
+            x=[double]$Element.coordinates.x
+            y=[double]$Element.coordinates.y
+        }
+        waitForNavigation=$WaitForNavigation
+    })
+}
+
 function Fill([string]$Selector,[string]$Value) {
     [void](Invoke-Bmg 'chrome_fill_or_select' @{selector=$Selector;value=$Value})
 }
@@ -121,6 +186,104 @@ function Current-Tab {
         foreach($tab in @($window.tabs)){ return $tab }
     }
     return $null
+}
+
+function Read-PageContent {
+    $value=Unwrap-Bmg (Invoke-Bmg 'chrome_read_page' @{})
+    if($value -is [string]){ return [string]$value }
+    if($null -ne $value.pageContent){ return [string]$value.pageContent }
+    return ($value | ConvertTo-Json -Depth 12 -Compress)
+}
+
+function Find-ButtonRef([string[]]$Labels) {
+    $lines=(Read-PageContent) -split "\r?\n"
+    for($i=0;$i -lt $lines.Count;$i++){
+        $line=[string]$lines[$i]
+        if($line -notmatch '- button(?: "[^"]*")? \[ref=(ref_\d+)\]'){ continue }
+        $ref=$Matches[1]
+        $end=[Math]::Min($lines.Count-1,$i+3)
+        $window=($lines[$i..$end] -join [Environment]::NewLine)
+        foreach($label in $Labels){
+            if($window.Contains('"' + $label + '"')){ return $ref }
+        }
+    }
+    return $null
+}
+
+function Try-TrustedClickButton([string[]]$Labels) {
+    $ref=Find-ButtonRef $Labels
+    if(-not $ref){ return $false }
+    [void](Unwrap-Bmg (Invoke-Bmg 'chrome_computer' @{
+        action='left_click'
+        ref=$ref
+        background=$true
+    }))
+    return $true
+}
+
+function Complete-CcmConsent([string]$ConsentUrl) {
+    $consent=[Uri]$ConsentUrl
+    $mcp=[Uri]$McpUrl
+    if($consent.Scheme -ne 'https' -or
+       $consent.Scheme -ne $mcp.Scheme -or
+       $consent.Host -ne $mcp.Host -or
+       $consent.Port -ne $mcp.Port -or
+       $consent.AbsolutePath -ne '/ccm/oauth/consent'){
+        throw 'Refusing to send the CCM approval secret to an unexpected consent URL.'
+    }
+
+    Add-Type -AssemblyName System.Web
+    Add-Type -AssemblyName System.Net.Http
+    $query=[System.Web.HttpUtility]::ParseQueryString($consent.Query)
+    $redirectRaw=$query['redirect_uri']
+    if(-not $redirectRaw){ throw 'OAuth consent URL does not contain redirect_uri.' }
+    $redirect=[Uri]$redirectRaw
+    if($redirect.Scheme -ne 'https'){ throw 'OAuth redirect_uri must use HTTPS.' }
+
+    $pairs=New-Object 'System.Collections.Generic.List[System.Collections.Generic.KeyValuePair[string,string]]'
+    foreach($key in $query.AllKeys){
+        if($null -eq $key){ continue }
+        $pairs.Add((New-Object 'System.Collections.Generic.KeyValuePair[string,string]'($key,[string]$query[$key])))
+    }
+    $secret=Resolve-ApprovalSecret
+    try {
+        $pairs.Add((New-Object 'System.Collections.Generic.KeyValuePair[string,string]'('approval_secret',$secret)))
+        $handler=New-Object System.Net.Http.HttpClientHandler
+        $handler.AllowAutoRedirect=$false
+        $client=New-Object System.Net.Http.HttpClient($handler)
+        try {
+            $formBody=(@($pairs) | ForEach-Object {
+                [Uri]::EscapeDataString([string]$_.Key) + '=' +
+                [Uri]::EscapeDataString([string]$_.Value)
+            }) -join '&'
+            $content=[System.Net.Http.StringContent]::new(
+                $formBody,
+                [Text.Encoding]::UTF8,
+                'application/x-www-form-urlencoded'
+            )
+            $response=$client.PostAsync($consent,$content).GetAwaiter().GetResult()
+            if([int]$response.StatusCode -lt 300 -or [int]$response.StatusCode -ge 400){
+                throw ('CCM OAuth consent returned HTTP ' + [int]$response.StatusCode + '.')
+            }
+            $location=$response.Headers.Location
+            if($null -eq $location){ throw 'CCM OAuth consent did not return a redirect.' }
+            if(-not $location.IsAbsoluteUri){ $location=New-Object Uri($consent,$location) }
+            if($location.Scheme -ne $redirect.Scheme -or
+               $location.Host -ne $redirect.Host -or
+               $location.Port -ne $redirect.Port -or
+               $location.AbsolutePath -ne $redirect.AbsolutePath){
+                throw 'CCM OAuth consent returned an unexpected callback location.'
+            }
+            Navigate $location.AbsoluteUri
+            Start-Sleep -Seconds 2
+        } finally {
+            if($null -ne $client){ $client.Dispose() }
+            if($null -ne $handler){ $handler.Dispose() }
+        }
+    } finally {
+        $secret=$null
+        $pairs=$null
+    }
 }
 
 function Page-Text {
@@ -216,13 +379,41 @@ function Create-Connector {
 }
 
 function Start-Connection([object]$Connector) {
-    Click $Connector.selector
+    Click-Element $Connector
     Start-Sleep -Milliseconds 700
     $state=Connector-UiState
     if($state -eq 'connected'){ return 'ui_connected' }
     if($state -eq 'unknown'){ return 'unknown' }
-    [void](Invoke-Bmg 'bmg_show_workspace' @{})
-    return 'manual_connection_required'
+    $connect=Find-ExactButton @(
+        '连接另一个账户',
+        'Connect another account',
+        '连接',
+        'Connect'
+    )
+    if(-not $connect){ return 'unknown' }
+    if(-not (Try-TrustedClickButton @(
+        '连接另一个账户',
+        'Connect another account',
+        '连接',
+        'Connect'
+    ))){
+        Click-Element $connect
+    }
+    Start-Sleep -Milliseconds 500
+    [void](Try-TrustedClickButton @(
+        ('使用 ' + $CurrentName + ' 登录'),
+        ('Use ' + $CurrentName + ' to sign in'),
+        ('Sign in with ' + $CurrentName)
+    ))
+    for($i=0;$i -lt 10;$i++){
+        Start-Sleep -Milliseconds 500
+        $tab=Current-Tab
+        if($tab -and ([string]$tab.url) -match '/ccm/oauth/consent'){
+            Complete-CcmConsent ([string]$tab.url)
+            return 'oauth_completed'
+        }
+    }
+    return 'connection_started'
 }
 
 function Emit([string]$State,[hashtable]$Extra=@{}) {
@@ -237,6 +428,11 @@ function Emit([string]$State,[hashtable]$Extra=@{}) {
     }
     foreach($key in $Extra.Keys){ $value[$key]=$Extra[$key] }
     $value | ConvertTo-Json -Depth 12 -Compress
+}
+
+$resumeTab=Current-Tab
+if($resumeTab -and ([string]$resumeTab.url) -match '/ccm/oauth/consent'){
+    Complete-CcmConsent ([string]$resumeTab.url)
 }
 
 Plugin-Settings
@@ -271,14 +467,9 @@ if(-not $current -and $old){
     Create-Connector
     $tab=Current-Tab
     if($tab -and ([string]$tab.url) -match '/oauth/consent'){
-        [void](Invoke-Bmg 'bmg_show_workspace' @{})
-        Emit 'authorization_required' @{
-            current_present=$false
-            old_present=$true
-            host_verification_required=$true
-            message='Fresh CCM registration was created. Complete OAuth in the visible BMG workspace, then run this tool again.'
-        }
-        exit 0
+        Complete-CcmConsent ([string]$tab.url)
+        Plugin-Settings
+        $current=Find-Installed $CurrentName
     }
     Plugin-Settings
     $current=Find-Installed $CurrentName
@@ -305,24 +496,43 @@ if(-not $current){
 }
 
 $connection=Start-Connection $current
-if($connection -eq 'authorization_required'){
-    Emit 'authorization_required' @{
-        current_present=$true
-        old_present=($null -ne $old)
-        host_verification_required=$true
-        message='OAuth consent is waiting in the visible BMG workspace. Complete it, then run this tool again.'
-    }
-    exit 0
-}
-if($connection -in @('manual_connection_required','unknown')){
+if($connection -in @('connection_started','unknown')){
     Emit 'connection_required' @{
         current_present=$true
         old_present=($null -ne $old)
         ui_connection_state=$connection
         host_verification_required=$true
-        message='The fresh connector is not connected yet. The BMG workspace has been shown for the required trusted Connect/OAuth interaction. Complete the connection, then run this tool again. Do not treat CCM Old tool availability as proof for the fresh CCM.'
+        message='The fresh connector is not yet proven connected. Do not treat CCM Old tool availability as proof for the fresh CCM.'
     }
     exit 0
+}
+
+if($connection -eq 'oauth_completed'){
+    Plugin-Settings
+    $current=Find-Installed $CurrentName
+    if(-not $current){
+        Emit 'connection_pending' @{
+            current_present=$false
+            old_present=($null -ne $old)
+            host_verification_required=$true
+            message='OAuth completed, but the fresh CCM registration is not visible yet. Run the tool again to resume.'
+        }
+        exit 0
+    }
+    Click-Element $current
+    Start-Sleep -Milliseconds 700
+    $uiState=Connector-UiState
+    if($uiState -ne 'connected'){
+        Emit 'connection_pending' @{
+            current_present=$true
+            old_present=($null -ne $old)
+            ui_connection_state=$uiState
+            host_verification_required=$true
+            message='OAuth completed, but ChatGPT UI has not yet confirmed the fresh CCM account connection.'
+        }
+        exit 0
+    }
+    $connection='ui_connected'
 }
 
 if(-not $KeepWorkspaceVisible){ [void](Invoke-Bmg 'bmg_hide_workspace' @{}) }

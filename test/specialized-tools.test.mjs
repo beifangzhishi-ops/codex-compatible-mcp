@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 import { registerSpecializedTools } from '../src/tools/specialized-tools.mjs';
 import { ToolRegistry } from '../src/tools/tool-registry.mjs';
 
@@ -157,6 +158,27 @@ test('BMG adapter stays optional and dispatches through the external bmgctl clie
   const encoded = Buffer.from(JSON.stringify(browserArgs), 'utf8').toString('base64');
   assert.ok(runtime.calls[0].cmd.includes(encoded));
   assert.equal(runtime.calls[0].cmd.includes('https://chatgpt.com'), false);
+});
+
+test('BMG adapter allowlists trusted page refs and computer input for schema refresh', () => {
+  const runtime = fakeRuntime();
+  const registry = new ToolRegistry();
+  registerSpecializedTools(registry, runtime);
+  const schema = registry.get('ccm-extra.bmg_call').inputSchema;
+  assert.ok(schema.tool.options.includes('chrome_read_page'));
+  assert.ok(schema.tool.options.includes('chrome_computer'));
+});
+
+test('ChatGPT schema refresh keeps CCM approval credentials local to the worker', async () => {
+  const script = await fs.readFile(
+    new URL('../tools/chatgpt-schema-refresh/refresh.ps1', import.meta.url),
+    'utf8',
+  );
+  assert.match(script, /CCM_APPROVAL_SECRET_FILE/);
+  assert.match(script, /\/ccm\/oauth\/consent/);
+  assert.match(script, /PostAsync\(\$consent,\$content\)/);
+  assert.match(script, /Refusing to send the CCM approval secret to an unexpected consent URL/);
+  assert.equal(/Invoke-Bmg[^\n]*approval_secret/.test(script), false);
 });
 
 test('ChatGPT schema refresh stays deferred and fail-closed pending host verification', async () => {
