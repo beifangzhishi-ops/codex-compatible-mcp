@@ -227,12 +227,13 @@ export function registerSpecializedTools(registry, runtime) {
     environmentRequirements: {
       platform: 'windows',
       capabilities: ['exec'],
-      localSoftware: ['Python', 'Google Gmail API Python client'],
+      localSoftware: ['Python', 'Google OAuth Python libraries', 'requests'],
     },
     description: [
       'Access Gmail through the official Gmail API using OAuth credentials stored on the selected CCM worker.',
       'Supports profile lookup, message search, and message reads. Authentication material stays on the worker and is never returned by this tool.',
       'Configure CCM_GMAIL_CREDENTIALS and CCM_GMAIL_TOKEN, or place credentials.json and token.json under %USERPROFILE%\\.ccm\\gmail.',
+      'For restricted networks, set CCM_GMAIL_PROXY or standard HTTP(S)_PROXY variables; the bundled helper can also reuse RCLONE_HTTP_PROXY as a fallback.',
     ].join('\n\n'),
     inputSchema: {
       action: z.enum(['profile', 'search', 'read']),
