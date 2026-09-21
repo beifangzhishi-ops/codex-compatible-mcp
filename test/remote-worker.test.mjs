@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import { EventEmitter } from 'node:events';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +9,7 @@ import { createControllerRuntime } from '../src/controller/runtime.mjs';
 import { createWorkerRuntime } from '../src/runtime/index.mjs';
 import { EnvironmentRegistry } from '../src/runtime/environment-registry.mjs';
 import { RemoteWorkerClient } from '../src/worker/remote-worker-client.mjs';
+import { RemoteProcessManager } from '../src/runtime/remote-process-manager.mjs';
 
 const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 
@@ -81,6 +83,48 @@ test('Controller routes execution across Remote Workers', async () => {
     workerA.close();
     workerB.close();
     await controller.close();
+  }
+});
+
+test('Controller caps initial Remote Worker exec waits at five seconds', async () => {
+  const registry = new EnvironmentRegistry({ resolvePaths: false });
+  registry.register({
+    id: 'worker-cap',
+    platform: 'windows',
+    cwd: 'C:\\workspace',
+    workspaceRoots: ['C:\\workspace'],
+    permissionProfile: 'full-access',
+    backend: 'remote-worker',
+  });
+
+  class FakeWorkerHub extends EventEmitter {
+    async call(environmentId, method, args, options) {
+      assert.equal(environmentId, 'worker-cap');
+      assert.equal(method, 'exec_command');
+      assert.equal(args.yield_time_ms, 5_000);
+      assert.equal(options.timeoutMs, 15_000);
+      return {
+        chunk_id: 'fake',
+        wall_time_seconds: 5,
+        output: '',
+        session_id: 42,
+      };
+    }
+  }
+
+  const manager = new RemoteProcessManager({
+    environmentRegistry: registry,
+    workerHub: new FakeWorkerHub(),
+  });
+  try {
+    const result = await manager.execCommand({
+      environment_id: 'worker-cap',
+      cmd: 'long-running command',
+      yield_time_ms: 30_000,
+    });
+    assert.equal(typeof result.session_id, 'number');
+  } finally {
+    await manager.close();
   }
 });
 

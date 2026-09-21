@@ -120,7 +120,7 @@ export function registerCoreTools(registry, runtime) {
       cmd: z.string().min(1).describe('Shell command to execute.'),
       workdir: z.string().optional().describe('Working directory for the command. Defaults to the environment cwd.'),
       tty: z.boolean().optional().describe('True allocates a PTY; false or omitted uses plain pipes.'),
-      yield_time_ms: z.number().int().nonnegative().optional().describe('Wait before yielding output. Defaults to 2000 ms. Windows effective range is 1000-30000 ms.'),
+      yield_time_ms: z.number().int().max(5_000).nonnegative().optional().describe('Wait before the initial command call yields output or a session. Defaults to 2000 ms. Initial exec waits cap at 5000 ms; long-running commands continue in a session and should be resumed with write_stdin.'),
       max_output_tokens: z.number().int().positive().optional().describe('Output token budget. Defaults to 10000 tokens.'),
       shell: z.string().optional().describe("Shell binary to launch. Defaults to the environment's default shell."),
       environment_id: z.string().optional().describe('Environment id. Omit to use the primary environment.'),

@@ -1,3 +1,12 @@
+const DEFAULT_EXEC_YIELD_TIME_MS = 2_000;
+const MAX_INITIAL_EXEC_YIELD_TIME_MS = 5_000;
+
+function clampInitialExecYield(milliseconds) {
+  const value = Number(milliseconds ?? DEFAULT_EXEC_YIELD_TIME_MS);
+  if (!Number.isFinite(value)) return DEFAULT_EXEC_YIELD_TIME_MS;
+  return Math.max(0, Math.min(MAX_INITIAL_EXEC_YIELD_TIME_MS, value));
+}
+
 export class RemoteProcessManager {
   constructor({ environmentRegistry, workerHub, approvalManager = null }) {
     if (!environmentRegistry || !workerHub) {
@@ -31,7 +40,12 @@ export class RemoteProcessManager {
 
   async execCommand(args) {
     const environment = this.environmentRegistry.resolve(args.environment_id);
-    let forwardedArgs = { ...args, environment_id: environment.id };
+    const requestedYieldMs = clampInitialExecYield(args.yield_time_ms);
+    let forwardedArgs = {
+      ...args,
+      environment_id: environment.id,
+      yield_time_ms: requestedYieldMs,
+    };
     const wantsEscalation = args.sandbox_permissions === 'require_escalated';
 
     if (args.approval_id && !wantsEscalation) {
@@ -78,8 +92,8 @@ export class RemoteProcessManager {
     }
 
     const timeoutMs = Math.max(
-      35_000,
-      Number(args.yield_time_ms ?? 2_000) + 10_000,
+      15_000,
+      requestedYieldMs + 10_000,
     );
     const result = await this.workerHub.call(
       environment.id,

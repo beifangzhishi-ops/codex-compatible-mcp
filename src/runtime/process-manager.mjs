@@ -10,6 +10,7 @@ import { resolvePermissionProfile } from './sandbox/sandbox-policy.mjs';
 const MIN_YIELD_TIME_MS = 250;
 const DEFAULT_EXEC_YIELD_TIME_MS = 2_000;
 const WINDOWS_INITIAL_EXEC_YIELD_TIME_FLOOR_MS = 1_000;
+const MAX_INITIAL_EXEC_YIELD_TIME_MS = 5_000;
 const MAX_YIELD_TIME_MS = 30_000;
 const DEFAULT_EMPTY_YIELD_TIME_MS = 1_000;
 const MIN_EMPTY_YIELD_TIME_MS = 250;
@@ -21,7 +22,7 @@ function clampExecYield(milliseconds, platform) {
   const min = platform === 'windows'
     ? WINDOWS_INITIAL_EXEC_YIELD_TIME_FLOOR_MS
     : MIN_YIELD_TIME_MS;
-  return Math.min(MAX_YIELD_TIME_MS, Math.max(min, value));
+  return Math.min(MAX_INITIAL_EXEC_YIELD_TIME_MS, Math.max(min, value));
 }
 
 function clampWriteYield(milliseconds, empty) {

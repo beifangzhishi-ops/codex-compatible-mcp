@@ -109,6 +109,33 @@ test('long commands yield an integer session id and resume with write_stdin', as
   }
 });
 
+test('initial exec wait is capped even when callers request 30 seconds', async () => {
+  const runtime = runtimeFor();
+  try {
+    const startedAt = Date.now();
+    const first = await runtime.processManager.execCommand({
+      cmd: 'Start-Sleep -Seconds 6; Write-Output capped',
+      yield_time_ms: 30_000,
+    });
+    const elapsed = Date.now() - startedAt;
+    assert.equal(typeof first.session_id, 'number');
+    assert.ok(
+      elapsed >= 4_000 && elapsed < 5_800,
+      'initial exec should cap the requested 30 second wait at about 5 seconds',
+    );
+
+    const second = await runtime.processManager.writeStdin({
+      session_id: first.session_id,
+      chars: '',
+      yield_time_ms: 5_000,
+    });
+    assert.equal(second.exit_code, 0);
+    assert.match(first.output + second.output, /capped/);
+  } finally {
+    runtime.close();
+  }
+});
+
 test('empty write_stdin polling returns promptly by default', async () => {
   const runtime = runtimeFor();
   try {
