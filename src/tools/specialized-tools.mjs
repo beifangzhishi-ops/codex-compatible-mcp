@@ -339,6 +339,81 @@ export function registerSpecializedTools(registry, runtime) {
 
   registry.register({
     namespace: 'ccm-extra',
+    name: 'refresh_chatgpt_schema',
+    provider: 'ccm-external-adapter',
+    provenance: 'ccm-bmg-chatgpt-schema-refresh',
+    surfaces: { deferred: true, codeMode: true },
+    tags: [
+      'bmg',
+      'chatgpt',
+      'plugin',
+      'connector',
+      'schema',
+      'oauth',
+      'refresh',
+      'windows',
+    ],
+    environmentRequirements: {
+      platform: 'windows',
+      capabilities: ['exec'],
+      localSoftware: ['BMG (optional)'],
+    },
+    description: [
+      'Refresh ChatGPT\'s CCM connector registration so ChatGPT can rediscover the current CCM MCP schema.',
+      'The workflow preserves the old registration as CCM Old, creates a fresh CCM registration, opens the BMG workspace for the trusted Connect/OAuth checkpoint, and never deletes CCM Old.',
+      'This tool is fail-closed: ChatGPT UI state is not sufficient to declare success. The final state is host_verification_required until the outer ChatGPT host exposes the fresh CCM namespace/app instance and successfully calls a read-only tool from that exact new instance.',
+      'The Connect/OAuth user gesture is intentionally not faked with DOM events. After that checkpoint, rerun the tool to continue to host verification.',
+      'BMG is optional for CCM overall. If BMG is absent, only this capability fails; all other CCM tools remain usable.',
+    ].join('\n\n'),
+    inputSchema: {
+      mode: z.enum(['refresh', 'status']).optional().describe(
+        'refresh performs or resumes the workflow; status only inspects ChatGPT UI state.',
+      ),
+      mcp_url: z.string().url().optional().describe(
+        'CCM MCP endpoint. Omit to resolve CCM_RESOURCE from the worker CCM configuration.',
+      ),
+      current_name: z.string().min(1).optional().describe(
+        'Fresh connector name. Defaults to CCM.',
+      ),
+      old_name: z.string().min(1).optional().describe(
+        'Preserved old connector name. Defaults to CCM Old.',
+      ),
+      keep_workspace_visible: z.boolean().optional().describe(
+        'Keep the BMG workspace visible after the browser-side flow. Defaults to false.',
+      ),
+      environment_id: z.string().optional().describe(
+        'Windows Remote Worker with BMG installed. Omit to use the default environment.',
+      ),
+      yield_time_ms: z.number().int().min(0).max(30_000).optional(),
+      max_output_tokens: z.number().int().min(256).max(10_000).optional(),
+    },
+    handler: async (args) => {
+      try {
+        const environment = resolveWindowsEnvironment(
+          runtime,
+          args.environment_id,
+        );
+        const command = [
+          toolPath('tools\\chatgpt-schema-refresh\\refresh.ps1'),
+          '& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $tool' +
+            ' -Mode ' + psQuote(args.mode || 'refresh') +
+            (args.mcp_url ? ' -McpUrl ' + psQuote(args.mcp_url) : '') +
+            ' -CurrentName ' + psQuote(args.current_name || 'CCM') +
+            ' -OldName ' + psQuote(args.old_name || 'CCM Old') +
+            (args.keep_workspace_visible ? ' -KeepWorkspaceVisible' : ''),
+        ].join('; ');
+        return execResult(await run(runtime, args, command), {
+          environment_id: environment.id,
+          capability: 'refresh_chatgpt_schema',
+        });
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  });
+
+  registry.register({
+    namespace: 'ccm-extra',
     name: 'bilibili_download_dash',
     provider: 'ccm-specialized',
     provenance: 'ported-from-wcm/tools/bilibili-download',

@@ -58,6 +58,7 @@ test('specialized WCM-derived tools are deferred and searchable', () => {
       'ccm-extra.bmg_call',
       'ccm-extra.quark_probe',
       'ccm-extra.quark_upload',
+      'ccm-extra.refresh_chatgpt_schema',
       'ccm-extra.send_file',
     ],
   );
@@ -76,6 +77,10 @@ test('specialized WCM-derived tools are deferred and searchable', () => {
   assert.equal(
     registry.searchDeferred('bmg browser gpt', { limit: 5 })[0].qualified_name,
     'ccm-extra.bmg_call',
+  );
+  assert.equal(
+    registry.searchDeferred('refresh chatgpt schema', { limit: 5 })[0].qualified_name,
+    'ccm-extra.refresh_chatgpt_schema',
   );
 });
 
@@ -152,6 +157,24 @@ test('BMG adapter stays optional and dispatches through the external bmgctl clie
   const encoded = Buffer.from(JSON.stringify(browserArgs), 'utf8').toString('base64');
   assert.ok(runtime.calls[0].cmd.includes(encoded));
   assert.equal(runtime.calls[0].cmd.includes('https://chatgpt.com'), false);
+});
+
+test('ChatGPT schema refresh stays deferred and fail-closed pending host verification', async () => {
+  const runtime = fakeRuntime();
+  const registry = new ToolRegistry();
+  registerSpecializedTools(registry, runtime);
+  const result = await registry.get('ccm-extra.refresh_chatgpt_schema').handler({
+    environment_id: 'worker-b',
+    mode: 'status',
+    mcp_url: 'https://example.invalid/ccm/mcp',
+  });
+  assert.equal(result.isError, undefined);
+  assert.equal(result.structuredContent.environment_id, 'worker-b');
+  assert.equal(result.structuredContent.capability, 'refresh_chatgpt_schema');
+  assert.match(runtime.calls[0].cmd, /chatgpt-schema-refresh\\refresh\.ps1/);
+  assert.match(runtime.calls[0].cmd, /-Mode 'status'/);
+  assert.match(runtime.calls[0].cmd, /-McpUrl 'https:\/\/example\.invalid\/ccm\/mcp'/);
+  assert.equal(runtime.calls[0].cmd.includes('ccm-approval-secret'), false);
 });
 
 test('Bilibili deferred tool passes signed DASH URLs without exposing them in result metadata', async () => {
