@@ -7,6 +7,7 @@ import { createHttpController } from '../src/controller/mcp-http-server.mjs';
 import { registerCoreTools } from '../src/tools/core-tools.mjs';
 import { ToolRegistry } from '../src/tools/tool-registry.mjs';
 import {
+  VIEW_IMAGE_LEGACY_UI_URI,
   VIEW_IMAGE_UI_HTML,
   VIEW_IMAGE_UI_URI,
 } from '../src/ui/view-image-app.mjs';
@@ -71,6 +72,15 @@ test('view_image exposes an MCP Apps image-context bridge', async () => {
     assert.match(resource.contents[0].text, /ui\/message/);
     assert.match(resource.contents[0].text, /type: "image"/);
     assert.doesNotMatch(resource.contents[0].text, /uploadFile/);
+
+    const legacyResource = await client.readResource({
+      uri: VIEW_IMAGE_LEGACY_UI_URI,
+    });
+    assert.equal(
+      legacyResource.contents[0].mimeType,
+      'text/html;profile=mcp-app',
+    );
+    assert.equal(legacyResource.contents[0].text, VIEW_IMAGE_UI_HTML);
   } finally {
     await client.close().catch(() => {});
     await controller.close();

@@ -1,4 +1,5 @@
 export const VIEW_IMAGE_UI_URI = 'ui://ccm/view-image-v2.html';
+export const VIEW_IMAGE_LEGACY_UI_URI = 'ui://ccm/view-image-v1.html';
 
 export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
 <html lang="en">
