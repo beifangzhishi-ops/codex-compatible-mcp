@@ -107,6 +107,8 @@ export class RemoteFileService {
       {
         path: args.path,
         environment_id: environment.id,
+        workspace_id: execution.workspaceId,
+        expected_workspace_root: execution.workspaceContext.workspace_root,
       },
       { timeoutMs: 60_000 },
     );

@@ -67,7 +67,13 @@ export class NativeFileService {
   }
 
   async sendFile(args) {
-    const environment = this.environmentRegistry.resolve(args.environment_id);
+    const environment = args.workspace_id
+      ? this.workspaceRegistry?.environmentFor(
+          args.workspace_id,
+          args.expected_workspace_root,
+        )
+      : this.environmentRegistry.resolve(args.environment_id);
+    if (!environment) throw new Error('Workspace file transfer requires a workspace registry.');
     return sendFileFromEnvironment({
       environment,
       path: args.path,

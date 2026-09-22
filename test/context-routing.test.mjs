@@ -1,8 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { RemoteProcessManager } from '../src/runtime/remote-process-manager.mjs';
 import { RemoteFileService } from '../src/runtime/filesystem/remote-file-service.mjs';
+import { NativeFileService } from '../src/runtime/filesystem/native-file-service.mjs';
 
 const CONTEXT_ID = '00000000-0000-4000-8000-000000000001';
 
@@ -114,6 +118,8 @@ test('send_file uses context to select Worker without imposing workspace read bo
     params: {
       path: outsidePath,
       environment_id: 'worker-a',
+      workspace_id: 'projectless-test',
+      expected_workspace_root: 'C:\\Users\\test\\Documents\\CCM\\projectless-test',
     },
   });
 
@@ -121,4 +127,59 @@ test('send_file uses context to select Worker without imposing workspace read bo
     fileService.sendFile({ path: outsidePath }),
     /requires workspace_context/,
   );
+});
+
+test('NativeFileService resolves relative send_file paths from workspace root', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-send-file-context-'));
+  try {
+    const bootstrapRoot = path.join(tempRoot, 'bootstrap');
+    const workspaceRoot = path.join(tempRoot, 'workspace');
+    const outsideRoot = path.join(tempRoot, 'outside');
+    await Promise.all([
+      fs.mkdir(bootstrapRoot, { recursive: true }),
+      fs.mkdir(workspaceRoot, { recursive: true }),
+      fs.mkdir(outsideRoot, { recursive: true }),
+    ]);
+    await fs.writeFile(path.join(bootstrapRoot, 'sample.txt'), 'bootstrap');
+    await fs.writeFile(path.join(workspaceRoot, 'sample.txt'), 'workspace');
+    const outsidePath = path.join(outsideRoot, 'outside.txt');
+    await fs.writeFile(outsidePath, 'outside');
+
+    const baseEnvironment = {
+      id: 'worker-a',
+      cwd: bootstrapRoot,
+    };
+    const service = new NativeFileService({
+      environmentRegistry: {
+        resolve: () => baseEnvironment,
+      },
+      workspaceRegistry: {
+        environmentFor(workspaceId, expectedRoot) {
+          assert.equal(workspaceId, 'project');
+          assert.equal(expectedRoot, workspaceRoot);
+          return { ...baseEnvironment, cwd: workspaceRoot };
+        },
+      },
+    });
+
+    const relative = await service.sendFile({
+      environment_id: 'worker-a',
+      workspace_id: 'project',
+      expected_workspace_root: workspaceRoot,
+      path: 'sample.txt',
+    });
+    assert.equal(Buffer.from(relative.data, 'base64').toString('utf8'), 'workspace');
+    assert.equal(relative.path, path.join(workspaceRoot, 'sample.txt'));
+
+    const absolute = await service.sendFile({
+      environment_id: 'worker-a',
+      workspace_id: 'project',
+      expected_workspace_root: workspaceRoot,
+      path: outsidePath,
+    });
+    assert.equal(Buffer.from(absolute.data, 'base64').toString('utf8'), 'outside');
+    assert.equal(absolute.path, outsidePath);
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
 });
