@@ -96,7 +96,7 @@ The exporter only recovers information present in the public Share payload. Info
 
 CCM ships optional Windows workflows ported from WCM without expanding the top-level MCP schema:
 
-- `ccm-extra.research_ppt_pipeline` returns the user-validated research PowerPoint production workflow, including production-mode selection, source/image review, canonical per-slide specs, Imagegen handoff, QA, mandatory whole-deck user review, and mode-specific delivery.
+- `ccm-extra.research_ppt_pipeline` returns the user-validated research PowerPoint production workflow, including production-mode selection, source/image review, canonical per-slide specs, mandatory `ccm-extra.send_file` delivery of Imagegen reference images, GPT decide-and-auto-advance handling of returned slide images, QA, mandatory whole-deck user review, and mode-specific delivery.
 - `ccm-extra.send_file` transfers an exact file from a selected CCM environment to the GPT client only when a user-facing handoff is actually needed (preview/download/upload to another tool). Do not use it merely for model-side inspection when the file can be read or viewed locally in CCM; prefer local reading, `view_image`, command-line inspection, or temporary local previews to avoid unnecessary materialization/approval prompts. The transfer does not use BMG or Library upload.
 - `ccm-extra.quark_upload` submits one or more files through that local Quark desktop session and can wait for verified completion.
 - `ccm-extra.bilibili_download_dash` downloads signed DASH video/audio URLs obtained from an authenticated browser session and remuxes them with `ffmpeg -c copy`.

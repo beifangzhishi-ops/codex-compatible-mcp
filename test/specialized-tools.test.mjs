@@ -187,9 +187,28 @@ test('research PPT pipeline exposes the latest user-validated workflow', async (
   assert.equal(result.structuredContent.capability, 'research_ppt_pipeline');
   assert.equal(result.structuredContent.section, 'handoff');
   assert.match(result.content[0].text, /ccm-extra\.send_file/);
+  assert.match(result.content[0].text, /必须实际调用 CCM/);
+  assert.match(result.content[0].text, /不能只回复文件名/);
+  assert.match(result.content[0].text, /send_file 返回/);
   assert.match(result.content[0].text, /fenced text\/code block/);
   assert.match(result.content[0].text, /\.md/);
   assert.match(result.content[0].text, /Mode A/);
+});
+
+test('research PPT pipeline decides returned-slide regeneration and auto-advances when accepted', async () => {
+  const runtime = fakeRuntime();
+  const registry = new ToolRegistry();
+  registerSpecializedTools(registry, runtime);
+
+  const result = await registry.get('ccm-extra.research_ppt_pipeline').handler({
+    section: 'generation_review',
+  });
+  assert.equal(result.isError, undefined);
+  assert.match(result.content[0].text, /直接判定是否需要重生成/);
+  assert.match(result.content[0].text, /不要再要求用户确认/);
+  assert.match(result.content[0].text, /立即进入下一页 Handoff/);
+  assert.match(result.content[0].text, /ccm-extra\.send_file/);
+  assert.match(result.content[0].text, /Global QA/);
 });
 
 test('research PPT pipeline keeps internal workspace layout flexible and requires image inspection', async () => {

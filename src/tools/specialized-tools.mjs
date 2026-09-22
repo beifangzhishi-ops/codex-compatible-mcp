@@ -149,7 +149,7 @@ export function registerSpecializedTools(registry, runtime) {
     supportsParallel: true,
     description: [
       'Return the user-validated research PowerPoint production workflow used for academic/research decks.',
-      'Use this before or during a research-PPT project to recover the latest agreed process: Mode A vs Mode B, visual-density calibration, source and image review, canonical per-slide production specs, full-pack self-audit, CCM reference-image handoff, fresh-chat Imagegen generation, optional per-slide review, whole-deck QA, mandatory user whole-deck review, and mode-specific final delivery.',
+      'Use this before or during a research-PPT project to recover the latest agreed process: Mode A vs Mode B, visual-density calibration, source and image review, canonical per-slide production specs, full-pack self-audit, mandatory CCM send_file reference-image handoff, fresh-chat Imagegen generation, GPT decide-and-auto-advance review of returned slides, whole-deck QA, mandatory user whole-deck review, and mode-specific final delivery.',
       'The workflow is guidance for orchestration; it does not itself generate images or PowerPoint files.',
     ].join('\n\n'),
     inputSchema: {
