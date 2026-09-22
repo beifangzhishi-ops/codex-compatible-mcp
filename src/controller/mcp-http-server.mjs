@@ -39,6 +39,7 @@ function createProtocolServer(
       'Use exec_command for shell/repository work and write_stdin for live sessions.',
       'Use list_environments when environment selection is unclear.',
       'Use tool_search to discover deferred capabilities without expanding the top-level MCP schema.',
+      'For local image inspection or bulk visual QA, discover ccm.view_image with tool_search and invoke it through exec. When reviewing many independent images, batch multiple ccm.view_image calls into one exec call with parallel=true instead of issuing one top-level call per image.',
       'Use exec/wait for structured nested capability dispatch; host Code Mode remains responsible for JavaScript/control flow.',
       'For multi-step CCM work, prefer one exec call containing Code Mode-enabled core tools such as list_environments, exec_command, write_stdin, and apply_patch (plus deferred tools when needed). This reduces repeated host MCP initialization round trips. Use parallel=true only for independent calls.',
       'Commands run under the selected environment permission profile.',

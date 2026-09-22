@@ -81,6 +81,7 @@ export function registerArchitectureTools(
       'Prefer one exec call for multi-step CCM work when the required tools are available on the Code Mode surface. Core tools such as list_environments, exec_command, write_stdin, and apply_patch can be nested here alongside deferred ccm-extra tools. This avoids repeated host MCP connection/initialization round trips.',
       'This is a structured dispatcher, not a JavaScript interpreter. Use the host Code Mode for loops, branching, and data processing.',
       'Set parallel=true only for independent calls; CCM rejects parallel execution for tools that do not declare parallel-call support.',
+      'For bulk local image review, search for ccm.view_image once and batch independent image calls in this exec dispatcher with parallel=true; image content is passed through natively without widget cards.',
       'If this returns state=running, resume the outer cell with wait. If it returns state=awaiting_io, the nested runner is finished but one or more process sessions are still live and must be continued with write_stdin. state=completed is terminal and never carries live sessions.',
     ].join('\n\n'),
     inputSchema: {
