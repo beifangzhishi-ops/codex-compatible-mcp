@@ -42,25 +42,36 @@ CCM Controller
 
 Every execution environment uses the same Remote Worker protocol. The machine hosting the Controller is not a special execution backend: by default, `npm start` launches a normal Remote Worker locally and connects it through loopback.
 
-Registered workspaces are owned by each Worker, not by the Controller. Entering or hot-registering a real project requires one-shot user approval and returns an opaque `workspace_context`. Normal development tools carry only that context. Workspace contexts are persisted by the Controller and remain valid across Controller or Worker restarts. Worker-local projectless mappings are persisted as well, so a surviving projectless directory can be resumed after a Worker restart. If no context is supplied, CCM creates a new projectless workspace under `CCM_PROJECTLESS_ROOT` (default: the user's `Documents\CCM` directory) without touching a registered project.
+Registered workspaces are owned by each Worker, not by the Controller. Entering or hot-registering a real project requires one-shot user approval and returns an opaque `workspace_context`. Normal development tools carry only that context. Workspace contexts are persisted by the Controller and remain valid across Controller or Worker restarts. Worker-local projectless mappings are persisted as well, so a surviving projectless directory can be resumed after a Worker restart.
+
+When no real project is selected, create an explicit projectless context with the deferred `ccm.create_projectless_context` capability through `tool_search` + `exec`. Pass `environment_id` to create it on a specific Worker, or omit `environment_id` to use the primary environment. Projectless workspaces are created under `CCM_PROJECTLESS_ROOT` (default: the user's `Documents\\CCM` directory) and do not require workspace approval. Do not register temporary directories, `Documents`, drive roots, or other arbitrary paths merely to obtain an execution context.
 
 ## Direct MCP tools
 
 | Tool | Purpose |
 | --- | --- |
 | `list_environments` | Show connected execution environments and capabilities. |
-| `list_workspaces` | Discover registered projects on one Worker without entering them. |
-| `select_workspace` | Enter a registered project after explicit user approval and receive a `workspace_context`. |
-| `register_workspace` | Hot-register and enter a new project directory after explicit user approval. |
-| `exec_command` | Run a native shell command inside a workspace context. Missing context starts a new projectless workspace. |
+| `exec_command` | Run a native shell command inside an existing `workspace_context`. |
+| `respond_to_escalation` | Record an explicit user decision for a pending one-shot CCM approval. |
 | `write_stdin` | Write to or poll a live process session returned by `exec_command`. |
-| `apply_patch` | Apply Codex-style `*** Begin Patch` / `*** End Patch` edits inside a workspace context. |
-| `view_image` | Read and validate a bounded PNG/JPEG/GIF/WebP image inside a workspace context. |
 | `tool_search` | Discover deferred ToolRegistry capabilities without expanding the top-level MCP schema. |
 | `exec` | Dispatch one or more nested registered capabilities, sequentially or safely in parallel. |
 | `wait` | Resume a nested `exec` cell that yielded before completion. |
 
 Normal repository inspection, search, Git, builds, tests, and diagnostics should usually go through `exec_command`.
+
+### Core deferred capabilities
+
+These are core CCM operations but intentionally stay off the top-level MCP schema. Discover them with `tool_search` and invoke them through `exec`.
+
+| Capability | Purpose |
+| --- | --- |
+| `ccm.create_projectless_context` | Create a temporary projectless context on a chosen Worker, or on the primary Worker when no environment is specified. |
+| `ccm.list_workspaces` | Discover registered projects on one Worker without entering them. |
+| `ccm.select_workspace` | Enter an explicitly selected registered project after user approval. |
+| `ccm.register_workspace` | Register and enter an explicitly selected project directory after user approval. |
+| `ccm.apply_patch` | Apply a Codex-style patch inside an existing workspace context. |
+| `ccm.view_image` | Read a bounded image inside an existing workspace context. |
 
 ## ToolRegistry and Code Mode
 
@@ -72,7 +83,11 @@ CCM stores capability exposure as three independent surfaces:
 
 Convenience states such as Direct, Deferred, CodeModeOnly, DirectModelOnly, DeferredModelOnly, and Hidden are derived from those surfaces rather than stored as one rigid enum.
 
-The current stable direct MCP surface contains six execution/approval/editing tools plus the three architecture tools above. Registering a new deferred capability does not change `tools/list`; it becomes discoverable immediately through `tool_search` and callable through `exec`.
+The direct MCP surface is intentionally kept small and stable. New ordinary capabilities should default to the **Deferred + Code Mode** surfaces and be invoked through `tool_search` + `exec`. Add a new top-level Direct tool only when the capability is fundamental to bootstrapping, environment discovery, explicit approval, process continuation, or nested-tool discovery/dispatch.
+
+Keeping ordinary additions off the Direct surface prevents routine feature work from changing the client's top-level MCP schema. In particular, adding a deferred capability should **not require deleting and recreating the CCM integration in ChatGPT or another MCP client**. Updating CCM server code may still require restarting the Controller and/or Worker processes so the new implementation is loaded; that is separate from recreating the client integration.
+
+Do not promote a capability to Direct merely for convenience. Prefer a deferred `ccm-extra.*` or other namespaced capability when the operation can be discovered and called through `tool_search` + `exec`. Existing examples include `ccm.view_image` and the bundled `ccm-extra.*` workflows below.
 
 CCM deliberately does not embed a second JavaScript interpreter for Code Mode. The host application remains responsible for loops, branching, and data processing. CCM's `exec/wait` pair is a bounded structured dispatcher over ToolRegistry capabilities. `state=completed` is terminal. If nested dispatch has finished but an `exec_command` leaves a live process session, CCM returns `state=awaiting_io` with `next_operation=write_stdin` until those process sessions are continued separately.
 
@@ -274,7 +289,7 @@ The legacy `CCM_WORKER_HUB_HOST` variable is accepted as a fallback for both bin
 
 Windows is the current fully supported restricted-execution platform.
 
-`read-only` and `workspace-write` command execution use the CCM Windows native sandbox helper. PTY sessions use a Rust ConPTY backend aligned with the useful parts of Codex's current Windows PTY implementation. `full-access` runs with the Worker's normal host permissions.
+`read-only` and `workspace-write` command execution use the CCM Windows native sandbox helper. For `exec_command`, `workspace-write` means **host-permitted filesystem reads plus workspace-only writes**: `workspace_roots` are project/write boundaries, not read boundaries. The Worker can read outside the selected workspace wherever its Windows host account already has read permission, while writes outside the workspace require explicit one-shot escalation. Other CCM tools may intentionally have narrower workspace-only access; for example, `apply_patch` keeps its own workspace boundary. PTY sessions use a Rust ConPTY backend aligned with the useful parts of Codex's current Windows PTY implementation. `full-access` runs with the Worker's normal host permissions.
 
 Restricted command execution on Linux/macOS is not implemented yet and **fails closed** rather than silently running unsandboxed. A Linux/macOS Worker therefore currently needs `CCM_PERMISSION_PROFILE=full-access` for shell execution.
 

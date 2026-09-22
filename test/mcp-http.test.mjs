@@ -48,30 +48,43 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const listed = await client.listTools();
     const names = listed.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, [
-      'apply_patch',
       'exec',
       'exec_command',
       'list_environments',
-      'list_workspaces',
-      'register_workspace',
       'respond_to_escalation',
-      'select_workspace',
       'tool_search',
       'wait',
       'write_stdin',
     ]);
 
+    const projectless = await client.callTool({
+      name: 'exec',
+      arguments: {
+        calls: [{
+          tool: 'ccm.create_projectless_context',
+          arguments: {},
+        }],
+        yield_time_ms: 1000,
+      },
+    });
+    assert.equal(projectless.isError, undefined);
+    assert.equal(projectless.structuredContent.state, 'completed');
+    const projectlessResult =
+      projectless.structuredContent.calls[0].result.structured_content;
+    const workspaceContext = projectlessResult.workspace_context;
+    const workspaceRoot = projectlessResult.workspace_root;
+    assert.equal(projectlessResult.workspace_kind, 'projectless');
+
     const result = await client.callTool({
       name: 'exec_command',
       arguments: {
+        workspace_context: workspaceContext,
         cmd: 'Write-Output MCP_OK',
       },
     });
     assert.equal(result.isError, undefined);
     assert.equal(Object.hasOwn(result, 'resultType'), false);
     assert.match(result.content[0].text, /MCP_OK/);
-    const workspaceContext = result.structuredContent.workspace_context;
-    const workspaceRoot = result.structuredContent.workspace_root;
     assert.equal(result.structuredContent.workspace_kind, 'projectless');
 
     const escalation = await client.callTool({

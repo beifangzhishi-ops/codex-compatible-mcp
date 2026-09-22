@@ -121,7 +121,10 @@ export function registerCoreTools(registry, runtime) {
     surfaces: { direct: true, codeMode: true },
     tags: ['environment', 'worker', 'capabilities'],
     supportsParallel: true,
-    description: 'List CCM execution environments and their native shell, permissions, and capabilities.',
+    description: [
+      'List CCM execution environments and their native shell, permissions, filesystem policy, and capabilities.',
+      'Important Windows semantics: workspace_roots are project/write boundaries, not read boundaries. With permission_profile=workspace-write, exec_command may read any path the Worker host account can read, while writes remain limited to the selected workspace unless a one-shot escalation is explicitly approved.',
+    ].join('\n\n'),
     inputSchema: {},
     handler: async () => jsonResult({
       default_environment_id: runtime.environmentRegistry.defaultEnvironmentId,
@@ -132,10 +135,10 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'list_workspaces',
     provider: 'ccm-core',
-    surfaces: { direct: true, codeMode: true },
+    surfaces: { deferred: true, codeMode: true },
     tags: ['workspace', 'project', 'environment'],
     supportsParallel: true,
-    description: 'List registered workspaces on one CCM environment. This is discovery only and does not enter a workspace.',
+    description: 'List registered workspaces on one CCM environment. This is discovery only and does not enter a workspace. Discover through tool_search and invoke through exec.',
     inputSchema: {
       environment_id: z.string().optional().describe('Environment whose Worker owns the workspaces. Omit to use the primary environment.'),
     },
@@ -159,12 +162,42 @@ export function registerCoreTools(registry, runtime) {
   });
 
   registry.register({
+    name: 'create_projectless_context',
+    provider: 'ccm-core',
+    surfaces: { deferred: true, codeMode: true },
+    tags: ['workspace', 'projectless', 'context', 'environment'],
+    supportsParallel: true,
+    description: [
+      'Create a projectless workspace_context for temporary execution without entering or registering a real project.',
+      'Use this whenever a target environment is known but the user did not explicitly select a project. If environment_id is omitted, CCM uses the primary environment.',
+      'Projectless context creation does not require workspace approval. Do not register Temp, Documents, a drive root, or another arbitrary directory merely to obtain an execution context.',
+    ].join('\n\n'),
+    inputSchema: {
+      environment_id: z.string().optional().describe('Environment on which to create the projectless context. Omit to use the primary environment.'),
+    },
+    handler: async (args) => {
+      try {
+        if (!runtime.workspaceContextManager) {
+          throw new Error('Workspace context manager is not available.');
+        }
+        return jsonResult(
+          await runtime.workspaceContextManager.createProjectless(args.environment_id),
+        );
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  });
+
+  registry.register({
     name: 'select_workspace',
     provider: 'ccm-core',
-    surfaces: { direct: true },
+    surfaces: { deferred: true, codeMode: true },
     tags: ['workspace', 'project', 'approval'],
     description: [
       'Enter a registered workspace and return a workspace_context for subsequent CCM development calls.',
+      'Workspace approval establishes a project context, cwd, and writable boundary. It does not grant, expand, or restrict the Worker\'s existing read access outside the workspace.',
+      'Use this only when the user explicitly intends to work in a registered project. For temporary execution without a selected project, use create_projectless_context instead.',
       'Entering a registered workspace always requires explicit user approval. Call once without approval_id, stop for user approval, call respond_to_escalation, then retry with the same target and approval_id.',
     ].join('\n\n'),
     inputSchema: {
@@ -195,7 +228,7 @@ export function registerCoreTools(registry, runtime) {
             intent,
             'Allow CCM to enter registered workspace ' +
               environment.id + ' / ' + workspace.workspace_id +
-              ' at ' + workspace.root + '?',
+              ' at ' + workspace.root + '? This establishes project/write context only; it does not change existing read access outside the workspace.',
           );
           return jsonResult({
             approval_required: true,
@@ -226,10 +259,11 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'register_workspace',
     provider: 'ccm-core',
-    surfaces: { direct: true },
+    surfaces: { deferred: true, codeMode: true },
     tags: ['workspace', 'project', 'approval', 'register'],
     description: [
       'Hot-register a new project directory on a Worker and immediately return a workspace_context for it.',
+      'Use this only when the user explicitly intends to register that concrete directory as a project. Do not register a temporary directory merely to obtain an execution context; use create_projectless_context instead.',
       'Registration expands CCM project access and always requires explicit user approval. Call once without approval_id, stop for user approval, call respond_to_escalation, then retry with the exact same target and approval_id.',
     ].join('\n\n'),
     inputSchema: {
@@ -304,14 +338,16 @@ export function registerCoreTools(registry, runtime) {
     supportsParallel: true,
     description: [
       'Runs a command using plain pipes by default; set tty=true to allocate a PTY. Returns output or a session ID for ongoing interaction.',
-      'Pass workspace_context to continue work in an existing CCM workspace. If omitted, CCM creates a new isolated projectless workspace on the primary environment and returns its context.',
+      'workspace_context is required and already determines the environment and workspace. Do not pass or infer a separate environment for this command.',
+      'If no project has been selected, first discover ccm.create_projectless_context with tool_search and invoke it through exec; then pass the returned workspace_context here.',
+      'On Windows with permission_profile=workspace-write, the workspace is the write boundary, not the read boundary: commands may read paths outside the workspace when the Worker host account can read them. Other tools such as apply_patch may intentionally enforce narrower workspace-only filesystem access.',
       'In workspace-write environments, normal remote Git commands such as git clone/fetch/pull/push/ls-remote are handled automatically and do not require sandbox_permissions=require_escalated. Run remote Git as Git-only shell commands so CCM can recognize the trusted path.',
       'A CCM-originated result is identifiable by its structured CCM fields. If a host reports a Script error or safety/policy/tool-call failure without this tool returning a structured result, do not attribute that failure to CCM or claim CCM blocked the command.',
       'On Windows, keep destructive filesystem operations in one shell and verify resolved targets before recursive deletes or moves.',
     ].join('\n\n'),
     inputSchema: {
       cmd: z.string().min(1).describe('Shell command to execute.'),
-      workspace_context: z.string().uuid().optional().describe('Existing workspace context. Omit only to intentionally start a new projectless workspace.'),
+      workspace_context: z.string().uuid().describe('Existing workspace context. Obtain one with create_projectless_context, select_workspace, or register_workspace before executing.'),
       workdir: z.string().optional().describe('Relative subdirectory inside the selected workspace. Defaults to the workspace root.'),
       tty: z.boolean().optional().describe('True allocates a PTY; false or omitted uses plain pipes.'),
       yield_time_ms: z.number().int().max(30_000).nonnegative().optional().describe('Wait before the initial command call yields output or a session. Defaults to 2000 ms. Values above 5000 ms are accepted for compatibility but are clamped to 5000 ms; long-running commands continue in a session and should be resumed with write_stdin.'),
@@ -324,6 +360,11 @@ export function registerCoreTools(registry, runtime) {
     outputSchema: UNIFIED_EXEC_OUTPUT_SCHEMA,
     handler: async (args) => {
       try {
+        if (!args.workspace_context) {
+          throw new Error(
+            'exec_command requires workspace_context. Use ccm.create_projectless_context through tool_search + exec when no project is selected.',
+          );
+        }
         return execResult(await runtime.processManager.execCommand(args));
       } catch (error) {
         return toolError(error);
@@ -384,13 +425,13 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'apply_patch',
     provider: 'ccm-core',
-    surfaces: { direct: true, codeMode: true },
+    surfaces: { deferred: true, codeMode: true },
     tags: ['edit', 'patch', 'filesystem'],
     environmentRequirements: { capabilities: ['applyPatch'] },
-    description: 'Apply a Codex-style Begin/End Patch inside the selected CCM workspace.',
+    description: 'Apply a Codex-style Begin/End Patch inside the selected CCM workspace. Discover through tool_search and invoke through exec.',
     inputSchema: {
       patch: z.string().min(1).describe('Codex-style patch text beginning with *** Begin Patch.'),
-      workspace_context: z.string().uuid().optional().describe('Existing workspace context. Omit only to intentionally start a new projectless workspace.'),
+      workspace_context: z.string().uuid().describe('Existing workspace context.'),
       workdir: z.string().optional().describe('Relative subdirectory inside the selected workspace.'),
     },
     handler: async (args) => {
@@ -423,7 +464,7 @@ export function registerCoreTools(registry, runtime) {
     ].join(' '),
     inputSchema: {
       path: z.string().min(1).describe('Image path relative to the selected workspace root.'),
-      workspace_context: z.string().uuid().optional().describe('Existing workspace context. Omit only to intentionally start a new projectless workspace.'),
+      workspace_context: z.string().uuid().describe('Existing workspace context.'),
     },
     handler: async (args) => {
       try {
