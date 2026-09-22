@@ -11,6 +11,10 @@ import {
   resolveMaxMcpFileResultBytes,
   resolveMaxMcpToolResultBytes,
 } from './response-guard.mjs';
+import {
+  VIEW_IMAGE_UI_HTML,
+  VIEW_IMAGE_UI_URI,
+} from '../ui/view-image-app.mjs';
 
 const SERVER_INFO = { name: 'ccm', version: '0.1.0' };
 
@@ -69,11 +73,29 @@ function createProtocolServer(
     },
   );
 
+  server.registerResource(
+    'ccm-view-image-ui',
+    VIEW_IMAGE_UI_URI,
+    {
+      title: 'CCM image preview',
+      description: 'Renders view_image output and forwards the image into model context when the host supports MCP Apps image context.',
+    },
+    async () => ({
+      contents: [{
+        uri: VIEW_IMAGE_UI_URI,
+        mimeType: 'text/html;profile=mcp-app',
+        text: VIEW_IMAGE_UI_HTML,
+      }],
+    }),
+  );
+
   for (const tool of toolRegistry.listDirect()) {
     server.registerTool(tool.name, {
       description: tool.description,
       inputSchema: tool.inputSchema,
       ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
+      ...(tool.annotations ? { annotations: tool.annotations } : {}),
+      ...(tool.mcpMeta ? { _meta: tool.mcpMeta } : {}),
     }, async (args, extra) => guardMcpToolResult(
       await tool.handler(args, { extra }),
       maxToolResultBytes,

@@ -311,6 +311,14 @@ CCM returns standard MCP tool results directly. It does not add a custom result 
 
 Text tools return normal `content: [{ type: "text", ... }]` results. `view_image` returns normal MCP image content. `structuredContent` is used only as the standard optional structured companion to `content`.
 
+For MCP Apps-capable hosts, `view_image` also advertises a small `ui://`
+image preview. The view keeps the standard MCP image result, renders it, and
+uses the MCP Apps `ui/update-model-context` image content block when the host
+advertises that capability. This gives the model a visual-context path without
+routing the image through `send_file`, file-resource materialization, or
+ChatGPT Library. Hosts without MCP Apps image-context support still receive the
+ordinary MCP `image` content unchanged.
+
 ## Security notes
 
 Both the MCP HTTP server and WorkerHub bind to loopback by default. v0.1 does not provide authentication or TLS for the WorkerHub. Do not expose it directly to an untrusted network.

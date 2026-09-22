@@ -1,4 +1,5 @@
 import * as z from 'zod/v4';
+import { VIEW_IMAGE_UI_URI } from '../ui/view-image-app.mjs';
 
 const UNIFIED_EXEC_OUTPUT_SCHEMA = {
   chunk_id: z.string().optional(),
@@ -409,10 +410,22 @@ export function registerCoreTools(registry, runtime) {
     name: 'view_image',
     provider: 'ccm-core',
     surfaces: { direct: true },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: false,
+    },
+    mcpMeta: {
+      ui: { resourceUri: VIEW_IMAGE_UI_URI },
+      'openai/outputTemplate': VIEW_IMAGE_UI_URI,
+    },
     tags: ['image', 'filesystem', 'media'],
     environmentRequirements: { capabilities: ['viewImage'] },
     supportsParallel: true,
-    description: 'Read a bounded image from the selected CCM workspace and return it as MCP image content.',
+    description: [
+      'Read a bounded image from the selected CCM workspace and return it as MCP image content.',
+      'On MCP Apps-capable hosts, the attached UI also forwards that image into model context without using send_file or a file-transfer upload.',
+    ].join(' '),
     inputSchema: {
       path: z.string().min(1).describe('Image path relative to the selected workspace root.'),
       workspace_context: z.string().uuid().optional().describe('Existing workspace context. Omit only to intentionally start a new projectless workspace.'),
