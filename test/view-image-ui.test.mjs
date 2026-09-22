@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 import { FileTransferStore } from '../src/controller/file-transfer-store.mjs';
 import { createHttpController } from '../src/controller/mcp-http-server.mjs';
 import { registerCoreTools } from '../src/tools/core-tools.mjs';
@@ -24,6 +25,18 @@ test('view_image exposes an MCP Apps image-context bridge', async () => {
   const runtime = {
     environmentRegistry,
     fileTransferStore,
+    fileService: {
+      async viewImage() {
+        return {
+          path: 'probe.png',
+          mime_type: 'image/png',
+          width: 1,
+          height: 1,
+          byte_length: 68,
+          data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2F+QAAAAASUVORK5CYII=',
+        };
+      },
+    },
     async close() {
       fileTransferStore.close();
     },
@@ -45,6 +58,14 @@ test('view_image exposes an MCP Apps image-context bridge', async () => {
   );
   try {
     await client.connect(transport);
+    let resolveListChanged;
+    const listChanged = new Promise((resolve) => {
+      resolveListChanged = resolve;
+    });
+    client.setNotificationHandler(
+      ToolListChangedNotificationSchema,
+      () => resolveListChanged(),
+    );
     const listed = await client.listTools();
     const viewImage = listed.tools.find((tool) => tool.name === 'view_image');
     assert.ok(viewImage);
@@ -88,6 +109,19 @@ test('view_image exposes an MCP Apps image-context bridge', async () => {
 
     const v2Resource = await client.readResource({ uri: VIEW_IMAGE_V2_UI_URI });
     assert.equal(v2Resource.contents[0].text, VIEW_IMAGE_UI_HTML);
+
+    const imageResult = await client.callTool({
+      name: 'view_image',
+      arguments: { path: 'probe.png' },
+    });
+    assert.equal(imageResult.content[0].type, 'image');
+    await Promise.race([
+      listChanged,
+      new Promise((_, reject) => setTimeout(
+        () => reject(new Error('tools/list_changed was not received')),
+        1000,
+      )),
+    ]);
   } finally {
     await client.close().catch(() => {});
     await controller.close();

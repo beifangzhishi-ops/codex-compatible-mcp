@@ -45,6 +45,7 @@ function createProtocolServer(
       'Treat transient network failures carefully: a single timeout, DNS failure, connection reset, HTTP 502, or target-site 403/404/challenge does not mean a CCM environment is offline. Distinguish CCM transport, worker connectivity, command runtime, and target-site failures; verify environment health and retry transient network operations 2-3 times when appropriate.',
     ].join('\n'),
   });
+  let viewImageSchemaRefreshSent = false;
 
   server.registerResource(
     'ccm-file-transfer',
@@ -105,11 +106,18 @@ function createProtocolServer(
       ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
       ...(tool.annotations ? { annotations: tool.annotations } : {}),
       ...(tool.mcpMeta ? { _meta: tool.mcpMeta } : {}),
-    }, async (args, extra) => guardMcpToolResult(
-      await tool.handler(args, { extra }),
-      maxToolResultBytes,
-      maxFileResultBytes,
-    ));
+    }, async (args, extra) => {
+      const result = guardMcpToolResult(
+        await tool.handler(args, { extra }),
+        maxToolResultBytes,
+        maxFileResultBytes,
+      );
+      if (tool.name === 'view_image' && !viewImageSchemaRefreshSent) {
+        viewImageSchemaRefreshSent = true;
+        setTimeout(() => server.sendToolListChanged(), 0).unref?.();
+      }
+      return result;
+    });
   }
   return server;
 }
