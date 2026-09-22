@@ -11,6 +11,7 @@ import {
   VIEW_IMAGE_LEGACY_UI_URI,
   VIEW_IMAGE_UI_HTML,
   VIEW_IMAGE_UI_URI,
+  VIEW_IMAGE_V6_UI_URI,
   VIEW_IMAGE_V5_UI_URI,
   VIEW_IMAGE_V4_UI_URI,
   VIEW_IMAGE_V3_UI_URI,
@@ -205,6 +206,7 @@ test('view_image exposes an MCP Apps image-context bridge', async () => {
     assert.match(resource.contents[0].text, /notifyIntrinsicHeight/);
     assert.match(resource.contents[0].text, /ui\/notifications\/size-changed/);
     assert.match(resource.contents[0].text, /requestClose/);
+    assert.match(resource.contents[0].text, /__ccm_view_image_bridge__/);
     assert.match(resource.contents[0].text, /openai:set_globals/);
     assert.match(resource.contents[0].text, /type: "image"/);
     assert.doesNotMatch(resource.contents[0].text, /<img\b/);
@@ -230,6 +232,9 @@ test('view_image exposes an MCP Apps image-context bridge', async () => {
 
     const v5Resource = await client.readResource({ uri: VIEW_IMAGE_V5_UI_URI });
     assert.equal(v5Resource.contents[0].text, VIEW_IMAGE_UI_HTML);
+
+    const v6Resource = await client.readResource({ uri: VIEW_IMAGE_V6_UI_URI });
+    assert.equal(v6Resource.contents[0].text, VIEW_IMAGE_UI_HTML);
 
     const imageResult = await client.callTool({
       name: 'view_image',
