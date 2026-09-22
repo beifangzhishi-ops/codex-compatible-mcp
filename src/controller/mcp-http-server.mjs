@@ -40,7 +40,7 @@ function createProtocolServer(
       'Use list_environments when environment selection is unclear.',
       'Use tool_search to discover deferred capabilities without expanding the top-level MCP schema.',
       'If an operational tool requires workspace_context and the user did not explicitly select a project or directory, automatically discover ccm.create_projectless_context with tool_search and invoke it through exec. Specify environment_id there when a particular Worker is required; omit it to use the primary environment. Do not ask the user to choose a directory and do not register/select an arbitrary temporary directory merely to obtain context.',
-      'Use direct apply_patch, view_image, and send_file for common file operations. They require workspace_context; send_file uses the context to select the Worker but may read an absolute path outside the workspace when the Worker host account can read it.',
+      'Use direct apply_patch, view_image, and send_file for common file operations. They require workspace_context. For send_file, relative paths are resolved from the selected workspace/projectless root; absolute paths remain absolute on the selected Worker.',
       'For bulk image inspection, view_image is also available through exec; batch independent image calls with parallel=true when useful.',
       'Use exec/wait for structured nested capability dispatch; host Code Mode remains responsible for JavaScript/control flow.',
       'For multi-step CCM work, prefer exec for deferred/Code Mode capabilities such as workspace discovery/selection and specialized ccm-extra tools. Direct operational tools may also support nested exec calls. Use parallel=true only for independent calls.',

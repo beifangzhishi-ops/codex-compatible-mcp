@@ -253,7 +253,7 @@ test('Controller uses projectless contexts and requires approval for registered 
     });
     assert.equal(pending.structuredContent.approval_required, true);
     assert.equal(pending.structuredContent.operation, 'select_workspace');
-    assert.match(pending.structuredContent.justification, /does not change existing read access outside the workspace/);
+    assert.doesNotMatch(pending.structuredContent.justification, /read access/i);
 
     controller.approvalManager.respond(
       pending.structuredContent.approval_id,

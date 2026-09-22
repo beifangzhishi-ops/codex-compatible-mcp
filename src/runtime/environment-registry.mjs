@@ -14,29 +14,6 @@ function defaultShell(platform) {
   return { type: 'bash', path: '/bin/bash' };
 }
 
-function filesystemPolicy(environment) {
-  const profile = environment.permissionProfile;
-  if (profile === 'full-access') {
-    return {
-      exec_command_read_scope: 'host-permitted-filesystem',
-      exec_command_write_scope: 'host-permitted-filesystem',
-      workspace_roots_role: 'project-context-only',
-    };
-  }
-  if (profile === 'read-only') {
-    return {
-      exec_command_read_scope: 'host-permitted-filesystem',
-      exec_command_write_scope: 'none',
-      workspace_roots_role: 'project-context-not-read-boundary',
-    };
-  }
-  return {
-    exec_command_read_scope: 'host-permitted-filesystem',
-    exec_command_write_scope: 'workspace-roots-only',
-    workspace_roots_role: 'project-and-write-boundary-not-read-boundary',
-  };
-}
-
 export class EnvironmentRegistry {
   constructor({
     defaultEnvironmentId = null,
@@ -100,11 +77,7 @@ export class EnvironmentRegistry {
       id: environment.id,
       name: environment.name,
       platform: environment.platform,
-      cwd: environment.cwd,
-      workspace_roots: environment.workspaceRoots,
       shell: environment.shell,
-      permission_profile: environment.permissionProfile,
-      filesystem_policy: filesystemPolicy(environment),
       capabilities: environment.capabilities,
       backend: environment.backend,
       is_default: environment.id === this.defaultEnvironmentId,

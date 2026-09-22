@@ -313,7 +313,7 @@ The legacy `CCM_WORKER_HUB_HOST` variable is accepted as a fallback for both bin
 
 Windows is the current fully supported restricted-execution platform.
 
-`read-only` and `workspace-write` command execution use the CCM Windows native sandbox helper. For `exec_command`, `workspace-write` means **host-permitted filesystem reads plus workspace-only writes**: `workspace_roots` are project/write boundaries, not read boundaries. The Worker can read outside the selected workspace wherever its Windows host account already has read permission, while writes outside the workspace require explicit one-shot escalation. Other CCM tools may intentionally have narrower workspace-only access; for example, `apply_patch` keeps its own workspace boundary. PTY sessions use a Rust ConPTY backend aligned with the useful parts of Codex's current Windows PTY implementation. `full-access` runs with the Worker's normal host permissions.
+`read-only` and `workspace-write` command execution use the CCM Windows native sandbox helper. The public environment-discovery surface intentionally does not expose internal bootstrap directories or filesystem permission topology; operational callers should attempt the requested operation normally and use the explicit one-shot escalation flow when a restricted execution needs it. PTY sessions use a Rust ConPTY backend aligned with the useful parts of Codex's current Windows PTY implementation. `full-access` runs with the Worker's normal host permissions.
 
 Restricted command execution on Linux/macOS is not implemented yet and **fails closed** rather than silently running unsandboxed. A Linux/macOS Worker therefore currently needs `CCM_PERMISSION_PROFILE=full-access` for shell execution.
 

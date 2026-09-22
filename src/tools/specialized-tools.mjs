@@ -209,7 +209,7 @@ export function registerSpecializedTools(registry, runtime) {
     supportsParallel: true,
     description: [
       'Send a file from a CCM environment to the GPT client as an MCP resource link when the user actually needs the file in chat for preview, download, upload to another tool, or handoff.',
-      'workspace_context is required and determines the Worker. The file path may be outside the workspace when that Worker host account can read it; the context selects the Worker and does not impose a workspace read boundary for send_file.',
+      'workspace_context is required and determines the Worker. Relative paths are resolved from that context root; absolute paths remain absolute on the selected Worker.',
       'If the user has not selected a project, automatically obtain a projectless context first through ccm.create_projectless_context; do not ask the user to choose or register a temporary directory.',
       'Do NOT use send_file merely so the model can inspect, review, analyze, or verify a local file. If the file can be examined inside CCM, prefer local reading, view_image, command-line inspection, or a temporary local preview instead. This avoids unnecessary file materialization and user approval prompts.',
       'Before calling send_file, make it clear to the user that the file needs to be transferred into chat. This preserves the original file bytes and does not use BMG or upload the file to ChatGPT Library.',
@@ -217,7 +217,7 @@ export function registerSpecializedTools(registry, runtime) {
     ].join('\n\n'),
     inputSchema: {
       path: z.string().min(1).describe(
-        'File path on the Worker selected by workspace_context. Absolute paths may be outside the workspace when host read permissions allow it.',
+        'File path on the Worker selected by workspace_context. Relative paths resolve from the selected context root; absolute paths remain absolute.',
       ),
       workspace_context: z.string().uuid().describe(
         'Existing workspace context used to determine the Worker that owns the file.',

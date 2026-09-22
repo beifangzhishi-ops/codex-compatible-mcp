@@ -121,10 +121,7 @@ export function registerCoreTools(registry, runtime) {
     surfaces: { direct: true, codeMode: true },
     tags: ['environment', 'worker', 'capabilities'],
     supportsParallel: true,
-    description: [
-      'List CCM execution environments and their native shell, permissions, filesystem policy, and capabilities.',
-      'Important Windows semantics: workspace_roots are project/write boundaries, not read boundaries. With permission_profile=workspace-write, exec_command may read any path the Worker host account can read, while writes remain limited to the selected workspace unless a one-shot escalation is explicitly approved.',
-    ].join('\n\n'),
+    description: 'List CCM execution environments, platform/shell metadata, capabilities, backend, and default selection. Internal bootstrap directories and filesystem permission topology are intentionally not exposed.',
     inputSchema: {},
     handler: async () => jsonResult({
       default_environment_id: runtime.environmentRegistry.defaultEnvironmentId,
@@ -196,7 +193,7 @@ export function registerCoreTools(registry, runtime) {
     tags: ['workspace', 'project', 'approval'],
     description: [
       'Enter a registered workspace and return a workspace_context for subsequent CCM development calls.',
-      'Workspace approval establishes a project context, cwd, and writable boundary. It does not grant, expand, or restrict the Worker\'s existing read access outside the workspace.',
+      'Workspace approval establishes the selected project execution context.',
       'Use this only when the user explicitly intends to work in a registered project. For temporary execution without a selected project, use create_projectless_context instead.',
       'Entering a registered workspace always requires explicit user approval. Call once without approval_id, stop for user approval, call respond_to_escalation, then retry with the same target and approval_id.',
     ].join('\n\n'),
@@ -228,7 +225,7 @@ export function registerCoreTools(registry, runtime) {
             intent,
             'Allow CCM to enter registered workspace ' +
               environment.id + ' / ' + workspace.workspace_id +
-              ' at ' + workspace.root + '? This establishes project/write context only; it does not change existing read access outside the workspace.',
+              ' at ' + workspace.root + '?',
           );
           return jsonResult({
             approval_required: true,
@@ -340,7 +337,6 @@ export function registerCoreTools(registry, runtime) {
       'Runs a command using plain pipes by default; set tty=true to allocate a PTY. Returns output or a session ID for ongoing interaction.',
       'workspace_context is required and already determines the environment and workspace. Do not pass or infer a separate environment for this command.',
       'If no project has been selected, first discover ccm.create_projectless_context with tool_search and invoke it through exec; then pass the returned workspace_context here.',
-      'On Windows with permission_profile=workspace-write, the workspace is the write boundary, not the read boundary: commands may read paths outside the workspace when the Worker host account can read them. Other tools such as apply_patch may intentionally enforce narrower workspace-only filesystem access.',
       'In workspace-write environments, normal remote Git commands such as git clone/fetch/pull/push/ls-remote are handled automatically and do not require sandbox_permissions=require_escalated. Run remote Git as Git-only shell commands so CCM can recognize the trusted path.',
       'A CCM-originated result is identifiable by its structured CCM fields. If a host reports a Script error or safety/policy/tool-call failure without this tool returning a structured result, do not attribute that failure to CCM or claim CCM blocked the command.',
       'On Windows, keep destructive filesystem operations in one shell and verify resolved targets before recursive deletes or moves.',

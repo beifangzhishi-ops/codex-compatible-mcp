@@ -139,10 +139,7 @@ test('core tool surface keeps workspace lifecycle deferred and common operations
     });
     const pending = select.structuredContent.calls[0].result.structured_content;
     assert.equal(pending.approval_required, true);
-    assert.match(
-      pending.justification,
-      /does not change existing read access outside the workspace/,
-    );
+    assert.doesNotMatch(pending.justification, /read access/i);
   } finally {
     codeModeManager.close();
   }
