@@ -53,6 +53,7 @@ function createProtocolServer(
 export function createHttpController({
   toolRegistry,
   runtime,
+  healthProvider = null,
   port = Number(process.env.CCM_PORT || 18209),
   host = process.env.CCM_HOST || '127.0.0.1',
   mcpPath = process.env.CCM_MCP_PATH || '/ccm/mcp',
@@ -68,11 +69,15 @@ export function createHttpController({
   const protocolServers = new Map();
 
   app.get('/ccm/health', (_req, res) => {
+    const extraHealth = typeof healthProvider === 'function'
+      ? healthProvider()
+      : {};
     res.json({
-      status: 'ok',
+      status: extraHealth.status || 'ok',
       service: 'ccm',
       default_environment_id: runtime.environmentRegistry.defaultEnvironmentId,
       environments: runtime.environmentRegistry.listPublic(),
+      ...extraHealth,
     });
   });
 

@@ -1,9 +1,11 @@
-import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createControllerRuntime } from './controller/runtime.mjs';
 import { createHttpController } from './controller/mcp-http-server.mjs';
+import { LocalWorkerSupervisor } from './controller/local-worker-supervisor.mjs';
 import { createToolRegistry } from './tools/index.mjs';
 
 const localEnvironmentId = process.env.CCM_ENVIRONMENT_ID || os.hostname();
@@ -14,40 +16,65 @@ const runtime = createControllerRuntime({
 });
 await runtime.start();
 
-let localWorker = null;
+let localWorkerSupervisor = null;
 const spawnLocalWorker = process.env.CCM_SPAWN_LOCAL_WORKER !== '0';
 if (spawnLocalWorker) {
   const agentPath = fileURLToPath(new URL('./worker/agent.mjs', import.meta.url));
-  const hubAddress = runtime.workerHub.address;
-  localWorker = spawn(process.execPath, [agentPath], {
-    env: {
-      ...process.env,
-      CCM_WORKER_HUB_CONNECT_HOST:
-        runtime.workerHub.host === '0.0.0.0'
-          ? '127.0.0.1'
-          : runtime.workerHub.host === '::'
-            ? '::1'
-            : runtime.workerHub.host,
-      CCM_WORKER_HUB_PORT: String(hubAddress.port),
-      CCM_WORKER_TAKEOVER_TOKEN: localWorkerTakeoverToken,
-    },
-    stdio: ['ignore', 'inherit', 'inherit'],
-    windowsHide: true,
-  });
-
-  const connected = await runtime.workerHub.waitForEnvironment(localEnvironmentId, 10_000);
-  if (!connected) {
-    localWorker.kill();
-    await runtime.close();
-    throw new Error(
-      'Local Remote Worker failed to register environment ' +
-      localEnvironmentId + '.',
+  const logPath = fileURLToPath(
+    new URL('../logs/ccm-local-worker.log', import.meta.url),
+  );
+  fs.mkdirSync(path.dirname(logPath), { recursive: true });
+  const appendLog = (message) => {
+    fs.appendFileSync(
+      logPath,
+      '[' + new Date().toISOString() + '] ' + message + '\n',
+      'utf8',
     );
+  };
+  localWorkerSupervisor = new LocalWorkerSupervisor({
+    workerHub: runtime.workerHub,
+    environmentId: localEnvironmentId,
+    agentPath,
+    takeoverToken: localWorkerTakeoverToken,
+    log: appendLog,
+    onOutput: (stream, chunk) => {
+      const text = String(chunk);
+      fs.appendFileSync(
+        logPath,
+        '[' + new Date().toISOString() + '] [' + stream + '] ' + text,
+        'utf8',
+      );
+      if (stream === 'stderr') process.stderr.write(chunk);
+      else process.stdout.write(chunk);
+    },
+  });
+  try {
+    await localWorkerSupervisor.start();
+  } catch (error) {
+    await localWorkerSupervisor.stop().catch(() => {});
+    await runtime.close();
+    throw error;
   }
 }
 
 const { registry: toolRegistry, codeModeManager } = createToolRegistry(runtime);
-const controller = createHttpController({ toolRegistry, runtime });
+const controller = createHttpController({
+  toolRegistry,
+  runtime,
+  healthProvider: () => {
+    const localWorker = localWorkerSupervisor?.status() || {
+      enabled: false,
+      state: 'disabled',
+    };
+    return {
+      status:
+        localWorker.enabled && localWorker.state !== 'connected'
+          ? 'degraded'
+          : 'ok',
+      local_worker: localWorker,
+    };
+  },
+});
 await controller.start();
 
 console.log('CCM listening at ' + controller.endpoint);
@@ -60,7 +87,7 @@ let stopping = false;
 async function shutdown() {
   if (stopping) return;
   stopping = true;
-  if (localWorker && !localWorker.killed) localWorker.kill();
+  await localWorkerSupervisor?.stop().catch(() => {});
   codeModeManager.close();
   await controller.close();
   process.exit(0);
