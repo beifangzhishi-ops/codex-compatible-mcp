@@ -98,6 +98,16 @@ These are core CCM operations but intentionally stay off the top-level MCP schem
 | `ccm.list_workspaces` | Discover registered projects on one Worker without entering them. |
 | `ccm.select_workspace` | Enter an explicitly selected registered project after user approval. |
 | `ccm.register_workspace` | Register and enter an explicitly selected project directory after user approval. |
+| `ccm.plan_patch` | Create or update one durable Plan using Codex-style patch syntax and an explicit opaque `plan_id`. |
+| `ccm.plan_read` | Read, range-read, or search only the Plan identified by `plan_id`; reading does not change planning/implementation workflow. |
+
+### Durable Plans
+
+CCM provides durable Plan storage without implementing a Controller-side "Plan Mode" state machine. When a user explicitly asks to plan/discuss before implementation and persistence is useful, discover `ccm.plan_patch` / `ccm.plan_read` through `tool_search` and invoke them through `exec`.
+
+`ccm.plan_patch` omits `plan_id` only for the first write. That call creates a Plan and returns an opaque UUID; later reads/patches carry that id explicitly, so Plan identity is independent of MCP transport sessions. Managed Plans are stored centrally under ignored Controller state at `.state/plans/<plan_id>.md`; no public list/delete/search-other-Plans capability is exposed and v0.1 does not automatically expire or garbage-collect Plan files.
+
+Plan patches reuse the normal Codex-style patch grammar but target one virtual file only: creation uses `*** Add File: plan.md`, and updates use `*** Update File: plan.md`. The real `.state` path is never accepted as a tool argument. `ccm.plan_read` is intentionally lifecycle-neutral so implementation can consult a Plan repeatedly without re-entering planning behavior.
 
 ## ToolRegistry and Code Mode
 

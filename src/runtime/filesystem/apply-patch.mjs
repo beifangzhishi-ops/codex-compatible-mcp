@@ -290,6 +290,42 @@ function applyUpdateText(text, hunk, filePath) {
   return joinText(lines, split.eol, split.finalNewline);
 }
 
+export function applySingleFilePatchToText({
+  patch: patchText,
+  currentText = null,
+  targetPath = 'plan.md',
+  mode,
+}) {
+  if (mode !== 'add' && mode !== 'update') {
+    throw patchError("single-file patch mode must be 'add' or 'update'");
+  }
+  const parsed = parsePatch(patchText);
+  if (parsed.environmentId) {
+    throw patchError('single-file text patches do not accept Environment ID');
+  }
+  if (parsed.hunks.length !== 1) {
+    throw patchError('single-file text patches require exactly one file hunk');
+  }
+  const hunk = parsed.hunks[0];
+  if (hunk.path !== targetPath) {
+    throw patchError("patch target must be '" + targetPath + "'");
+  }
+  if (hunk.type !== mode) {
+    throw patchError(
+      "patch for '" + targetPath + "' must use " +
+      (mode === 'add' ? 'Add File' : 'Update File'),
+    );
+  }
+  if (hunk.movePath) {
+    throw patchError('single-file text patches do not accept Move to');
+  }
+  if (mode === 'add') return hunk.content;
+  if (typeof currentText !== 'string') {
+    throw patchError('Update File requires existing text content');
+  }
+  return applyUpdateText(currentText, hunk, targetPath);
+}
+
 function resolveWorkdir(environment, requested) {
   if (!requested) return environment.cwd;
   return path.isAbsolute(requested)

@@ -20,6 +20,7 @@ const runtime = createControllerRuntime({
   workspaceContextStateFile:
     process.env.CCM_WORKSPACE_CONTEXT_FILE ||
     path.join(installRoot, '.state', 'workspace-contexts.json'),
+  planStateDir: path.join(installRoot, '.state', 'plans'),
 });
 await runtime.start();
 
