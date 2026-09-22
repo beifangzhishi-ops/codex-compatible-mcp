@@ -12,6 +12,7 @@ import {
   resolveMaxMcpToolResultBytes,
 } from './response-guard.mjs';
 import {
+  EXEC_IMAGE_BRIDGE_UI_HTML,
   EXEC_IMAGE_BRIDGE_UI_URI,
   VIEW_IMAGE_LEGACY_UI_URI,
   VIEW_IMAGE_UI_HTML,
@@ -52,6 +53,24 @@ function createProtocolServer(
   });
 
   server.registerResource(
+    'ccm-exec-image-bridge-ui-legacy',
+    EXEC_IMAGE_BRIDGE_UI_URI,
+    {
+      title: 'CCM legacy exec image bridge',
+      description: 'Compatibility resource for clients that cached the former exec output template.',
+      mimeType: 'text/html;profile=mcp-app',
+    },
+    async () => ({
+      contents: [{
+        uri: EXEC_IMAGE_BRIDGE_UI_URI,
+        mimeType: 'text/html;profile=mcp-app',
+        text: EXEC_IMAGE_BRIDGE_UI_HTML,
+        _meta: { ui: { prefersBorder: false } },
+      }],
+    }),
+  );
+
+  server.registerResource(
     'ccm-file-transfer',
     new ResourceTemplate('ccm-file:///{token}', { list: undefined }),
     {
@@ -81,7 +100,6 @@ function createProtocolServer(
   );
 
   for (const [name, uri] of [
-    ['ccm-exec-image-bridge-ui', EXEC_IMAGE_BRIDGE_UI_URI],
     ['ccm-view-image-ui', VIEW_IMAGE_UI_URI],
     ['ccm-view-image-ui-v6', VIEW_IMAGE_V6_UI_URI],
     ['ccm-view-image-ui-v5', VIEW_IMAGE_V5_UI_URI],

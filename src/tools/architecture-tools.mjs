@@ -1,6 +1,5 @@
 import * as z from 'zod/v4';
 import { CodeModeManager } from './code-mode-manager.mjs';
-import { EXEC_IMAGE_BRIDGE_UI_URI } from '../ui/view-image-app.mjs';
 
 function jsonResult(value, text = null, extraContent = []) {
   return {
@@ -76,11 +75,6 @@ export function registerArchitectureTools(
     provider: 'ccm-runtime',
     provenance: 'ccm-runtime',
     surfaces: { direct: true },
-    mcpMeta: {
-      ui: { resourceUri: EXEC_IMAGE_BRIDGE_UI_URI },
-      'ui/resourceUri': EXEC_IMAGE_BRIDGE_UI_URI,
-      'openai/outputTemplate': EXEC_IMAGE_BRIDGE_UI_URI,
-    },
     tags: ['tools', 'code-mode', 'orchestration', 'batch'],
     description: [
       'Execute one or more ToolRegistry capabilities through CCM nested dispatch.',

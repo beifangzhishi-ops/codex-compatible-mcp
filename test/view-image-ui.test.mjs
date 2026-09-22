@@ -9,7 +9,6 @@ import { registerArchitectureTools } from '../src/tools/architecture-tools.mjs';
 import { registerCoreTools } from '../src/tools/core-tools.mjs';
 import { ToolRegistry } from '../src/tools/tool-registry.mjs';
 import {
-  EXEC_IMAGE_BRIDGE_UI_URI,
   VIEW_IMAGE_LEGACY_UI_URI,
   VIEW_IMAGE_UI_HTML,
   VIEW_IMAGE_UI_URI,
@@ -176,12 +175,7 @@ test('view_image exposes an MCP Apps image-context bridge', async () => {
     const listed = await client.listTools();
     const execTool = listed.tools.find((tool) => tool.name === 'exec');
     assert.ok(execTool);
-    assert.equal(execTool._meta.ui.resourceUri, EXEC_IMAGE_BRIDGE_UI_URI);
-    assert.equal(execTool._meta['ui/resourceUri'], EXEC_IMAGE_BRIDGE_UI_URI);
-    assert.equal(
-      execTool._meta['openai/outputTemplate'],
-      EXEC_IMAGE_BRIDGE_UI_URI,
-    );
+    assert.equal(execTool._meta, undefined);
     assert.equal(listed.tools.some((tool) => tool.name === 'view_image'), false);
 
     const search = await client.callTool({
@@ -189,11 +183,6 @@ test('view_image exposes an MCP Apps image-context bridge', async () => {
       arguments: { query: 'view image' },
     });
     assert.equal(search.structuredContent.tools[0].qualified_name, 'ccm.view_image');
-
-    const execResource = await client.readResource({
-      uri: EXEC_IMAGE_BRIDGE_UI_URI,
-    });
-    assert.equal(execResource.contents[0].text, VIEW_IMAGE_UI_HTML);
 
     const resource = await client.readResource({ uri: VIEW_IMAGE_UI_URI });
     assert.equal(resource.contents.length, 1);

@@ -317,25 +317,12 @@ so multimodal clients can preserve the image block instead of reducing the
 result to structured-only output. Other tools may use `structuredContent` as
 the standard optional structured companion to `content`.
 
-For MCP Apps-capable hosts, `view_image` is a deferred Code Mode capability
-invoked through the stable top-level `exec` dispatcher. `exec` owns a fixed
-`ui://ccm/exec-image-bridge.html` bridge, so later `view_image` schema and
-implementation changes do not require refreshing the top-level MCP tool list.
-The bridge is intentionally visually hidden: it keeps the standard MCP image
-result without rendering a duplicate preview in the chat, and
-uses the MCP Apps `ui/update-model-context` image content block when the host
-advertises that capability. In ChatGPT, if that portable image-context
-capability is absent, the bridge falls back to a temporary non-Library
-`window.openai.uploadFile(..., { library: false })`, stores the returned file ID
-in widget `imageIds`, and triggers a follow-up turn. This avoids `send_file`
-resource materialization and keeps the image out of ChatGPT Library while still
-using ChatGPT's documented file-ID path for model-visible images. Hosts without
-either bridge still receive the ordinary MCP `image` content unchanged.
-
-The bridge also reports zero intrinsic size and requests that ChatGPT close the
-widget after handoff. This keeps the background-only bridge from leaving an
-empty CCM card in the conversation when the host honors those UI lifecycle
-requests.
+`view_image` is a deferred Code Mode capability invoked through the stable
+top-level `exec` dispatcher. `exec` passes nested MCP `image` content through
+directly while compacting the duplicate structured result, so the model can
+receive the image without attaching an MCP Apps output template or creating a
+widget card for every image. Later `view_image` schema and implementation
+changes therefore do not require refreshing the top-level MCP tool list.
 
 ## Security notes
 

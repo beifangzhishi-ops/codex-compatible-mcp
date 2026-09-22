@@ -1,4 +1,14 @@
 export const EXEC_IMAGE_BRIDGE_UI_URI = 'ui://ccm/exec-image-bridge.html';
+export const EXEC_IMAGE_BRIDGE_UI_HTML = String.raw`<!doctype html>
+<html><head><meta charset="utf-8"><style>
+html,body{margin:0!important;padding:0!important;width:0!important;height:0!important;overflow:hidden!important}
+</style></head><body><script>
+(() => {
+  try { window.openai?.notifyIntrinsicHeight?.({ height: 0 }); } catch {}
+  try { window.openai?.requestClose?.(); } catch {}
+})();
+</script></body></html>`;
+
 export const VIEW_IMAGE_UI_URI = 'ui://ccm/view-image-v7.html';
 export const VIEW_IMAGE_V6_UI_URI = 'ui://ccm/view-image-v6.html';
 export const VIEW_IMAGE_V5_UI_URI = 'ui://ccm/view-image-v5.html';
