@@ -44,6 +44,8 @@ Every execution environment uses the same Remote Worker protocol. The machine ho
 
 Registered workspaces are owned by each Worker, not by the Controller. Entering or hot-registering a real project requires one-shot user approval and returns an opaque `workspace_context`. Normal development tools carry only that context. Workspace contexts are persisted by the Controller and remain valid across Controller or Worker restarts. Worker-local projectless mappings are persisted as well, so a surviving projectless directory can be resumed after a Worker restart.
 
+An environment does not expose a default workspace or default working directory to the MCP client. Worker bootstrap cwd is an internal/legacy runtime seed only; it is not a project-location hint, a default project, or the parent directory for newly created projects. CCM deliberately has no "Projects Root" policy: project placement comes from the user or the upper-layer orchestrator.
+
 When no real project is selected, create an explicit projectless context with the deferred `ccm.create_projectless_context` capability through `tool_search` + `exec`. Pass `environment_id` to create it on a specific Worker, or omit `environment_id` to use the primary environment. Projectless workspaces are created under `CCM_PROJECTLESS_ROOT` (default: the user's `Documents\\CCM` directory) and do not require workspace approval. Do not register temporary directories, `Documents`, drive roots, or other arbitrary paths merely to obtain an execution context.
 
 ### Identity and lifecycle terminology
@@ -204,7 +206,7 @@ Copy-Item .\config\worker.env.example .\config\worker.env
 notepad .\config\worker.env
 ```
 
-Set at least `CCM_WORKER_HUB_CONNECT_HOST` and `CCM_WORKSPACE`; normally also give the Worker a stable `CCM_ENVIRONMENT_ID`. Then install and inspect the Worker task:
+Set at least `CCM_WORKER_HUB_CONNECT_HOST`; normally also give the Worker a stable `CCM_ENVIRONMENT_ID`. `CCM_WORKSPACE` is optional legacy/bootstrap configuration and is not a GPT-visible default project. Then install and inspect the Worker task:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-ccm-worker-autostart.ps1
@@ -276,7 +278,6 @@ On a trusted remote Windows Worker:
 $env:CCM_WORKER_HUB_CONNECT_HOST = "<controller-private-ip>"
 $env:CCM_WORKER_HUB_PORT = "18301"
 $env:CCM_ENVIRONMENT_ID = "build-windows"
-$env:CCM_WORKSPACE = "C:\work\project"
 $env:CCM_PERMISSION_PROFILE = "workspace-write"
 npm run worker
 ```
@@ -296,7 +297,7 @@ The legacy `CCM_WORKER_HUB_HOST` variable is accepted as a fallback for both bin
 | `CCM_SPAWN_LOCAL_WORKER` | enabled | Set to `0` to prevent `npm start` from spawning a local Worker. |
 | `CCM_ENVIRONMENT_ID` | OS hostname | Environment id advertised by a Worker. |
 | `CCM_WORKER_ID` | environment id | Worker connection id. |
-| `CCM_WORKSPACE` | current directory | Legacy/default project root; seeded into the Worker's registered-workspace registry. |
+| `CCM_WORKSPACE` | current directory | Legacy/internal Worker bootstrap seed. It may seed Worker-local registry state for compatibility, but it is not a GPT-visible default workspace/project or a new-project parent. |
 | `CCM_PROJECTLESS_ROOT` | `~/Documents/CCM` | Root used for automatically created projectless workspaces. |
 | `CCM_WORKSPACE_REGISTRY_FILE` | `<install>/.state/workspaces.json` for the packaged Worker | Worker-local registered and projectless workspace registry. |
 | `CCM_WORKSPACE_CONTEXT_FILE` | `<install>/.state/workspace-contexts.json` for the packaged Controller | Persistent Controller workspace-context registry. |
@@ -356,12 +357,11 @@ so multimodal clients can preserve the image block instead of reducing the
 result to structured-only output. Other tools may use `structuredContent` as
 the standard optional structured companion to `content`.
 
-`view_image` is a deferred Code Mode capability invoked through the stable
-top-level `exec` dispatcher. `exec` passes nested MCP `image` content through
-directly while compacting the duplicate structured result, so the model can
-receive the image without attaching an MCP Apps output template or creating a
-widget card for every image. Later `view_image` schema and implementation
-changes therefore do not require refreshing the top-level MCP tool list.
+`view_image` is a common Direct operational tool and is also available through
+Code Mode for nested/batched dispatch. `exec` passes nested MCP `image` content
+through directly while compacting the duplicate structured result, so the
+model can receive the image without attaching an MCP Apps output template or
+creating a widget card for every image.
 
 ## Security notes
 
