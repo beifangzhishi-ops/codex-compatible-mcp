@@ -72,5 +72,15 @@ class ParserTests(unittest.TestCase):
    return {'parent':parent,'children':children,'message':{'author':{'role':role},'create_time':t,'content':{'parts':['x']}}}
   nodes={'root':n(None,['a','b'],1),'a':n('root',[],2),'b':n('root',[],3)}
   self.assertEqual(e.active_branch(nodes),['root','b'])
+ def test_markdown_preserves_speaker_roles(self):
+  out=e.render_markdown([
+   {'role':'user','text':'hello','visible_text':'hello'},
+   {'role':'assistant','text':'hi','visible_text':'hi'},
+   {'role':'tool','text':'result','visible_text':'result'},
+  ])
+  self.assertIn('## User\n\nhello',out)
+  self.assertIn('## Assistant\n\nhi',out)
+  self.assertIn('## Tool\n\nresult',out)
+  self.assertNotIn('## message',out)
 
 if __name__=='__main__': unittest.main()

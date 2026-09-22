@@ -194,6 +194,17 @@ def resolve_output_path(share_url, requested, fmt, branch, mode, cwd=None):
     safe=re.sub(r'[^A-Za-z0-9._-]+','-',share_id).strip('-') or 'conversation'
     return cache/f'{safe}.{branch}.{mode}.{fmt}'
 
+def markdown_role_heading(role):
+    value=(role or 'unknown').strip()
+    known={'user':'User','assistant':'Assistant','system':'System','developer':'Developer','tool':'Tool'}
+    return known.get(value.lower(), value.replace('_',' ').strip().title() or 'Unknown')
+
+def render_markdown(recs):
+    lines=["# ChatGPT Share export","","> exported conversation",""]
+    for r in recs:
+        lines += [f"## {markdown_role_heading(r.get('role'))}", "", r.get('visible_text') or r.get('text') or '', ""]
+    return '\n'.join(lines)
+
 def main():
     ap=argparse.ArgumentParser(); ap.add_argument('share_url'); ap.add_argument('--output'); ap.add_argument('--format',choices=['md','json'],default='md'); ap.add_argument('--branch',choices=['active','all'],default='active'); ap.add_argument('--mode',choices=['text','full'],default='text'); ap.add_argument('--json-summary',action='store_true'); a=ap.parse_args()
     html=fetch(a.share_url); D=extract_payload(html); nodes=unpack(D); meta=conversation_meta(D); current_node=meta.get('current_node')
@@ -206,11 +217,7 @@ def main():
     out.parent.mkdir(parents=True,exist_ok=True)
     if a.format=='json': out.write_text(json.dumps({'title':title,'share_url':a.share_url,'branch':a.branch,'mode':a.mode,'total_nodes':len(nodes),'messages':recs if a.mode=='full' else [{'id':r['id'],'role':r['role'],'create_time':r['create_time'],'text':r['visible_text']} for r in recs]},ensure_ascii=False,indent=2),encoding='utf-8')
     else:
-        lines=["# ChatGPT Share export","","> exported conversation",""]; turn=0
-        for r in recs:
-            if r['role']=='user':turn+=1
-            lines += ["## message", "", r["text"], ""]
-        out.write_text('\n'.join(lines),encoding='utf-8')
+        out.write_text(render_markdown(recs),encoding='utf-8')
     summary={'status':'ok','title':title,'branch':a.branch,'total_nodes':len(nodes),'exported_messages':len(recs),'user_turns':turns,'assistant_messages':sum(r['role']=='assistant' for r in recs),'output_path':str(out.resolve()),'output_bytes':out.stat().st_size}
     print(json.dumps(summary,ensure_ascii=False))
 if __name__=='__main__':
