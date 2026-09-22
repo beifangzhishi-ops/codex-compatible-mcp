@@ -1,4 +1,9 @@
 ﻿import * as z from 'zod/v4';
+import {
+  RESEARCH_PPT_PIPELINE_SECTIONS,
+  RESEARCH_PPT_PIPELINE_VERSION,
+  getResearchPptPipeline,
+} from './research-ppt-pipeline.mjs';
 
 function toolError(error) {
   return {
@@ -127,6 +132,63 @@ async function run(runtime, args, command) {
 export function registerSpecializedTools(registry, runtime) {
   registry.register({
     namespace: 'ccm-extra',
+    name: 'research_ppt_pipeline',
+    provider: 'ccm-specialized',
+    provenance: 'user-validated-research-ppt-workflow',
+    surfaces: { deferred: true, codeMode: true },
+    tags: [
+      'ppt',
+      'powerpoint',
+      'research',
+      'academic',
+      'presentation',
+      'imagegen',
+      'workflow',
+      'slides',
+    ],
+    supportsParallel: true,
+    description: [
+      'Return the user-validated research PowerPoint production workflow used for academic/research decks.',
+      'Use this before or during a research-PPT project to recover the latest agreed process: Mode A vs Mode B, visual-density calibration, source and image review, canonical per-slide production specs, full-pack self-audit, CCM reference-image handoff, fresh-chat Imagegen generation, optional per-slide review, whole-deck QA, mandatory user whole-deck review, and mode-specific final delivery.',
+      'The workflow is guidance for orchestration; it does not itself generate images or PowerPoint files.',
+    ].join('\n\n'),
+    inputSchema: {
+      section: z.enum([
+        'full',
+        ...RESEARCH_PPT_PIPELINE_SECTIONS,
+      ]).optional().describe(
+        'Workflow section to return. Defaults to full.',
+      ),
+      mode: z.enum([
+        'auto',
+        'imagegen_assisted',
+        'zero_imagegen_final',
+      ]).optional().describe(
+        'Optional production mode hint. auto returns the general workflow; the other values append the relevant mode reminder.',
+      ),
+    },
+    handler: async (args) => {
+      try {
+        const section = args.section || 'full';
+        const mode = args.mode || 'auto';
+        const workflow = getResearchPptPipeline(section, mode);
+        return {
+          content: [{ type: 'text', text: workflow }],
+          structuredContent: {
+            capability: 'research_ppt_pipeline',
+            version: RESEARCH_PPT_PIPELINE_VERSION,
+            section,
+            mode,
+            workflow,
+          },
+        };
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  });
+  registry.register({
+    namespace: 'ccm-extra',
     name: 'send_file',
     provider: 'ccm-specialized',
     provenance: 'ccm-native-file-transfer',
@@ -137,9 +199,10 @@ export function registerSpecializedTools(registry, runtime) {
     },
     supportsParallel: true,
     description: [
-      'Send a file from a CCM environment to the GPT client as an embedded binary resource for preview or download.',
-      'This preserves the original file bytes and does not use BMG or upload the file to ChatGPT Library.',
-      'Use this for Word, PDF, Excel, PowerPoint, archives, images, and other local files after locating the exact path.',
+      'Send a file from a CCM environment to the GPT client as an embedded binary resource when the user actually needs the file in chat for preview, download, upload to another tool, or handoff.',
+      'Do NOT use send_file merely so the model can inspect, review, analyze, or verify a local file. If the file can be examined inside CCM, prefer local reading, view_image, command-line inspection, or a temporary local preview instead. This avoids unnecessary file materialization and user approval prompts.',
+      'Before calling send_file, make it clear to the user that the file needs to be transferred into chat. This preserves the original file bytes and does not use BMG or upload the file to ChatGPT Library.',
+      'Use this for Word, PDF, Excel, PowerPoint, archives, images, and other local files only after locating the exact path and determining that an actual user-facing transfer is needed.',
     ].join('\n\n'),
     inputSchema: {
       path: z.string().min(1).describe(
