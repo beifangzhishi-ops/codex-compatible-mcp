@@ -46,6 +46,29 @@ Registered workspaces are owned by each Worker, not by the Controller. Entering 
 
 When no real project is selected, create an explicit projectless context with the deferred `ccm.create_projectless_context` capability through `tool_search` + `exec`. Pass `environment_id` to create it on a specific Worker, or omit `environment_id` to use the primary environment. Projectless workspaces are created under `CCM_PROJECTLESS_ROOT` (default: the user's `Documents\\CCM` directory) and do not require workspace approval. Do not register temporary directories, `Documents`, drive roots, or other arbitrary paths merely to obtain an execution context.
 
+### Identity and lifecycle terminology
+
+CCM deliberately keeps transport identity, execution identity, process identity, and higher-level task state separate. Do not use the word "session" interchangeably for these concepts.
+
+- **Host conversation / ChatGPT conversation**: conversation state owned by the MCP client. CCM does not own it and must not assume a one-to-one mapping between a host conversation and an MCP session.
+- **MCP session**: the current CCM HTTP implementation's stateful Streamable HTTP protocol/transport session. It is created during MCP initialization, identified by the `Mcp-Session-Id` header, and used by the Controller to find the corresponding transport and protocol server. It may span multiple user turns, and a single host conversation may create more than one MCP session because of reconnects, fresh initialization, Controller restart, or other client lifecycle events. **An MCP session is not a durable task, plan, workspace, or conversation identifier.**
+- **Process session (`session_id`)**: a live command/process continuation handle returned by `exec_command` and consumed by `write_stdin`. It identifies one running process session and is unrelated to `Mcp-Session-Id`.
+- **Workspace context (`workspace_context`)**: an opaque logical execution-context identifier that binds a Worker and workspace/projectless root. Workspace contexts are persisted independently of MCP transport sessions and may remain valid across Controller or Worker restarts.
+- **Approval (`approval_id`)**: a one-shot authorization record for one exact escalated operation or workspace entry attempt. It is neither an MCP session nor a workspace context.
+- **Plan**: a logical planning cycle, if/when Plan Mode is used. One MCP session may contain zero, one, or multiple plans. A persisted plan may outlive the MCP session that created it. A session-scoped "active plan" pointer is only a convenience for multi-turn continuity and must never redefine the MCP session itself as the plan identity.
+
+Useful cardinality rules:
+
+```text
+host conversation  -> 0..N MCP sessions
+MCP session        -> 0..N process sessions
+MCP session        -> 0..N logical plans
+workspace_context  -> independent of MCP session lifetime
+persisted plan     -> may outlive MCP session lifetime
+```
+
+When adding stateful features, choose an identity according to the feature's real lifecycle. Do not key durable intent solely by `Mcp-Session-Id` merely because it is convenient at the transport layer.
+
 ## Direct MCP tools
 
 | Tool | Purpose |

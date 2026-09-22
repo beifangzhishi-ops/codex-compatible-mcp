@@ -162,6 +162,10 @@ export function createHttpController({
   ),
 } = {}) {
   const app = createMcpExpressApp();
+  // These maps are keyed by the MCP Streamable HTTP protocol/transport session.
+  // Mcp-Session-Id is not a host conversation id, workspace_context, process
+  // session_id, approval_id, or durable plan/task identity. Do not persist
+  // higher-level intent solely against this transport-scoped identifier.
   const transports = new Map();
   const protocolServers = new Map();
 
