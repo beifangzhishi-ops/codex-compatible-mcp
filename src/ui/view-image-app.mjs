@@ -1,4 +1,5 @@
-export const VIEW_IMAGE_UI_URI = 'ui://ccm/view-image-v2.html';
+export const VIEW_IMAGE_UI_URI = 'ui://ccm/view-image-v3.html';
+export const VIEW_IMAGE_V2_UI_URI = 'ui://ccm/view-image-v2.html';
 export const VIEW_IMAGE_LEGACY_UI_URI = 'ui://ccm/view-image-v1.html';
 
 export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
@@ -71,6 +72,23 @@ export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
         );
       }
 
+      function chatGptToolResult() {
+        const openai = window.openai;
+        const metadata = openai && openai.toolResponseMetadata;
+        return metadata && (
+          metadata.mcp_tool_result || metadata.call_tool_result
+        );
+      }
+
+      function followUpText(meta) {
+        const label = meta.path ? " for " + meta.path : "";
+        return (
+          "CCM view_image added the requested local image" + label +
+          " to model context. Continue the current task using the image now. " +
+          "Do not call view_image again for the same image unless the user asks."
+        );
+      }
+
       async function bridgeResult(result) {
         const image = findImage(result);
         if (!image) return;
@@ -111,19 +129,16 @@ export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
           const canSendMessage = hostCapabilities &&
             hostCapabilities.message &&
             hostCapabilities.message.text;
+          const openai = window.openai;
+          const canSendChatGptFollowUp = openai &&
+            typeof openai.sendFollowUpMessage === "function";
           if (canSendMessage) {
-            const label = meta.path
-              ? " for " + meta.path
-              : "";
             try {
               await request("ui/message", {
                 role: "user",
                 content: [{
                   type: "text",
-                  text:
-                    "CCM view_image added the requested local image" + label +
-                    " to model context. Continue the current task using the image now. " +
-                    "Do not call view_image again for the same image unless the user asks."
+                  text: followUpText(meta)
                 }]
               });
               status.textContent =
@@ -131,6 +146,21 @@ export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
             } catch (messageError) {
               status.textContent =
                 "Image placed in model context, but the automatic follow-up failed: " +
+                String(messageError && messageError.message
+                  ? messageError.message
+                  : messageError);
+            }
+          } else if (canSendChatGptFollowUp) {
+            try {
+              await openai.sendFollowUpMessage({
+                prompt: followUpText(meta),
+                scrollToBottom: true
+              });
+              status.textContent =
+                "Image placed in model context and a ChatGPT follow-up was triggered.";
+            } catch (messageError) {
+              status.textContent =
+                "Image placed in model context, but the ChatGPT follow-up failed: " +
                 String(messageError && messageError.message
                   ? messageError.message
                   : messageError);
@@ -171,6 +201,11 @@ export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
         }
       });
 
+      window.addEventListener("openai:set_globals", () => {
+        const result = chatGptToolResult();
+        if (result) void bridgeResult(result);
+      });
+
       async function initialize() {
         try {
           const initialized = await request("ui/initialize", {
@@ -189,6 +224,8 @@ export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
             jsonrpc: "2.0",
             method: "ui/notifications/initialized"
           });
+          const result = chatGptToolResult();
+          if (result) void bridgeResult(result);
         } catch (error) {
           status.textContent =
             "Image bridge initialization failed: " +

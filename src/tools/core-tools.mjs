@@ -26,19 +26,6 @@ const UNIFIED_EXEC_OUTPUT_SCHEMA = {
   created_at: z.string().optional(),
 };
 
-const VIEW_IMAGE_OUTPUT_SCHEMA = {
-  path: z.string(),
-  mime_type: z.string(),
-  width: z.number().int().nullable(),
-  height: z.number().int().nullable(),
-  byte_length: z.number().int(),
-  workspace_context: z.string().optional(),
-  environment_id: z.string().optional(),
-  workspace_id: z.string().optional(),
-  workspace_kind: z.enum(['registered', 'projectless']).optional(),
-  workspace_root: z.string().optional(),
-};
-
 function jsonResult(value) {
   return {
     content: [{ type: 'text', text: JSON.stringify(value, null, 2) }],
@@ -444,7 +431,6 @@ export function registerCoreTools(registry, runtime) {
       path: z.string().min(1).describe('Image path relative to the selected workspace root.'),
       workspace_context: z.string().uuid().optional().describe('Existing workspace context. Omit only to intentionally start a new projectless workspace.'),
     },
-    outputSchema: VIEW_IMAGE_OUTPUT_SCHEMA,
     handler: async (args) => {
       try {
         return imageResult(await runtime.fileService.viewImage(args));
