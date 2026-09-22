@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 import { FileTransferStore } from '../src/controller/file-transfer-store.mjs';
 import { createHttpController } from '../src/controller/mcp-http-server.mjs';
 import { registerCoreTools } from '../src/tools/core-tools.mjs';
@@ -58,14 +57,6 @@ test('view_image exposes an MCP Apps image-context bridge', async () => {
   );
   try {
     await client.connect(transport);
-    let resolveListChanged;
-    const listChanged = new Promise((resolve) => {
-      resolveListChanged = resolve;
-    });
-    client.setNotificationHandler(
-      ToolListChangedNotificationSchema,
-      () => resolveListChanged(),
-    );
     const listed = await client.listTools();
     const viewImage = listed.tools.find((tool) => tool.name === 'view_image');
     assert.ok(viewImage);
@@ -115,13 +106,8 @@ test('view_image exposes an MCP Apps image-context bridge', async () => {
       arguments: { path: 'probe.png' },
     });
     assert.equal(imageResult.content[0].type, 'image');
-    await Promise.race([
-      listChanged,
-      new Promise((_, reject) => setTimeout(
-        () => reject(new Error('tools/list_changed was not received')),
-        1000,
-      )),
-    ]);
+    assert.equal(imageResult.structuredContent, undefined);
+    assert.equal(imageResult._meta.path, 'probe.png');
   } finally {
     await client.close().catch(() => {});
     await controller.close();

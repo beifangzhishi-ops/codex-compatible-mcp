@@ -111,7 +111,7 @@ export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
 
         const meta = result && result.structuredContent
           ? result.structuredContent
-          : {};
+          : (result && result._meta ? result._meta : {});
         try {
           await request("ui/update-model-context", {
             content: [{

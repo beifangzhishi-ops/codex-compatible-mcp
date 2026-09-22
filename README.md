@@ -311,7 +311,11 @@ If a hard transport limit would be exceeded, CCM returns or triggers a compact f
 
 CCM returns standard MCP tool results directly. It does not add a custom result envelope such as `resultType`.
 
-Text tools return normal `content: [{ type: "text", ... }]` results. `view_image` returns normal MCP image content. `structuredContent` is used only as the standard optional structured companion to `content`.
+Text tools return normal `content: [{ type: "text", ... }]` results. `view_image`
+returns normal MCP image content and keeps its file metadata in result `_meta`,
+so multimodal clients can preserve the image block instead of reducing the
+result to structured-only output. Other tools may use `structuredContent` as
+the standard optional structured companion to `content`.
 
 For MCP Apps-capable hosts, `view_image` also advertises a small `ui://`
 image preview. The view keeps the standard MCP image result, renders it, and

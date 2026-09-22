@@ -91,7 +91,7 @@ function imageResult(value) {
       data: value.data,
       mimeType: value.mime_type,
     }],
-    structuredContent: {
+    _meta: {
       path: value.path,
       mime_type: value.mime_type,
       width: value.width,
