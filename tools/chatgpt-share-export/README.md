@@ -24,4 +24,4 @@ python tools/chatgpt-share-export/export.py "https://chatgpt.com/share/..." --mo
 
 `--output` is optional. When omitted, the exporter generates a filename under `.cache/chatgpt-share-export/`. Any relative `--output` path is also rooted under that Git-ignored cache directory, so bare filenames do not pollute the CCM repository. Absolute paths are written exactly where requested.
 
-Network fetching uses finite curl connect/overall timeouts and honors `HTTP_PROXY` / `HTTPS_PROXY` from the CCM environment.
+Network fetching uses Python's HTTPS stack with a finite request timeout and honors `HTTP_PROXY` / `HTTPS_PROXY` from the CCM environment. The exporter prefers an explicitly configured CA bundle (`SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, or `CURL_CA_BUNDLE`) and otherwise uses `certifi` when available, avoiding Windows `curl`/Schannel backend mismatches inside Python child processes.

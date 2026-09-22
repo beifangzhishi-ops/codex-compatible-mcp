@@ -1,11 +1,19 @@
-import importlib.util, unittest
+import importlib.util, os, tempfile, unittest
 from pathlib import Path
+from unittest.mock import patch
 
 P=Path(__file__).with_name('export.py')
 spec=importlib.util.spec_from_file_location('share_export',P)
 e=importlib.util.module_from_spec(spec); spec.loader.exec_module(e)
 
 class ParserTests(unittest.TestCase):
+ def test_ca_bundle_prefers_explicit_environment_file(self):
+  with tempfile.NamedTemporaryFile() as f:
+   with patch.dict(os.environ,{'SSL_CERT_FILE':f.name},clear=False):
+    self.assertEqual(e.ca_bundle_path(),str(Path(f.name)))
+ def test_fetch_rejects_non_share_url_before_network_access(self):
+  with self.assertRaises(ValueError):
+   e.fetch('https://chatgpt.com/')
  def test_default_output_uses_gitignored_cache(self):
   out=e.resolve_output_path('https://chatgpt.com/share/abc',None,'md','active','text',Path('C:/repo'))
   self.assertEqual(out,Path('C:/repo/.cache/chatgpt-share-export/abc.active.text.md').resolve())

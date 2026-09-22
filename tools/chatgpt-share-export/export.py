@@ -1,15 +1,50 @@
 #!/usr/bin/env python3
-import argparse, json, re, subprocess, sys
+import argparse, importlib, json, os, re, ssl, sys, time
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
+from urllib.request import HTTPSHandler, Request, build_opener
+
+def ca_bundle_path():
+    for name in ('SSL_CERT_FILE','REQUESTS_CA_BUNDLE','CURL_CA_BUNDLE'):
+        value=os.environ.get(name)
+        if value and Path(value).is_file():
+            return str(Path(value))
+    for module_name in ('certifi','pip._vendor.certifi'):
+        try:
+            module=importlib.import_module(module_name)
+            value=module.where()
+            if value and Path(value).is_file():
+                return str(Path(value))
+        except (ImportError, AttributeError):
+            pass
+    return None
+
+def ssl_context():
+    bundle=ca_bundle_path()
+    return ssl.create_default_context(cafile=bundle) if bundle else ssl.create_default_context()
 
 def fetch(url):
     u=urlparse(url)
     if u.scheme!='https' or u.hostname not in ('chatgpt.com','www.chatgpt.com') or not u.path.startswith('/share/'):
         raise ValueError('share_url must be an https://chatgpt.com/share/... URL')
-    p=subprocess.run(['curl.exe','-L','--fail','--silent','--show-error','--connect-timeout','10','--max-time','60','--retry','1',url],capture_output=True)
-    if p.returncode: raise RuntimeError(p.stderr.decode('utf-8','replace').strip() or f'curl failed: {p.returncode}')
-    return p.stdout.decode('utf-8','replace')
+    opener=build_opener(HTTPSHandler(context=ssl_context()))
+    request=Request(url,headers={'User-Agent':'ccm-chatgpt-share-export/1.0'})
+    last_error=None
+    for attempt in range(2):
+        try:
+            with opener.open(request,timeout=60) as response:
+                body=response.read()
+                charset=response.headers.get_content_charset() or 'utf-8'
+                return body.decode(charset,'replace')
+        except HTTPError as e:
+            raise RuntimeError(f'ChatGPT Share request failed with HTTP {e.code}: {e.reason}') from e
+        except (URLError,TimeoutError,OSError) as e:
+            last_error=e
+            if attempt==0:
+                time.sleep(0.25)
+    reason=getattr(last_error,'reason',last_error)
+    raise RuntimeError(f'ChatGPT Share request failed: {reason}') from last_error
 
 def resolve_indexed(D, value, cache=None, stack=None):
     cache={} if cache is None else cache
