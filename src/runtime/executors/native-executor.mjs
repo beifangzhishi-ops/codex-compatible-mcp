@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { spawn as spawnChild } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { buildProxyEnvironment } from '../proxy-env.mjs';
 
 const DEFAULT_PTY_PROXY_PATH = fileURLToPath(
   new URL('../../../native/bin/ccm-pty-proxy.exe', import.meta.url),
@@ -43,6 +44,7 @@ export class NativeEnvironmentExecutor {
     onData,
     onExit,
   }) {
+    const childEnv = buildProxyEnvironment(process.env);
     const invocation = this.sandboxBackend.buildInvocation({
       environment,
       command,
@@ -75,7 +77,7 @@ export class NativeEnvironmentExecutor {
           cwd,
           windowsHide: true,
           stdio: ['pipe', 'pipe', 'pipe'],
-          env: { ...process.env },
+          env: childEnv,
         },
       );
 
@@ -89,7 +91,7 @@ export class NativeEnvironmentExecutor {
       cwd,
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env },
+      env: childEnv,
     });
 
     return {
