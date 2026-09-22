@@ -22,10 +22,19 @@ function environmentDescriptor(runtime) {
   };
 }
 
+export class RemoteWorkerHandshakeError extends Error {
+  constructor(message, code = 'worker_hello_rejected') {
+    super(message);
+    this.name = 'RemoteWorkerHandshakeError';
+    this.code = code;
+  }
+}
+
 export class RemoteWorkerClient {
   constructor({
     runtime,
     workerId,
+    takeoverToken = process.env.CCM_WORKER_TAKEOVER_TOKEN || null,
     host = process.env.CCM_WORKER_HUB_CONNECT_HOST ||
       process.env.CCM_WORKER_HUB_HOST ||
       '127.0.0.1',
@@ -38,6 +47,7 @@ export class RemoteWorkerClient {
     this.runtime = runtime;
     const environment = environmentDescriptor(runtime);
     this.workerId = String(workerId || process.env.CCM_WORKER_ID || environment.id);
+    this.takeoverToken = takeoverToken ? String(takeoverToken) : null;
     this.host = host;
     this.port = port;
     this.handshakeTimeoutMs = handshakeTimeoutMs;
@@ -83,6 +93,9 @@ export class RemoteWorkerClient {
           type: 'hello',
           protocol: WORKER_PROTOCOL,
           worker_id: this.workerId,
+          ...(this.takeoverToken
+            ? { takeover_token: this.takeoverToken }
+            : {}),
           environments: [environmentDescriptor(this.runtime)],
         });
       });
@@ -94,7 +107,10 @@ export class RemoteWorkerClient {
             return;
           }
           if (message?.type === 'hello_error') {
-            fail(new Error(String(message.message || 'Worker hello rejected.')));
+            fail(new RemoteWorkerHandshakeError(
+              String(message.message || 'Worker hello rejected.'),
+              String(message.code || 'worker_hello_rejected'),
+            ));
             socket.destroy();
             return;
           }

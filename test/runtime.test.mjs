@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRuntime } from '../src/runtime/index.mjs';
+import { killChildProcessTree } from '../src/runtime/executors/native-executor.mjs';
 
 const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const stateDir = path.join(root, '.state');
@@ -194,4 +195,47 @@ test('tty sessions accept interactive write_stdin input', async () => {
   } finally {
     runtime.close();
   }
+});
+
+test('Windows child termination uses taskkill /T /F before falling back to direct kill', () => {
+  const calls = [];
+  let directKillCount = 0;
+  const child = {
+    pid: 4321,
+    kill() {
+      directKillCount += 1;
+    },
+  };
+
+  killChildProcessTree(child, {
+    platform: 'win32',
+    spawnSync(file, args, options) {
+      calls.push({ file, args, options });
+      return { status: 0 };
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].file, 'taskkill.exe');
+  assert.deepEqual(calls[0].args, ['/PID', '4321', '/T', '/F']);
+  assert.equal(directKillCount, 0);
+});
+
+test('child termination falls back to direct kill when taskkill fails', () => {
+  let directKillCount = 0;
+  const child = {
+    pid: 4321,
+    kill() {
+      directKillCount += 1;
+    },
+  };
+
+  killChildProcessTree(child, {
+    platform: 'win32',
+    spawnSync() {
+      return { status: 1 };
+    },
+  });
+
+  assert.equal(directKillCount, 1);
 });

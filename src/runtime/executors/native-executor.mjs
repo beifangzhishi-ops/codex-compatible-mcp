@@ -1,11 +1,40 @@
 import fs from 'node:fs';
-import { spawn as spawnChild } from 'node:child_process';
+import {
+  spawn as spawnChild,
+  spawnSync as spawnSyncChild,
+} from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { buildProxyEnvironment } from '../proxy-env.mjs';
 
 const DEFAULT_PTY_PROXY_PATH = fileURLToPath(
   new URL('../../../native/bin/ccm-pty-proxy.exe', import.meta.url),
 );
+
+export function killChildProcessTree(
+  child,
+  {
+    platform = process.platform,
+    spawnSync = spawnSyncChild,
+  } = {},
+) {
+  if (!child) return;
+
+  if (platform === 'win32' && Number.isInteger(child.pid) && child.pid > 0) {
+    const result = spawnSync(
+      'taskkill.exe',
+      ['/PID', String(child.pid), '/T', '/F'],
+      {
+        windowsHide: true,
+        stdio: 'ignore',
+      },
+    );
+    if (!result?.error && result?.status === 0) return;
+  }
+
+  try {
+    child.kill();
+  } catch {}
+}
 
 function wirePipeChild(child, onData, onExit) {
   child.stdout.on('data', onData);
@@ -20,7 +49,7 @@ function wirePipeChild(child, onData, onExit) {
       child.stdin.write(chars);
     },
     kill() {
-      child.kill();
+      killChildProcessTree(child);
     },
     get stdinWritable() {
       return Boolean(child.stdin?.writable);

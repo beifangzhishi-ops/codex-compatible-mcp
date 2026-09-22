@@ -18,6 +18,7 @@ export class WorkerHub extends EventEmitter {
       '127.0.0.1',
     port = Number(process.env.CCM_WORKER_HUB_PORT || 18301),
     requestTimeoutMs = 30_000,
+    takeoverToken = null,
   } = {}) {
     super();
     if (!environmentRegistry) throw new Error('WorkerHub requires an environment registry.');
@@ -25,6 +26,7 @@ export class WorkerHub extends EventEmitter {
     this.host = host;
     this.port = port;
     this.requestTimeoutMs = requestTimeoutMs;
+    this.takeoverToken = takeoverToken ? String(takeoverToken) : null;
     this.server = null;
     this.connections = new Map();
     this.environmentOwners = new Map();
@@ -190,8 +192,52 @@ export class WorkerHub extends EventEmitter {
     const workerId = String(message.worker_id);
     const previous = this.connections.get(workerId);
     if (previous && previous !== connection) {
-      this.#removeConnection(previous, new Error('Remote Worker connection replaced.'));
+      const authorizedTakeover = Boolean(
+        this.takeoverToken &&
+        message.takeover_token &&
+        String(message.takeover_token) === this.takeoverToken,
+      );
+      if (!authorizedTakeover) {
+        send(connection.socket, {
+          type: 'hello_error',
+          code: 'duplicate_worker_id',
+          message: 'Remote Worker id is already connected: ' + workerId + '.',
+        });
+        connection.socket.destroy();
+        return;
+      }
+
+      this.#removeConnection(
+        previous,
+        new Error('Remote Worker connection superseded by controller-owned worker.'),
+      );
       previous.socket.destroy();
+    }
+
+    for (const environment of environments) {
+      const environmentId = String(environment.id || '');
+      if (!environmentId) {
+        send(connection.socket, {
+          type: 'hello_error',
+          code: 'invalid_environment_id',
+          message: 'Worker environment id is required.',
+        });
+        connection.socket.destroy();
+        return;
+      }
+
+      const owner = this.environmentOwners.get(environmentId);
+      if (owner && owner !== workerId) {
+        send(connection.socket, {
+          type: 'hello_error',
+          code: 'environment_already_owned',
+          message:
+            'Environment ' + environmentId +
+            ' is already owned by worker ' + owner + '.',
+        });
+        connection.socket.destroy();
+        return;
+      }
     }
 
     connection.workerId = workerId;
@@ -200,14 +246,6 @@ export class WorkerHub extends EventEmitter {
     try {
       for (const environment of environments) {
         const environmentId = String(environment.id || '');
-        if (!environmentId) throw new Error('Worker environment id is required.');
-
-        const owner = this.environmentOwners.get(environmentId);
-        if (owner && owner !== workerId) {
-          throw new Error(
-            'Environment ' + environmentId + ' is already owned by worker ' + owner + '.',
-          );
-        }
 
         this.environmentRegistry.unregister(environmentId);
         this.environmentRegistry.register({
@@ -229,6 +267,7 @@ export class WorkerHub extends EventEmitter {
       this.#removeConnection(connection, error);
       send(connection.socket, {
         type: 'hello_error',
+        code: 'worker_registration_failed',
         message: String(error?.message || error),
       });
       connection.socket.destroy();

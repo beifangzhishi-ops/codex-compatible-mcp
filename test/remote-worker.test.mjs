@@ -78,6 +78,93 @@ test('Remote Worker connect times out when hello_ack never arrives', async () =>
   }
 });
 
+test('Controller rejects a duplicate worker id without replacing the active worker', async () => {
+  const controller = createControllerRuntime({ workerPort: 0 });
+  const firstRuntime = workerRuntime('worker-duplicate');
+  const secondRuntime = workerRuntime('worker-duplicate');
+  let firstClient = null;
+  let secondClient = null;
+
+  await controller.start();
+  try {
+    firstClient = new RemoteWorkerClient({
+      runtime: firstRuntime,
+      workerId: 'worker-duplicate',
+      port: controller.workerHub.address.port,
+    });
+    secondClient = new RemoteWorkerClient({
+      runtime: secondRuntime,
+      workerId: 'worker-duplicate',
+      port: controller.workerHub.address.port,
+    });
+    await firstClient.connect();
+    await assert.rejects(
+      secondClient.connect(),
+      (error) => error?.code === 'duplicate_worker_id',
+    );
+
+    assert.equal(firstClient.connected, true);
+    assert.equal(
+      controller.environmentRegistry.resolve('worker-duplicate').id,
+      'worker-duplicate',
+    );
+  } finally {
+    await firstClient?.close().catch(() => {});
+    await secondClient?.close().catch(() => {});
+    firstRuntime.close();
+    secondRuntime.close();
+    await controller.close();
+  }
+});
+
+test('Controller-owned worker can take over a stale duplicate identity', async () => {
+  const takeoverToken = 'test-controller-takeover-token';
+  const controller = createControllerRuntime({
+    workerPort: 0,
+    workerTakeoverToken: takeoverToken,
+  });
+  const staleRuntime = workerRuntime('worker-takeover');
+  const ownedRuntime = workerRuntime('worker-takeover');
+  let staleClient = null;
+  let ownedClient = null;
+
+  await controller.start();
+  try {
+    staleClient = new RemoteWorkerClient({
+      runtime: staleRuntime,
+      workerId: 'worker-takeover',
+      port: controller.workerHub.address.port,
+    });
+    await staleClient.connect();
+
+    ownedClient = new RemoteWorkerClient({
+      runtime: ownedRuntime,
+      workerId: 'worker-takeover',
+      takeoverToken,
+      port: controller.workerHub.address.port,
+    });
+    await ownedClient.connect();
+
+    for (let index = 0; index < 50 && staleClient.connected; index += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(staleClient.connected, false);
+    assert.equal(ownedClient.connected, true);
+
+    await assert.rejects(
+      staleClient.connect(),
+      (error) => error?.code === 'duplicate_worker_id',
+    );
+    assert.equal(ownedClient.connected, true);
+  } finally {
+    await staleClient?.close().catch(() => {});
+    await ownedClient?.close().catch(() => {});
+    staleRuntime.close();
+    ownedRuntime.close();
+    await controller.close();
+  }
+});
+
 test('Controller routes execution across Remote Workers', async () => {
   const controller = createControllerRuntime({ workerPort: 0 });
   const workerA = workerRuntime('worker-a');

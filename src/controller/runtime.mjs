@@ -14,6 +14,7 @@ export function createControllerRuntime(options = {}) {
     environmentRegistry,
     host: options.workerHost,
     port: options.workerPort,
+    takeoverToken: options.workerTakeoverToken,
   });
   const approvalManager = options.approvalManager || new ApprovalManager();
   const processManager = options.processManager || new RemoteProcessManager({

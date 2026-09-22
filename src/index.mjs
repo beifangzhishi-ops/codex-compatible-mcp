@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createControllerRuntime } from './controller/runtime.mjs';
@@ -6,8 +7,10 @@ import { createHttpController } from './controller/mcp-http-server.mjs';
 import { createToolRegistry } from './tools/index.mjs';
 
 const localEnvironmentId = process.env.CCM_ENVIRONMENT_ID || os.hostname();
+const localWorkerTakeoverToken = randomUUID();
 const runtime = createControllerRuntime({
   defaultEnvironmentId: localEnvironmentId,
+  workerTakeoverToken: localWorkerTakeoverToken,
 });
 await runtime.start();
 
@@ -26,6 +29,7 @@ if (spawnLocalWorker) {
             ? '::1'
             : runtime.workerHub.host,
       CCM_WORKER_HUB_PORT: String(hubAddress.port),
+      CCM_WORKER_TAKEOVER_TOKEN: localWorkerTakeoverToken,
     },
     stdio: ['ignore', 'inherit', 'inherit'],
     windowsHide: true,

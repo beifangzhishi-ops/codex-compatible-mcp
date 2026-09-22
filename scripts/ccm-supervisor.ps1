@@ -95,8 +95,14 @@ try {
             if(-not (WaitPort 18208 10)){ throw 'CCM OAuth sidecar did not listen on 18208.' }
             if(-not (WaitHealthy 20)){ throw 'CCM health checks did not become ready.' }
 
-            $envInfo=(Invoke-RestMethod 'http://127.0.0.1:18209/ccm/health' -TimeoutSec 3).environments |
+            $health=(Invoke-RestMethod 'http://127.0.0.1:18209/ccm/health' -TimeoutSec 3)
+            $expectedEnv=if($env:CCM_ENVIRONMENT_ID){$env:CCM_ENVIRONMENT_ID}else{$env:COMPUTERNAME}
+            $envInfo=$health.environments |
+                Where-Object { $_.id -eq $expectedEnv } |
                 Select-Object -First 1
+            if(-not $envInfo){
+                $envInfo=$health.environments | Select-Object -First 1
+            }
             Log ("ready gateway={0} env={1} permission={2}" -f $gateway.Id,$envInfo.id,$envInfo.permission_profile)
 
             while(-not $gateway.HasExited){
