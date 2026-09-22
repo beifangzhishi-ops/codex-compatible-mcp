@@ -22,6 +22,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       cwd: tempRoot,
       permissionProfile: 'workspace-write',
     },
+    projectlessRoot: path.join(tempRoot, 'projectless'),
   });
   await runtime.start();
 
@@ -51,7 +52,10 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       'exec',
       'exec_command',
       'list_environments',
+      'list_workspaces',
+      'register_workspace',
       'respond_to_escalation',
+      'select_workspace',
       'tool_search',
       'view_image',
       'wait',
@@ -61,18 +65,20 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const result = await client.callTool({
       name: 'exec_command',
       arguments: {
-        environment_id: 'mcp-worker',
         cmd: 'Write-Output MCP_OK',
       },
     });
     assert.equal(result.isError, undefined);
     assert.equal(Object.hasOwn(result, 'resultType'), false);
     assert.match(result.content[0].text, /MCP_OK/);
+    const workspaceContext = result.structuredContent.workspace_context;
+    const workspaceRoot = result.structuredContent.workspace_root;
+    assert.equal(result.structuredContent.workspace_kind, 'projectless');
 
     const escalation = await client.callTool({
       name: 'exec_command',
       arguments: {
-        environment_id: 'mcp-worker',
+        workspace_context: workspaceContext,
         cmd: 'Write-Output MCP_ESCALATED_OK',
         sandbox_permissions: 'require_escalated',
         justification: 'Allow this MCP test command once?',
@@ -96,7 +102,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const escalatedResult = await client.callTool({
       name: 'exec_command',
       arguments: {
-        environment_id: 'mcp-worker',
+        workspace_context: workspaceContext,
         cmd: 'Write-Output MCP_ESCALATED_OK',
         sandbox_permissions: 'require_escalated',
         justification: 'Allow this MCP test command once?',
@@ -112,7 +118,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
         calls: [{
           tool: 'ccm.exec_command',
           arguments: {
-            environment_id: 'mcp-worker',
+            workspace_context: workspaceContext,
             cmd: 'Write-Output NESTED_CORE_OK',
           },
         }],
@@ -130,7 +136,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const patchResult = await client.callTool({
       name: 'apply_patch',
       arguments: {
-        environment_id: 'mcp-worker',
+        workspace_context: workspaceContext,
         patch: [
           '*** Begin Patch',
           '*** Add File: mcp.txt',
@@ -142,7 +148,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(patchResult.isError, undefined);
     assert.match(patchResult.content[0].text, /A mcp\.txt/);
     assert.equal(
-      await fs.readFile(path.join(tempRoot, 'mcp.txt'), 'utf8'),
+      await fs.readFile(path.join(workspaceRoot, 'mcp.txt'), 'utf8'),
       'patched through MCP\n',
     );
 
@@ -150,11 +156,11 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2F+QAAAAASUVORK5CYII=',
       'base64',
     );
-    await fs.writeFile(path.join(tempRoot, 'tiny.png'), png);
+    await fs.writeFile(path.join(workspaceRoot, 'tiny.png'), png);
     const imageResult = await client.callTool({
       name: 'view_image',
       arguments: {
-        environment_id: 'mcp-worker',
+        workspace_context: workspaceContext,
         path: 'tiny.png',
       },
     });

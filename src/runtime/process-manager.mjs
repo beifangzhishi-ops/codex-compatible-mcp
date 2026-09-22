@@ -6,6 +6,7 @@ import {
   DEFAULT_MAX_OUTPUT_TOKENS,
 } from './output-budget.mjs';
 import { resolvePermissionProfile } from './sandbox/sandbox-policy.mjs';
+import { resolveWorkspaceRelativePath } from './workspace-registry.mjs';
 
 const MIN_YIELD_TIME_MS = 250;
 const DEFAULT_EXEC_YIELD_TIME_MS = 2_000;
@@ -40,7 +41,7 @@ function generateChunkId() {
   return crypto.randomBytes(3).toString('hex');
 }
 
-function resolveWorkdir(environment, requested) {
+function resolveLegacyWorkdir(environment, requested) {
   if (!requested) return environment.cwd;
   if (path.isAbsolute(requested)) return path.normalize(requested);
   return path.resolve(environment.cwd, requested);
@@ -69,9 +70,10 @@ function appendOutput(record, chunk) {
 }
 
 export class ProcessManager {
-  constructor({ environmentRegistry, executorRegistry }) {
+  constructor({ environmentRegistry, executorRegistry, workspaceRegistry = null }) {
     this.environmentRegistry = environmentRegistry;
     this.executorRegistry = executorRegistry;
+    this.workspaceRegistry = workspaceRegistry;
     this.sessions = new Map();
     this.nextProcessId = 1000;
   }
@@ -88,9 +90,16 @@ export class ProcessManager {
   }
 
   async execCommand(args) {
-    const environment = this.environmentRegistry.resolve(args.environment_id);
+    const environment = args.workspace_id
+      ? this.workspaceRegistry?.environmentFor(args.workspace_id)
+      : this.environmentRegistry.resolve(args.environment_id);
+    if (!environment) {
+      throw new Error('Workspace execution requires a workspace registry.');
+    }
     const executor = this.executorRegistry.resolve(environment);
-    const cwd = resolveWorkdir(environment, args.workdir);
+    const cwd = args.workspace_id
+      ? resolveWorkspaceRelativePath(environment.cwd, args.workdir, 'workdir')
+      : resolveLegacyWorkdir(environment, args.workdir);
     const permissionProfile = resolvePermissionProfile(
       environment,
       args.sandbox_permissions,

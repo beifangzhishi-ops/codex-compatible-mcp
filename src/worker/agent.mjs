@@ -17,7 +17,11 @@ process.env.CCM_INSTALL_ROOT ||= installRoot;
 const takeoverToken = process.env.CCM_WORKER_TAKEOVER_TOKEN || null;
 delete process.env.CCM_WORKER_TAKEOVER_TOKEN;
 
-const runtime = createWorkerRuntime();
+const runtime = createWorkerRuntime({
+  workspaceStateFile:
+    process.env.CCM_WORKSPACE_REGISTRY_FILE ||
+    path.join(installRoot, '.state', 'workspaces.json'),
+});
 const reconnectDelayMs = Number(process.env.CCM_WORKER_RECONNECT_MS || 1000);
 const healthIntervalMs = Number(
   process.env.CCM_WORKER_HEALTH_INTERVAL_MS || 5_000,

@@ -8,13 +8,19 @@ function clampInitialExecYield(milliseconds) {
 }
 
 export class RemoteProcessManager {
-  constructor({ environmentRegistry, workerHub, approvalManager = null }) {
+  constructor({
+    environmentRegistry,
+    workerHub,
+    approvalManager = null,
+    workspaceContextManager = null,
+  }) {
     if (!environmentRegistry || !workerHub) {
       throw new Error('RemoteProcessManager requires environmentRegistry and workerHub.');
     }
     this.environmentRegistry = environmentRegistry;
     this.workerHub = workerHub;
     this.approvalManager = approvalManager;
+    this.workspaceContextManager = workspaceContextManager;
     this.sessions = new Map();
     this.nextSessionId = 1000;
     this.onEnvironmentDisconnected = (environmentId) => {
@@ -39,11 +45,33 @@ export class RemoteProcessManager {
   }
 
   async execCommand(args) {
-    const environment = this.environmentRegistry.resolve(args.environment_id);
+    let workspaceContext = null;
+    let environment;
+    let forwardedArgs;
+    const contextMode = Boolean(args.workspace_context) || !args.environment_id;
+    if (contextMode) {
+      if (!this.workspaceContextManager) {
+        throw new Error('Workspace context manager is not available.');
+      }
+      workspaceContext = args.workspace_context
+        ? this.workspaceContextManager.resolve(args.workspace_context)
+        : await this.workspaceContextManager.createProjectless();
+      environment = this.environmentRegistry.resolve(
+        workspaceContext.environment_id,
+      );
+      forwardedArgs = {
+        ...args,
+        environment_id: environment.id,
+        workspace_id: workspaceContext.workspace_id,
+      };
+      delete forwardedArgs.workspace_context;
+    } else {
+      environment = this.environmentRegistry.resolve(args.environment_id);
+      forwardedArgs = { ...args, environment_id: environment.id };
+    }
     const requestedYieldMs = clampInitialExecYield(args.yield_time_ms);
-    let forwardedArgs = {
-      ...args,
-      environment_id: environment.id,
+    forwardedArgs = {
+      ...forwardedArgs,
       yield_time_ms: requestedYieldMs,
     };
     const wantsEscalation = args.sandbox_permissions === 'require_escalated';
@@ -60,7 +88,12 @@ export class RemoteProcessManager {
       }
       if (!args.approval_id) {
         const approval = this.approvalManager.requestExecution(
-          args,
+          {
+            ...args,
+            ...(workspaceContext
+              ? { workspace_context: workspaceContext.workspace_context }
+              : {}),
+          },
           environment.id,
         );
         return {
@@ -70,12 +103,18 @@ export class RemoteProcessManager {
             'Approval required before this command can run outside the sandbox.',
           approval_required: true,
           ...approval,
+          ...(workspaceContext || {}),
         };
       }
 
       this.approvalManager.consumeExecution(
         args.approval_id,
-        args,
+        {
+          ...args,
+          ...(workspaceContext
+            ? { workspace_context: workspaceContext.workspace_context }
+            : {}),
+        },
         environment.id,
       );
       forwardedArgs = {
@@ -106,10 +145,15 @@ export class RemoteProcessManager {
       this.sessions.set(publicSessionId, {
         environmentId: environment.id,
         remoteSessionId: result.session_id,
+        workspaceContext: workspaceContext?.workspace_context || null,
       });
-      return { ...result, session_id: publicSessionId };
+      return {
+        ...result,
+        session_id: publicSessionId,
+        ...(workspaceContext || {}),
+      };
     }
-    return result;
+    return { ...result, ...(workspaceContext || {}) };
   }
 
   async writeStdin(args) {

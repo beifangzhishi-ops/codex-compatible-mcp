@@ -25,12 +25,14 @@ CCM Controller
    |- MCP HTTP server
    |- ToolRegistry
    |- Environment Registry
+   |- Workspace Context Manager
    |- RemoteProcessManager / RemoteFileService
    '- WorkerHub
           |
           v
       Remote Worker
          |- native shell / filesystem semantics
+         |- Worker-local Workspace Registry
          |- ProcessManager
          |- PTY
          |- native sandbox
@@ -40,17 +42,20 @@ CCM Controller
 
 Every execution environment uses the same Remote Worker protocol. The machine hosting the Controller is not a special execution backend: by default, `npm start` launches a normal Remote Worker locally and connects it through loopback.
 
-Environment selection is per operation. A session may use a default environment, while individual calls can specify `environment_id`.
+Registered workspaces are owned by each Worker, not by the Controller. Entering or hot-registering a real project requires one-shot user approval and returns an opaque `workspace_context`. Normal development tools carry only that context. If no context is supplied, CCM creates a new projectless workspace under `CCM_PROJECTLESS_ROOT` (default: the user's `Documents\CCM` directory) without touching a registered project.
 
 ## Direct MCP tools
 
 | Tool | Purpose |
 | --- | --- |
 | `list_environments` | Show connected execution environments and capabilities. |
-| `exec_command` | Run a native shell command. Uses pipes by default; `tty=true` allocates a PTY. |
+| `list_workspaces` | Discover registered projects on one Worker without entering them. |
+| `select_workspace` | Enter a registered project after explicit user approval and receive a `workspace_context`. |
+| `register_workspace` | Hot-register and enter a new project directory after explicit user approval. |
+| `exec_command` | Run a native shell command inside a workspace context. Missing context starts a new projectless workspace. |
 | `write_stdin` | Write to or poll a live process session returned by `exec_command`. |
-| `apply_patch` | Apply Codex-style `*** Begin Patch` / `*** End Patch` edits on the selected Worker. |
-| `view_image` | Read and validate a bounded PNG/JPEG/GIF/WebP image from the selected Worker. |
+| `apply_patch` | Apply Codex-style `*** Begin Patch` / `*** End Patch` edits inside a workspace context. |
+| `view_image` | Read and validate a bounded PNG/JPEG/GIF/WebP image inside a workspace context. |
 | `tool_search` | Discover deferred ToolRegistry capabilities without expanding the top-level MCP schema. |
 | `exec` | Dispatch one or more nested registered capabilities, sequentially or safely in parallel. |
 | `wait` | Resume a nested `exec` cell that yielded before completion. |
@@ -252,7 +257,8 @@ The legacy `CCM_WORKER_HUB_HOST` variable is accepted as a fallback for both bin
 | `CCM_SPAWN_LOCAL_WORKER` | enabled | Set to `0` to prevent `npm start` from spawning a local Worker. |
 | `CCM_ENVIRONMENT_ID` | OS hostname | Environment id advertised by a Worker. |
 | `CCM_WORKER_ID` | environment id | Worker connection id. |
-| `CCM_WORKSPACE` | current directory | Worker cwd and default workspace root. |
+| `CCM_WORKSPACE` | current directory | Legacy/default project root; seeded into the Worker's registered-workspace registry. |
+| `CCM_PROJECTLESS_ROOT` | `~/Documents/CCM` | Root used for automatically created projectless workspaces. |
 | `CCM_PERMISSION_PROFILE` | `workspace-write` | `read-only`, `workspace-write`, or `full-access`. |
 | `CCM_MAX_MCP_TOOL_RESULT_BYTES` | 2 MiB | Serialized MCP tool-result limit for ordinary results. |
 | `CCM_MAX_MCP_FILE_RESULT_BYTES` | 24 MiB | Serialized MCP result limit when returning an embedded file resource. |

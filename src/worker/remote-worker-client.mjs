@@ -201,6 +201,19 @@ export class RemoteWorkerClient {
         return this.runtime.fileService.viewImage(params);
       case 'send_file':
         return this.runtime.fileService.sendFile(params);
+      case 'list_workspaces':
+        return { workspaces: this.runtime.workspaceRegistry.list() };
+      case 'get_workspace':
+        return this.runtime.workspaceRegistry.resolve(params.workspace_id);
+      case 'inspect_workspace_path':
+        return this.runtime.workspaceRegistry.inspectPath(
+          params.path,
+          params.workspace_id,
+        );
+      case 'register_workspace':
+        return this.runtime.workspaceRegistry.register(params);
+      case 'create_projectless_workspace':
+        return this.runtime.workspaceRegistry.createProjectless();
       case 'terminate_session':
         return {
           terminated: this.runtime.processManager.terminateSession(
