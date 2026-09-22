@@ -12,6 +12,7 @@ import {
 import { EnvironmentRegistry } from '../src/runtime/environment-registry.mjs';
 import { RemoteWorkerClient } from '../src/worker/remote-worker-client.mjs';
 import { createToolRegistry } from '../src/tools/index.mjs';
+import { WorkspaceContextManager } from '../src/controller/workspace-context-manager.mjs';
 
 test('WorkspaceRegistry keeps registered and projectless workspaces separate', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-workspaces-'));
@@ -52,6 +53,18 @@ test('WorkspaceRegistry keeps registered and projectless workspaces separate', a
     assert.equal(projectless.root.startsWith(projectlessRoot), true);
     assert.equal(registry.list().length, 2, 'projectless is not registered');
 
+    const reloaded = new WorkspaceRegistry({
+      environmentRegistry: environments,
+      stateFile: path.join(tempRoot, 'state', 'workspaces.json'),
+      projectlessRoot,
+      seedLegacyWorkspace: false,
+    });
+    assert.deepEqual(reloaded.resolve(projectless.workspace_id), projectless);
+    assert.throws(
+      () => reloaded.environmentFor('extra', legacyRoot),
+      /Workspace root changed/,
+    );
+
     assert.throws(
       () => resolveWorkspaceRelativePath(legacyRoot, '..', 'workdir'),
       /escapes the selected workspace/,
@@ -60,6 +73,43 @@ test('WorkspaceRegistry keeps registered and projectless workspaces separate', a
       () => resolveWorkspaceRelativePath(legacyRoot, extraRoot, 'workdir'),
       /must be relative/,
     );
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('WorkspaceContextManager persists contexts across controller instances', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-context-state-'));
+  const stateFile = path.join(tempRoot, 'workspace-contexts.json');
+  const environments = new EnvironmentRegistry({ resolvePaths: false });
+  environments.register({
+    id: 'context-worker',
+    platform: 'windows',
+    cwd: tempRoot,
+    workspaceRoots: [tempRoot],
+    permissionProfile: 'workspace-write',
+  });
+
+  try {
+    const first = new WorkspaceContextManager({
+      environmentRegistry: environments,
+      workerHub: {},
+      stateFile,
+    });
+    const created = first.createRegistered('context-worker', {
+      workspace_id: 'project-a',
+      kind: 'registered',
+      root: tempRoot,
+    });
+    first.close();
+
+    const second = new WorkspaceContextManager({
+      environmentRegistry: environments,
+      workerHub: {},
+      stateFile,
+    });
+    assert.deepEqual(second.resolve(created.workspace_context), created);
+    second.close();
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
@@ -114,13 +164,14 @@ test('Controller uses projectless contexts and requires approval for registered 
   await fs.mkdir(newRoot, { recursive: true });
 
   const controller = createControllerRuntime({ workerPort: 0 });
-  const worker = createWorkerRuntime({
+  const workspaceStateFile = path.join(tempRoot, 'state', 'workspaces.json');
+  let worker = createWorkerRuntime({
     environment: {
       id: 'workspace-worker',
       cwd: legacyRoot,
       permissionProfile: 'full-access',
     },
-    workspaceStateFile: path.join(tempRoot, 'state', 'workspaces.json'),
+    workspaceStateFile,
     projectlessRoot,
   });
   let client = null;
@@ -229,19 +280,48 @@ test('Controller uses projectless contexts and requires approval for registered 
     assert.equal(worker.workspaceRegistry.list().length, 2);
 
     const oldContext = selected.structuredContent.workspace_context;
+    const oldProjectlessContext = first.workspace_context;
     await client.close();
-    for (let attempt = 0; attempt < 50; attempt += 1) {
-      try {
-        controller.workspaceContextManager.resolve(oldContext);
-      } catch {
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    assert.throws(
-      () => controller.workspaceContextManager.resolve(oldContext),
-      /Unknown or expired workspace_context/,
+    assert.equal(
+      controller.workspaceContextManager.resolve(oldContext).workspace_context,
+      oldContext,
     );
+
+    worker.close();
+    worker = createWorkerRuntime({
+      environment: {
+        id: 'workspace-worker',
+        cwd: legacyRoot,
+        permissionProfile: 'full-access',
+      },
+      workspaceStateFile,
+      projectlessRoot,
+    });
+
+    client = new RemoteWorkerClient({
+      runtime: worker,
+      workerId: 'workspace-worker',
+      port: controller.workerHub.address.port,
+    });
+    await client.connect();
+    assert.equal(
+      await controller.workerHub.waitForEnvironment('workspace-worker'),
+      true,
+    );
+    const resumed = await controller.processManager.execCommand({
+      workspace_context: oldContext,
+      cmd: 'Write-Output RESUMED_CONTEXT',
+    });
+    assert.match(resumed.output, /RESUMED_CONTEXT/);
+    assert.equal(resumed.workspace_context, oldContext);
+
+    const resumedProjectless = await controller.processManager.execCommand({
+      workspace_context: oldProjectlessContext,
+      cmd: 'Write-Output RESUMED_PROJECTLESS',
+    });
+    assert.match(resumedProjectless.output, /RESUMED_PROJECTLESS/);
+    assert.equal(resumedProjectless.workspace_context, oldProjectlessContext);
+    assert.equal(resumedProjectless.workspace_root, first.workspace_root);
   } finally {
     codeModeManager?.close();
     await client?.close().catch(() => {});

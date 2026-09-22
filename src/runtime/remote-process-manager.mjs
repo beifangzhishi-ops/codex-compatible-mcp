@@ -65,6 +65,7 @@ export class RemoteProcessManager {
         ...args,
         environment_id: environment.id,
         workspace_id: workspaceContext.workspace_id,
+        expected_workspace_root: workspaceContext.workspace_root,
       };
       delete forwardedArgs.workspace_context;
     } else {

@@ -42,7 +42,7 @@ CCM Controller
 
 Every execution environment uses the same Remote Worker protocol. The machine hosting the Controller is not a special execution backend: by default, `npm start` launches a normal Remote Worker locally and connects it through loopback.
 
-Registered workspaces are owned by each Worker, not by the Controller. Entering or hot-registering a real project requires one-shot user approval and returns an opaque `workspace_context`. Normal development tools carry only that context. If no context is supplied, CCM creates a new projectless workspace under `CCM_PROJECTLESS_ROOT` (default: the user's `Documents\CCM` directory) without touching a registered project.
+Registered workspaces are owned by each Worker, not by the Controller. Entering or hot-registering a real project requires one-shot user approval and returns an opaque `workspace_context`. Normal development tools carry only that context. Workspace contexts are persisted by the Controller and remain valid across Controller or Worker restarts. Worker-local projectless mappings are persisted as well, so a surviving projectless directory can be resumed after a Worker restart. If no context is supplied, CCM creates a new projectless workspace under `CCM_PROJECTLESS_ROOT` (default: the user's `Documents\CCM` directory) without touching a registered project.
 
 ## Direct MCP tools
 
@@ -259,6 +259,8 @@ The legacy `CCM_WORKER_HUB_HOST` variable is accepted as a fallback for both bin
 | `CCM_WORKER_ID` | environment id | Worker connection id. |
 | `CCM_WORKSPACE` | current directory | Legacy/default project root; seeded into the Worker's registered-workspace registry. |
 | `CCM_PROJECTLESS_ROOT` | `~/Documents/CCM` | Root used for automatically created projectless workspaces. |
+| `CCM_WORKSPACE_REGISTRY_FILE` | `<install>/.state/workspaces.json` for the packaged Worker | Worker-local registered and projectless workspace registry. |
+| `CCM_WORKSPACE_CONTEXT_FILE` | `<install>/.state/workspace-contexts.json` for the packaged Controller | Persistent Controller workspace-context registry. |
 | `CCM_PERMISSION_PROFILE` | `workspace-write` | `read-only`, `workspace-write`, or `full-access`. |
 | `CCM_MAX_MCP_TOOL_RESULT_BYTES` | 2 MiB | Serialized MCP tool-result limit for ordinary results. |
 | `CCM_MAX_MCP_FILE_RESULT_BYTES` | 24 MiB | Serialized MCP result limit when returning an embedded file resource. |

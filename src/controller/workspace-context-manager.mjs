@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 
 function publicContext(record) {
   return {
@@ -12,7 +14,7 @@ function publicContext(record) {
 }
 
 export class WorkspaceContextManager {
-  constructor({ environmentRegistry, workerHub } = {}) {
+  constructor({ environmentRegistry, workerHub, stateFile = null } = {}) {
     if (!environmentRegistry || !workerHub) {
       throw new Error(
         'WorkspaceContextManager requires environmentRegistry and workerHub.',
@@ -20,13 +22,48 @@ export class WorkspaceContextManager {
     }
     this.environmentRegistry = environmentRegistry;
     this.workerHub = workerHub;
+    this.stateFile = stateFile || null;
     this.contexts = new Map();
-    this.onEnvironmentDisconnected = (environmentId) => {
-      for (const [id, context] of this.contexts) {
-        if (context.environmentId === environmentId) this.contexts.delete(id);
-      }
+    this.#load();
+  }
+
+  #load() {
+    if (!this.stateFile || !fs.existsSync(this.stateFile)) return;
+    const text = fs.readFileSync(this.stateFile, 'utf8').replace(/^\uFEFF/, '');
+    const parsed = JSON.parse(text);
+    for (const value of parsed?.contexts || []) {
+      if (!value?.id || !value?.environment_id || !value?.workspace_id ||
+          !value?.kind || !value?.root) continue;
+      this.contexts.set(String(value.id), {
+        id: String(value.id),
+        environmentId: String(value.environment_id),
+        workspaceId: String(value.workspace_id),
+        kind: String(value.kind),
+        root: String(value.root),
+        createdAt: String(value.created_at || new Date().toISOString()),
+      });
+    }
+  }
+
+  #persist() {
+    if (!this.stateFile) return;
+    fs.mkdirSync(path.dirname(this.stateFile), { recursive: true });
+    const payload = {
+      version: 1,
+      contexts: [...this.contexts.values()].map((record) => ({
+        id: record.id,
+        environment_id: record.environmentId,
+        workspace_id: record.workspaceId,
+        kind: record.kind,
+        root: record.root,
+        created_at: record.createdAt,
+      })),
     };
-    this.workerHub.on('environment_disconnected', this.onEnvironmentDisconnected);
+    fs.writeFileSync(
+      this.stateFile,
+      JSON.stringify(payload, null, 2) + '\n',
+      'utf8',
+    );
   }
 
   #create(environmentId, workspace) {
@@ -39,6 +76,7 @@ export class WorkspaceContextManager {
       createdAt: new Date().toISOString(),
     };
     this.contexts.set(record.id, record);
+    this.#persist();
     return publicContext(record);
   }
 
@@ -67,10 +105,6 @@ export class WorkspaceContextManager {
   }
 
   close() {
-    this.contexts.clear();
-    this.workerHub.off(
-      'environment_disconnected',
-      this.onEnvironmentDisconnected,
-    );
+    this.#persist();
   }
 }

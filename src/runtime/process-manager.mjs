@@ -92,7 +92,10 @@ export class ProcessManager {
 
   async execCommand(args) {
     const environment = args.workspace_id
-      ? this.workspaceRegistry?.environmentFor(args.workspace_id)
+      ? this.workspaceRegistry?.environmentFor(
+          args.workspace_id,
+          args.expected_workspace_root,
+        )
       : this.environmentRegistry.resolve(args.environment_id);
     if (!environment) {
       throw new Error('Workspace execution requires a workspace registry.');

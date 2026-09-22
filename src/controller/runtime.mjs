@@ -20,7 +20,11 @@ export function createControllerRuntime(options = {}) {
   });
   const approvalManager = options.approvalManager || new ApprovalManager();
   const workspaceContextManager = options.workspaceContextManager ||
-    new WorkspaceContextManager({ environmentRegistry, workerHub });
+    new WorkspaceContextManager({
+      environmentRegistry,
+      workerHub,
+      stateFile: options.workspaceContextStateFile,
+    });
   const processManager = options.processManager || new RemoteProcessManager({
     environmentRegistry,
     workerHub,

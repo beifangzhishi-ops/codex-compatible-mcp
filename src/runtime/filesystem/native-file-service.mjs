@@ -31,7 +31,10 @@ export class NativeFileService {
 
   async applyPatch(args) {
     const environment = args.workspace_id
-      ? this.workspaceRegistry?.environmentFor(args.workspace_id)
+      ? this.workspaceRegistry?.environmentFor(
+          args.workspace_id,
+          args.expected_workspace_root,
+        )
       : this.environmentRegistry.resolve(args.environment_id);
     if (!environment) throw new Error('Workspace patching requires a workspace registry.');
     const workdir = args.workspace_id
@@ -47,7 +50,10 @@ export class NativeFileService {
 
   async viewImage(args) {
     const environment = args.workspace_id
-      ? this.workspaceRegistry?.environmentFor(args.workspace_id)
+      ? this.workspaceRegistry?.environmentFor(
+          args.workspace_id,
+          args.expected_workspace_root,
+        )
       : this.environmentRegistry.resolve(args.environment_id);
     if (!environment) throw new Error('Workspace image reads require a workspace registry.');
     const imagePath = args.workspace_id

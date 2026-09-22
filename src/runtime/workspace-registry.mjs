@@ -74,6 +74,15 @@ export class WorkspaceRegistry {
         createdAt: String(value.created_at || new Date().toISOString()),
       });
     }
+    for (const value of parsed?.projectless_workspaces || []) {
+      if (!value?.id || !value?.root) continue;
+      this.projectless.set(String(value.id), {
+        id: String(value.id),
+        kind: 'projectless',
+        root: String(value.root),
+        createdAt: String(value.created_at || new Date().toISOString()),
+      });
+    }
   }
 
   #persist() {
@@ -82,6 +91,11 @@ export class WorkspaceRegistry {
     const payload = {
       version: 1,
       workspaces: [...this.registered.values()].map((workspace) => ({
+        id: workspace.id,
+        root: workspace.root,
+        created_at: workspace.createdAt,
+      })),
+      projectless_workspaces: [...this.projectless.values()].map((workspace) => ({
         id: workspace.id,
         root: workspace.root,
         created_at: workspace.createdAt,
@@ -177,6 +191,7 @@ export class WorkspaceRegistry {
       createdAt: now.toISOString(),
     };
     this.projectless.set(workspace.id, workspace);
+    this.#persist();
     return publicWorkspace(workspace);
   }
 
@@ -185,15 +200,24 @@ export class WorkspaceRegistry {
     const workspace = this.registered.get(id) || this.projectless.get(id);
     if (!workspace) throw new Error('Unknown workspace_id: ' + id);
     if (!fs.existsSync(workspace.root) || !fs.statSync(workspace.root).isDirectory()) {
-      if (workspace.kind === 'projectless') this.projectless.delete(id);
+      if (workspace.kind === 'projectless') {
+        this.projectless.delete(id);
+        this.#persist();
+      }
       throw new Error('Workspace directory no longer exists: ' + workspace.root);
     }
     return publicWorkspace(workspace);
   }
 
-  environmentFor(workspaceId) {
+  environmentFor(workspaceId, expectedRoot = null) {
     const base = this.environmentRegistry.resolve();
     const workspace = this.resolve(workspaceId);
+    if (expectedRoot != null && pathKey(workspace.root) !== pathKey(expectedRoot)) {
+      throw new Error(
+        'Workspace root changed for ' + workspace.workspace_id +
+        ': expected ' + expectedRoot + ', current ' + workspace.root + '.',
+      );
+    }
     return {
       ...base,
       cwd: workspace.root,

@@ -71,7 +71,10 @@ export class RemoteFileService {
       ...args,
       environment_id: environment.id,
       ...(execution.workspaceId
-        ? { workspace_id: execution.workspaceId }
+        ? {
+            workspace_id: execution.workspaceId,
+            expected_workspace_root: execution.workspaceContext.workspace_root,
+          }
         : {}),
     };
     delete forwarded.workspace_context;
@@ -97,7 +100,10 @@ export class RemoteFileService {
       ...args,
       environment_id: environment.id,
       ...(execution.workspaceId
-        ? { workspace_id: execution.workspaceId }
+        ? {
+            workspace_id: execution.workspaceId,
+            expected_workspace_root: execution.workspaceContext.workspace_root,
+          }
         : {}),
     };
     delete forwarded.workspace_context;

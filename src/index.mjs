@@ -8,11 +8,18 @@ import { createHttpController } from './controller/mcp-http-server.mjs';
 import { LocalWorkerSupervisor } from './controller/local-worker-supervisor.mjs';
 import { createToolRegistry } from './tools/index.mjs';
 
+const installRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+);
 const localEnvironmentId = process.env.CCM_ENVIRONMENT_ID || os.hostname();
 const localWorkerTakeoverToken = randomUUID();
 const runtime = createControllerRuntime({
   defaultEnvironmentId: localEnvironmentId,
   workerTakeoverToken: localWorkerTakeoverToken,
+  workspaceContextStateFile:
+    process.env.CCM_WORKSPACE_CONTEXT_FILE ||
+    path.join(installRoot, '.state', 'workspace-contexts.json'),
 });
 await runtime.start();
 
