@@ -321,12 +321,13 @@ For MCP Apps-capable hosts, `view_image` also advertises a small `ui://`
 bridge. The view is intentionally visually hidden: it keeps the standard MCP
 image result without rendering a duplicate preview in the chat, and
 uses the MCP Apps `ui/update-model-context` image content block when the host
-advertises that capability. When the host also supports `ui/message`, the app
-sends a short follow-up so the deferred image context is available to the model
-on the next model turn. This gives the model a visual-context path without
-routing the image through `send_file`, file-resource materialization, or
-ChatGPT Library. Hosts without MCP Apps image-context support still receive the
-ordinary MCP `image` content unchanged.
+advertises that capability. In ChatGPT, if that portable image-context
+capability is absent, the bridge falls back to a temporary non-Library
+`window.openai.uploadFile(..., { library: false })`, stores the returned file ID
+in widget `imageIds`, and triggers a follow-up turn. This avoids `send_file`
+resource materialization and keeps the image out of ChatGPT Library while still
+using ChatGPT's documented file-ID path for model-visible images. Hosts without
+either bridge still receive the ordinary MCP `image` content unchanged.
 
 ## Security notes
 

@@ -1,4 +1,5 @@
-export const VIEW_IMAGE_UI_URI = 'ui://ccm/view-image-v4.html';
+export const VIEW_IMAGE_UI_URI = 'ui://ccm/view-image-v5.html';
+export const VIEW_IMAGE_V4_UI_URI = 'ui://ccm/view-image-v4.html';
 export const VIEW_IMAGE_V3_UI_URI = 'ui://ccm/view-image-v3.html';
 export const VIEW_IMAGE_V2_UI_URI = 'ui://ccm/view-image-v2.html';
 export const VIEW_IMAGE_LEGACY_UI_URI = 'ui://ccm/view-image-v1.html';
@@ -78,6 +79,75 @@ export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
         );
       }
 
+      function imageFileName(meta, image) {
+        const raw = meta && typeof meta.path === "string"
+          ? meta.path.split(/[\\/]/).pop()
+          : "";
+        if (raw) return raw;
+        const subtype = image.mimeType.split("/")[1] || "png";
+        return "ccm-view-image." + subtype.replace(/[^a-z0-9.+-]/gi, "");
+      }
+
+      function imageFile(image, meta) {
+        const binary = atob(image.data);
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) {
+          bytes[index] = binary.charCodeAt(index);
+        }
+        return new File(
+          [bytes],
+          imageFileName(meta, image),
+          { type: image.mimeType }
+        );
+      }
+
+      async function triggerFollowUp(meta) {
+        const openai = window.openai;
+        if (openai && typeof openai.sendFollowUpMessage === "function") {
+          await openai.sendFollowUpMessage({
+            prompt: followUpText(meta),
+            scrollToBottom: true
+          });
+          return true;
+        }
+        const canSendMessage = hostCapabilities &&
+          hostCapabilities.message &&
+          hostCapabilities.message.text;
+        if (!canSendMessage) return false;
+        await request("ui/message", {
+          role: "user",
+          content: [{ type: "text", text: followUpText(meta) }]
+        });
+        return true;
+      }
+
+      async function bridgeViaChatGptFile(image, meta) {
+        const openai = window.openai;
+        if (!openai ||
+            typeof openai.uploadFile !== "function" ||
+            typeof openai.setWidgetState !== "function") {
+          return false;
+        }
+        const uploaded = await openai.uploadFile(
+          imageFile(image, meta),
+          { library: false }
+        );
+        const fileId = uploaded && uploaded.fileId;
+        if (!fileId) throw new Error("ChatGPT uploadFile returned no fileId");
+        openai.setWidgetState({
+          modelContent: "Review the image supplied by CCM view_image.",
+          privateContent: {
+            source: "ccm.view_image",
+            path: meta.path || null,
+            mimeType: image.mimeType,
+            fileId
+          },
+          imageIds: [fileId]
+        });
+        await triggerFollowUp(meta);
+        return true;
+      }
+
       async function bridgeResult(result) {
         const image = findImage(result);
         if (!image) return;
@@ -86,18 +156,29 @@ export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
         if (key === lastImageKey) return;
         lastImageKey = key;
 
+        const meta = result && result.structuredContent
+          ? result.structuredContent
+          : (result && result._meta ? result._meta : {});
+
         const imageContext = hostCapabilities &&
           hostCapabilities.updateModelContext &&
           hostCapabilities.updateModelContext.image;
         if (!imageContext) {
-          status.textContent =
-            "Image rendered. This host does not advertise image model-context updates.";
+          try {
+            if (await bridgeViaChatGptFile(image, meta)) {
+              status.textContent =
+                "Image added through ChatGPT file state for the next model turn.";
+              return;
+            }
+          } catch (error) {
+            status.textContent =
+              "ChatGPT file-state image bridge failed: " +
+              String(error && error.message ? error.message : error);
+            return;
+          }
+          status.textContent = "No supported image-to-model bridge is available.";
           return;
         }
-
-        const meta = result && result.structuredContent
-          ? result.structuredContent
-          : (result && result._meta ? result._meta : {});
         try {
           await request("ui/update-model-context", {
             content: [{
@@ -112,48 +193,17 @@ export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
               height: meta.height || null
             }
           });
-          const canSendMessage = hostCapabilities &&
-            hostCapabilities.message &&
-            hostCapabilities.message.text;
-          const openai = window.openai;
-          const canSendChatGptFollowUp = openai &&
-            typeof openai.sendFollowUpMessage === "function";
-          if (canSendMessage) {
-            try {
-              await request("ui/message", {
-                role: "user",
-                content: [{
-                  type: "text",
-                  text: followUpText(meta)
-                }]
-              });
-              status.textContent =
-                "Image placed in model context and a visual follow-up was triggered.";
-            } catch (messageError) {
-              status.textContent =
-                "Image placed in model context, but the automatic follow-up failed: " +
-                String(messageError && messageError.message
-                  ? messageError.message
-                  : messageError);
-            }
-          } else if (canSendChatGptFollowUp) {
-            try {
-              await openai.sendFollowUpMessage({
-                prompt: followUpText(meta),
-                scrollToBottom: true
-              });
-              status.textContent =
-                "Image placed in model context and a ChatGPT follow-up was triggered.";
-            } catch (messageError) {
-              status.textContent =
-                "Image placed in model context, but the ChatGPT follow-up failed: " +
-                String(messageError && messageError.message
-                  ? messageError.message
-                  : messageError);
-            }
-          } else {
+          try {
+            const triggered = await triggerFollowUp(meta);
+            status.textContent = triggered
+              ? "Image placed in model context and a visual follow-up was triggered."
+              : "Image placed in model context for the next user message.";
+          } catch (messageError) {
             status.textContent =
-              "Image placed in model context. The host will expose it on the next user message.";
+              "Image placed in model context, but the follow-up failed: " +
+              String(messageError && messageError.message
+                ? messageError.message
+                : messageError);
           }
         } catch (error) {
           status.textContent =
