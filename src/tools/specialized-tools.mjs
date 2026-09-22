@@ -124,8 +124,14 @@ function toolPath(relativePath) {
 }
 
 async function run(runtime, args, command) {
+  if (!runtime.workspaceContextManager) {
+    throw new Error('Workspace context manager is unavailable.');
+  }
+  const context = await runtime.workspaceContextManager.createProjectless(
+    args.environment_id,
+  );
   return runtime.processManager.execCommand({
-    environment_id: args.environment_id,
+    workspace_context: context.workspace_context,
     cmd: command,
     yield_time_ms: args.yield_time_ms,
     max_output_tokens: args.max_output_tokens,
@@ -195,7 +201,7 @@ export function registerSpecializedTools(registry, runtime) {
     name: 'send_file',
     provider: 'ccm-specialized',
     provenance: 'ccm-native-file-transfer',
-    surfaces: { deferred: true, codeMode: true },
+    surfaces: { direct: true, codeMode: true },
     tags: ['file', 'attachment', 'preview', 'transfer', 'gpt'],
     environmentRequirements: {
       capabilities: ['sendFile'],
@@ -203,33 +209,29 @@ export function registerSpecializedTools(registry, runtime) {
     supportsParallel: true,
     description: [
       'Send a file from a CCM environment to the GPT client as an MCP resource link when the user actually needs the file in chat for preview, download, upload to another tool, or handoff.',
+      'workspace_context is required and determines the Worker. The file path may be outside the workspace when that Worker host account can read it; the context selects the Worker and does not impose a workspace read boundary for send_file.',
+      'If the user has not selected a project, automatically obtain a projectless context first through ccm.create_projectless_context; do not ask the user to choose or register a temporary directory.',
       'Do NOT use send_file merely so the model can inspect, review, analyze, or verify a local file. If the file can be examined inside CCM, prefer local reading, view_image, command-line inspection, or a temporary local preview instead. This avoids unnecessary file materialization and user approval prompts.',
       'Before calling send_file, make it clear to the user that the file needs to be transferred into chat. This preserves the original file bytes and does not use BMG or upload the file to ChatGPT Library.',
       'Use this for Word, PDF, Excel, PowerPoint, archives, images, and other local files only after locating the exact path and determining that an actual user-facing transfer is needed.',
     ].join('\n\n'),
     inputSchema: {
       path: z.string().min(1).describe(
-        'File path relative to the environment cwd, or an absolute native path.',
+        'File path on the Worker selected by workspace_context. Absolute paths may be outside the workspace when host read permissions allow it.',
       ),
-      environment_id: z.string().optional().describe(
-        'CCM environment that owns the file. Omit to use the default environment.',
+      workspace_context: z.string().uuid().describe(
+        'Existing workspace context used to determine the Worker that owns the file.',
       ),
     },
     handler: async (args) => {
       try {
-        const environment = runtime.environmentRegistry.resolve(args.environment_id);
-        if (!environment.capabilities?.sendFile) {
-          throw new Error(
-            'Environment does not support send_file: ' + environment.id,
-          );
-        }
         const value = await runtime.fileService.sendFile({
-          environment_id: environment.id,
+          workspace_context: args.workspace_context,
           path: args.path,
         });
         return fileResourceResult(
           value,
-          environment.id,
+          value.environment_id,
           runtime.fileTransferStore,
         );
       } catch (error) {

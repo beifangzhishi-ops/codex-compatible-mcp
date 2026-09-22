@@ -10,25 +10,30 @@ export class RemoteFileService {
     this.workspaceContextManager = workspaceContextManager;
   }
 
-  async #resolveExecution(args, fallbackEnvironmentId = null) {
-    const contextMode = args.workspace_scoped === true ||
-      Boolean(args.workspace_context) ||
-      (!args.environment_id && !fallbackEnvironmentId);
-    if (!contextMode) {
-      const environment = this.environmentRegistry.resolve(
-        args.environment_id || fallbackEnvironmentId,
+  #resolveExecution(args, fallbackEnvironmentId = null) {
+    if (!args.workspace_context) {
+      throw new Error('File operation requires workspace_context.');
+    }
+    if (args.environment_id) {
+      throw new Error(
+        'File operation does not accept environment_id; workspace_context already determines the environment.',
       );
-      return { environment, workspaceContext: null, workspaceId: null };
     }
     if (!this.workspaceContextManager) {
       throw new Error('Workspace context manager is not available.');
     }
-    const workspaceContext = args.workspace_context
-      ? this.workspaceContextManager.resolve(args.workspace_context)
-      : await this.workspaceContextManager.createProjectless();
+    const workspaceContext = this.workspaceContextManager.resolve(
+      args.workspace_context,
+    );
     const environment = this.environmentRegistry.resolve(
       workspaceContext.environment_id,
     );
+    if (fallbackEnvironmentId && fallbackEnvironmentId !== environment.id) {
+      throw new Error(
+        'File operation environment mismatch: context=' + environment.id +
+        ', requested=' + fallbackEnvironmentId,
+      );
+    }
     return {
       environment,
       workspaceContext,
@@ -38,29 +43,8 @@ export class RemoteFileService {
 
   async applyPatch(args) {
     const parsed = parsePatch(args.patch);
-    const execution = await this.#resolveExecution(args, parsed.environmentId);
-    if (execution.workspaceContext &&
-        parsed.environmentId &&
-        parsed.environmentId !== execution.environment.id) {
-      throw new Error(
-        'apply_patch environment mismatch: context=' +
-        execution.environment.id + ', patch=' + parsed.environmentId,
-      );
-    }
-    if (!execution.workspaceContext && args.environment_id &&
-        parsed.environmentId &&
-        args.environment_id !== parsed.environmentId) {
-      throw new Error(
-        'apply_patch environment mismatch: argument=' + args.environment_id +
-        ', patch=' + parsed.environmentId,
-      );
-    }
-
-    const environment = execution.workspaceContext
-      ? execution.environment
-      : this.environmentRegistry.resolve(
-          args.environment_id || parsed.environmentId,
-        );
+    const execution = this.#resolveExecution(args, parsed.environmentId);
+    const environment = execution.environment;
     if (!environment.capabilities?.applyPatch) {
       throw new Error(
         'Environment does not support apply_patch: ' + environment.id,
@@ -70,12 +54,8 @@ export class RemoteFileService {
     const forwarded = {
       ...args,
       environment_id: environment.id,
-      ...(execution.workspaceId
-        ? {
-            workspace_id: execution.workspaceId,
-            expected_workspace_root: execution.workspaceContext.workspace_root,
-          }
-        : {}),
+      workspace_id: execution.workspaceId,
+      expected_workspace_root: execution.workspaceContext.workspace_root,
     };
     delete forwarded.workspace_context;
     delete forwarded.workspace_scoped;
@@ -88,7 +68,7 @@ export class RemoteFileService {
     return { ...result, ...(execution.workspaceContext || {}) };
   }
   async viewImage(args) {
-    const execution = await this.#resolveExecution(args);
+    const execution = this.#resolveExecution(args);
     const environment = execution.environment;
     if (!environment.capabilities?.viewImage) {
       throw new Error(
@@ -99,12 +79,8 @@ export class RemoteFileService {
     const forwarded = {
       ...args,
       environment_id: environment.id,
-      ...(execution.workspaceId
-        ? {
-            workspace_id: execution.workspaceId,
-            expected_workspace_root: execution.workspaceContext.workspace_root,
-          }
-        : {}),
+      workspace_id: execution.workspaceId,
+      expected_workspace_root: execution.workspaceContext.workspace_root,
     };
     delete forwarded.workspace_context;
     const result = await this.workerHub.call(
@@ -117,18 +93,23 @@ export class RemoteFileService {
   }
 
   async sendFile(args) {
-    const environment = this.environmentRegistry.resolve(args.environment_id);
+    const execution = this.#resolveExecution(args);
+    const environment = execution.environment;
     if (!environment.capabilities?.sendFile) {
       throw new Error(
         'Environment does not support send_file: ' + environment.id,
       );
     }
 
-    return this.workerHub.call(
+    const result = await this.workerHub.call(
       environment.id,
       'send_file',
-      { ...args, environment_id: environment.id },
+      {
+        path: args.path,
+        environment_id: environment.id,
+      },
       { timeoutMs: 60_000 },
     );
+    return { ...result, ...execution.workspaceContext };
   }
 }

@@ -48,11 +48,14 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const listed = await client.listTools();
     const names = listed.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, [
+      'apply_patch',
       'exec',
       'exec_command',
       'list_environments',
       'respond_to_escalation',
+      'send_file',
       'tool_search',
+      'view_image',
       'wait',
       'write_stdin',
     ]);
@@ -203,7 +206,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
         calls: [{
           tool: 'ccm-extra.send_file',
           arguments: {
-            environment_id: 'mcp-worker',
+            workspace_context: workspaceContext,
             path: 'preview.docx',
           },
         }],

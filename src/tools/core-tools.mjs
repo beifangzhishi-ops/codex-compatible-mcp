@@ -425,10 +425,13 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'apply_patch',
     provider: 'ccm-core',
-    surfaces: { deferred: true, codeMode: true },
+    surfaces: { direct: true, codeMode: true },
     tags: ['edit', 'patch', 'filesystem'],
     environmentRequirements: { capabilities: ['applyPatch'] },
-    description: 'Apply a Codex-style Begin/End Patch inside the selected CCM workspace. Discover through tool_search and invoke through exec.',
+    description: [
+      'Apply a Codex-style Begin/End Patch inside an existing workspace_context.',
+      'If the user has not selected a project, automatically obtain a projectless context first through ccm.create_projectless_context; do not ask the user to choose or register a temporary directory.',
+    ].join('\n\n'),
     inputSchema: {
       patch: z.string().min(1).describe('Codex-style patch text beginning with *** Begin Patch.'),
       workspace_context: z.string().uuid().describe('Existing workspace context.'),
@@ -449,7 +452,7 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'view_image',
     provider: 'ccm-core',
-    surfaces: { deferred: true, codeMode: true },
+    surfaces: { direct: true, codeMode: true },
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
@@ -460,7 +463,8 @@ export function registerCoreTools(registry, runtime) {
     supportsParallel: true,
     description: [
       'Read a bounded image from the selected CCM workspace and return it as MCP image content.',
-      'Invoke through the stable exec dispatcher; its MCP Apps bridge forwards image results into model context without exposing view_image as a top-level tool.',
+      'If the user has not selected a project, automatically obtain a projectless context first through ccm.create_projectless_context; do not ask the user to choose or register a temporary directory.',
+      'This direct tool is also available through exec for nested or batched image calls.',
     ].join(' '),
     inputSchema: {
       path: z.string().min(1).describe('Image path relative to the selected workspace root.'),

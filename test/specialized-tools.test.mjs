@@ -7,6 +7,7 @@ import { FileTransferStore } from '../src/controller/file-transfer-store.mjs';
 
 function fakeRuntime() {
   const calls = [];
+  const contexts = new Map();
   return {
     calls,
     environmentRegistry: {
@@ -14,6 +15,28 @@ function fakeRuntime() {
         return {
           id: environmentId || 'windows-worker',
           platform: 'windows',
+        };
+      },
+    },
+    workspaceContextManager: {
+      async createProjectless(environmentId = null) {
+        const context = {
+          workspace_context: '00000000-0000-4000-8000-000000000001',
+          environment_id: environmentId || 'windows-worker',
+          workspace_id: 'projectless-test',
+          workspace_kind: 'projectless',
+          workspace_root: 'C:\\temp\\projectless-test',
+        };
+        contexts.set(context.workspace_context, context);
+        return context;
+      },
+      resolve(contextId) {
+        return contexts.get(contextId) || {
+          workspace_context: contextId,
+          environment_id: 'worker-a',
+          workspace_id: 'projectless-test',
+          workspace_kind: 'projectless',
+          workspace_root: 'C:\\temp\\projectless-test',
         };
       },
     },
@@ -32,6 +55,7 @@ function fakeRuntime() {
       async sendFile(args) {
         calls.push({ sendFile: args });
         return {
+          environment_id: 'worker-a',
           path: args.path,
           filename: 'report.docx',
           mime_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -45,7 +69,7 @@ function fakeRuntime() {
   };
 }
 
-test('send_file returns a readable resource link without changing the direct tool surface', async () => {
+test('send_file is direct and returns a readable resource link using workspace_context', async () => {
   const runtime = fakeRuntime();
   runtime.environmentRegistry.resolve = (environmentId) => ({
     id: environmentId || 'windows-worker',
@@ -54,9 +78,10 @@ test('send_file returns a readable resource link without changing the direct too
   });
   const registry = new ToolRegistry();
   registerSpecializedTools(registry, runtime);
+  assert.equal(registry.get('ccm-extra.send_file').surfaces.direct, true);
 
   const result = await registry.get('ccm-extra.send_file').handler({
-    environment_id: 'worker-a',
+    workspace_context: '00000000-0000-4000-8000-000000000001',
     path: 'C:\\docs\\report.docx',
   });
   assert.equal(result.isError, undefined);

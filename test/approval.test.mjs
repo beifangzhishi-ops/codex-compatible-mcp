@@ -36,6 +36,21 @@ class FakeWorkerHub extends EventEmitter {
   }
 }
 
+function fakeWorkspaceContextManager() {
+  return {
+    resolve(contextId) {
+      assert.equal(contextId, '00000000-0000-4000-8000-000000000001');
+      return {
+        workspace_context: contextId,
+        environment_id: 'approval-worker',
+        workspace_id: 'approval-workspace',
+        workspace_kind: 'registered',
+        workspace_root: 'C:\\workspace',
+      };
+    },
+  };
+}
+
 test('ApprovalManager binds a grant to one exact execution and expires it', () => {
   let now = Date.UTC(2026, 8, 20, 12, 0, 0);
   const approvals = new ApprovalManager({
@@ -97,9 +112,10 @@ test('RemoteProcessManager executes only after one matching approval', async () 
     environmentRegistry,
     workerHub,
     approvalManager,
+    workspaceContextManager: fakeWorkspaceContextManager(),
   });
   const args = {
-    environment_id: 'approval-worker',
+    workspace_context: '00000000-0000-4000-8000-000000000001',
     cmd: 'Write-Output ESCALATED_OK',
     sandbox_permissions: 'require_escalated',
     justification: 'Allow this command once?',
@@ -165,11 +181,12 @@ test('RemoteProcessManager does not request approval for trusted remote Git', as
     environmentRegistry,
     workerHub,
     approvalManager,
+    workspaceContextManager: fakeWorkspaceContextManager(),
   });
 
   try {
     const result = await manager.execCommand({
-      environment_id: 'approval-worker',
+      workspace_context: '00000000-0000-4000-8000-000000000001',
       cmd: 'git push origin main',
       sandbox_permissions: 'require_escalated',
       justification: 'Legacy caller requested escalation.',

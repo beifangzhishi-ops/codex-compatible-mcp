@@ -191,18 +191,26 @@ test('Controller routes execution across Remote Workers', async () => {
     assert.equal(await controller.workerHub.waitForEnvironment('worker-a'), true);
     assert.equal(await controller.workerHub.waitForEnvironment('worker-b'), true);
 
+    const contextA = controller.workspaceContextManager.createRegistered(
+      'worker-a',
+      workerA.workspaceRegistry.list()[0],
+    );
+    const contextB = controller.workspaceContextManager.createRegistered(
+      'worker-b',
+      workerB.workspaceRegistry.list()[0],
+    );
     const a = await controller.processManager.execCommand({
-      environment_id: 'worker-a',
+      workspace_context: contextA.workspace_context,
       cmd: 'Write-Output WORKER_A',
     });
     const b = await controller.processManager.execCommand({
-      environment_id: 'worker-b',
+      workspace_context: contextB.workspace_context,
       cmd: 'Write-Output WORKER_B',
     });
     assert.match(a.output, /WORKER_A/);
     assert.match(b.output, /WORKER_B/);
     const first = await controller.processManager.execCommand({
-      environment_id: 'worker-a',
+      workspace_context: contextA.workspace_context,
       cmd: 'Write-Output before; Start-Sleep -Seconds 3; Write-Output after',
       yield_time_ms: 250,
     });
@@ -254,10 +262,22 @@ test('Controller caps initial Remote Worker exec waits at five seconds', async (
   const manager = new RemoteProcessManager({
     environmentRegistry: registry,
     workerHub: new FakeWorkerHub(),
+    workspaceContextManager: {
+      resolve(contextId) {
+        assert.equal(contextId, '00000000-0000-4000-8000-000000000001');
+        return {
+          workspace_context: contextId,
+          environment_id: 'worker-cap',
+          workspace_id: 'projectless-cap',
+          workspace_kind: 'projectless',
+          workspace_root: 'C:\\workspace',
+        };
+      },
+    },
   });
   try {
     const result = await manager.execCommand({
-      environment_id: 'worker-cap',
+      workspace_context: '00000000-0000-4000-8000-000000000001',
       cmd: 'long-running command',
       yield_time_ms: 30_000,
     });
@@ -382,6 +402,11 @@ test('Remote Worker owns apply_patch, view_image, and send_file filesystem work'
     });
     await client.connect();
     assert.equal(await controller.workerHub.waitForEnvironment('worker-files'), true);
+    const seeded = worker.workspaceRegistry.list()[0];
+    const workspaceContext = controller.workspaceContextManager.createRegistered(
+      'worker-files',
+      seeded,
+    );
 
     const patch = [
       '*** Begin Patch',
@@ -390,7 +415,10 @@ test('Remote Worker owns apply_patch, view_image, and send_file filesystem work'
       '+hello from worker',
       '*** End Patch',
     ].join('\n');
-    const patchResult = await controller.fileService.applyPatch({ patch });
+    const patchResult = await controller.fileService.applyPatch({
+      workspace_context: workspaceContext.workspace_context,
+      patch,
+    });
     assert.match(patchResult.output, /A remote\.txt/);
     assert.equal(
       await fs.readFile(path.join(tempRoot, 'remote.txt'), 'utf8'),
@@ -403,7 +431,7 @@ test('Remote Worker owns apply_patch, view_image, and send_file filesystem work'
     );
     await fs.writeFile(path.join(tempRoot, 'tiny.png'), png);
     const image = await controller.fileService.viewImage({
-      environment_id: 'worker-files',
+      workspace_context: workspaceContext.workspace_context,
       path: 'tiny.png',
     });
     assert.equal(image.mime_type, 'image/png');
@@ -414,7 +442,7 @@ test('Remote Worker owns apply_patch, view_image, and send_file filesystem work'
     const docBytes = Buffer.from('fake-docx-content');
     await fs.writeFile(path.join(tempRoot, 'sample.docx'), docBytes);
     const file = await controller.fileService.sendFile({
-      environment_id: 'worker-files',
+      workspace_context: workspaceContext.workspace_context,
       path: 'sample.docx',
     });
     assert.equal(file.filename, 'sample.docx');

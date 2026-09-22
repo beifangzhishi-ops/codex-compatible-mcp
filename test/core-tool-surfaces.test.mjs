@@ -52,14 +52,16 @@ function runtimeStub() {
   };
 }
 
-test('core tool surface keeps bootstrap direct and workspace management deferred', async () => {
+test('core tool surface keeps workspace lifecycle deferred and common operations direct', async () => {
   const registry = registerCoreTools(new ToolRegistry(), runtimeStub());
 
   const direct = registry.listDirect().map((tool) => tool.name).sort();
   assert.deepEqual(direct, [
+    'apply_patch',
     'exec_command',
     'list_environments',
     'respond_to_escalation',
+    'view_image',
     'write_stdin',
   ]);
 
@@ -68,8 +70,6 @@ test('core tool surface keeps bootstrap direct and workspace management deferred
     'list_workspaces',
     'select_workspace',
     'register_workspace',
-    'apply_patch',
-    'view_image',
   ]) {
     const tool = registry.get(name);
     assert.equal(tool.surfaces.direct, false, name + ' should not be direct');
@@ -93,11 +93,13 @@ test('core tool surface keeps bootstrap direct and workspace management deferred
     assert.deepEqual(
       registry.listDirect().map((tool) => tool.name).sort(),
       [
+        'apply_patch',
         'exec',
         'exec_command',
         'list_environments',
         'respond_to_escalation',
         'tool_search',
+        'view_image',
         'wait',
         'write_stdin',
       ],

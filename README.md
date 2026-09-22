@@ -54,6 +54,9 @@ When no real project is selected, create an explicit projectless context with th
 | `exec_command` | Run a native shell command inside an existing `workspace_context`. |
 | `respond_to_escalation` | Record an explicit user decision for a pending one-shot CCM approval. |
 | `write_stdin` | Write to or poll a live process session returned by `exec_command`. |
+| `apply_patch` | Apply a Codex-style patch inside an existing `workspace_context`. |
+| `view_image` | Read and validate a bounded image inside an existing `workspace_context`. |
+| `send_file` | Transfer a file from the Worker selected by `workspace_context` to the client. |
 | `tool_search` | Discover deferred ToolRegistry capabilities without expanding the top-level MCP schema. |
 | `exec` | Dispatch one or more nested registered capabilities, sequentially or safely in parallel. |
 | `wait` | Resume a nested `exec` cell that yielded before completion. |
@@ -70,8 +73,6 @@ These are core CCM operations but intentionally stay off the top-level MCP schem
 | `ccm.list_workspaces` | Discover registered projects on one Worker without entering them. |
 | `ccm.select_workspace` | Enter an explicitly selected registered project after user approval. |
 | `ccm.register_workspace` | Register and enter an explicitly selected project directory after user approval. |
-| `ccm.apply_patch` | Apply a Codex-style patch inside an existing workspace context. |
-| `ccm.view_image` | Read a bounded image inside an existing workspace context. |
 
 ## ToolRegistry and Code Mode
 
@@ -83,11 +84,11 @@ CCM stores capability exposure as three independent surfaces:
 
 Convenience states such as Direct, Deferred, CodeModeOnly, DirectModelOnly, DeferredModelOnly, and Hidden are derived from those surfaces rather than stored as one rigid enum.
 
-The direct MCP surface is intentionally kept small and stable. New ordinary capabilities should default to the **Deferred + Code Mode** surfaces and be invoked through `tool_search` + `exec`. Add a new top-level Direct tool only when the capability is fundamental to bootstrapping, environment discovery, explicit approval, process continuation, or nested-tool discovery/dispatch.
+The direct MCP surface is intentionally kept small and stable. New ordinary capabilities should default to the **Deferred + Code Mode** surfaces and be invoked through `tool_search` + `exec`. Add a new top-level Direct tool only when the capability is a common operational primitive or is fundamental to environment discovery, explicit approval, process continuation, or nested-tool discovery/dispatch. Workspace/context lifecycle tools intentionally remain Deferred.
 
 Keeping ordinary additions off the Direct surface prevents routine feature work from changing the client's top-level MCP schema. In particular, adding a deferred capability should **not require deleting and recreating the CCM integration in ChatGPT or another MCP client**. Updating CCM server code may still require restarting the Controller and/or Worker processes so the new implementation is loaded; that is separate from recreating the client integration.
 
-Do not promote a capability to Direct merely for convenience. Prefer a deferred `ccm-extra.*` or other namespaced capability when the operation can be discovered and called through `tool_search` + `exec`. Existing examples include `ccm.view_image` and the bundled `ccm-extra.*` workflows below.
+Do not promote a capability to Direct merely for convenience. Keep workspace/context lifecycle operations deferred, and prefer deferred `ccm-extra.*` or other namespaced capabilities for specialized workflows. The common operational file tools `apply_patch`, `view_image`, and `send_file` are intentionally Direct.
 
 CCM deliberately does not embed a second JavaScript interpreter for Code Mode. The host application remains responsible for loops, branching, and data processing. CCM's `exec/wait` pair is a bounded structured dispatcher over ToolRegistry capabilities. `state=completed` is terminal. If nested dispatch has finished but an `exec_command` leaves a live process session, CCM returns `state=awaiting_io` with `next_operation=write_stdin` until those process sessions are continued separately.
 
@@ -107,16 +108,16 @@ Supported features:
 
 The exporter only recovers information present in the public Share payload. Information removed upstream by ChatGPT is not recoverable.
 
-### Bundled specialized deferred capabilities
+### Bundled specialized capabilities
 
-CCM ships optional Windows workflows ported from WCM without expanding the top-level MCP schema:
+CCM ships optional Windows workflows ported from WCM. Specialized workflows remain deferred; `ccm-extra.send_file` is the direct file-transfer exception:
 
 - `ccm-extra.research_ppt_pipeline` returns the user-validated research PowerPoint production workflow, including production-mode selection, source/image review, canonical per-slide specs, mandatory `ccm-extra.send_file` delivery of Imagegen reference images, GPT decide-and-auto-advance handling of returned slide images, QA, mandatory whole-deck user review, and mode-specific delivery.
 - `ccm-extra.send_file` transfers an exact file from a selected CCM environment to the GPT client only when a user-facing handoff is actually needed (preview/download/upload to another tool). It returns a temporary MCP `resource_link`; after the client approves/materializes it, `resources/read` serves the exact file bytes from a bounded TTL cache. Do not use it merely for model-side inspection when the file can be read or viewed locally in CCM; prefer local reading, `view_image`, command-line inspection, or temporary local previews to avoid unnecessary materialization/approval prompts. The transfer does not use BMG or Library upload.
 - `ccm-extra.quark_upload` submits one or more files through that local Quark desktop session and can wait for verified completion.
 - `ccm-extra.bilibili_download_dash` downloads signed DASH video/audio URLs obtained from an authenticated browser session and remuxes them with `ffmpeg -c copy`.
 
-Discover them with `tool_search` (for example, `quark upload` or `bilibili`) and invoke them through `exec`. Long uploads/downloads may return a live process session; continue that session with the top-level `write_stdin` tool.
+Discover deferred specialized workflows with `tool_search` (for example, `quark upload` or `bilibili`) and invoke them through `exec`. `send_file` is available directly and is also callable through `exec`. Long uploads/downloads may return a live process session; continue that session with the top-level `write_stdin` tool.
 
 The Quark helper reuses only the login state of the local Quark desktop client and does not export account credentials. The Bilibili helper intentionally leaves authenticated `playurl` discovery to the browser/BMG layer and accepts only the resulting short-lived signed media URLs; it does not export cookies or attempt to bypass account/quality restrictions.
 

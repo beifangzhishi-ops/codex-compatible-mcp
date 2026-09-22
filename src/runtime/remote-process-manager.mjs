@@ -47,31 +47,32 @@ export class RemoteProcessManager {
   }
 
   async execCommand(args) {
-    let workspaceContext = null;
-    let environment;
-    let forwardedArgs;
-    const contextMode = Boolean(args.workspace_context) || !args.environment_id;
-    if (contextMode) {
-      if (!this.workspaceContextManager) {
-        throw new Error('Workspace context manager is not available.');
-      }
-      workspaceContext = args.workspace_context
-        ? this.workspaceContextManager.resolve(args.workspace_context)
-        : await this.workspaceContextManager.createProjectless();
-      environment = this.environmentRegistry.resolve(
-        workspaceContext.environment_id,
+    if (!args.workspace_context) {
+      throw new Error(
+        'exec_command requires workspace_context. Obtain one explicitly before execution.',
       );
-      forwardedArgs = {
-        ...args,
-        environment_id: environment.id,
-        workspace_id: workspaceContext.workspace_id,
-        expected_workspace_root: workspaceContext.workspace_root,
-      };
-      delete forwardedArgs.workspace_context;
-    } else {
-      environment = this.environmentRegistry.resolve(args.environment_id);
-      forwardedArgs = { ...args, environment_id: environment.id };
     }
+    if (args.environment_id) {
+      throw new Error(
+        'exec_command does not accept environment_id; workspace_context already determines the environment.',
+      );
+    }
+    if (!this.workspaceContextManager) {
+      throw new Error('Workspace context manager is not available.');
+    }
+    const workspaceContext = this.workspaceContextManager.resolve(
+      args.workspace_context,
+    );
+    const environment = this.environmentRegistry.resolve(
+      workspaceContext.environment_id,
+    );
+    let forwardedArgs = {
+      ...args,
+      environment_id: environment.id,
+      workspace_id: workspaceContext.workspace_id,
+      expected_workspace_root: workspaceContext.workspace_root,
+    };
+    delete forwardedArgs.workspace_context;
     const requestedYieldMs = clampInitialExecYield(args.yield_time_ms);
     forwardedArgs = {
       ...forwardedArgs,
@@ -105,9 +106,7 @@ export class RemoteProcessManager {
         const approval = this.approvalManager.requestExecution(
           {
             ...args,
-            ...(workspaceContext
-              ? { workspace_context: workspaceContext.workspace_context }
-              : {}),
+            workspace_context: workspaceContext.workspace_context,
           },
           environment.id,
         );
@@ -126,9 +125,7 @@ export class RemoteProcessManager {
         args.approval_id,
         {
           ...args,
-          ...(workspaceContext
-            ? { workspace_context: workspaceContext.workspace_context }
-            : {}),
+          workspace_context: workspaceContext.workspace_context,
         },
         environment.id,
       );
@@ -160,15 +157,15 @@ export class RemoteProcessManager {
       this.sessions.set(publicSessionId, {
         environmentId: environment.id,
         remoteSessionId: result.session_id,
-        workspaceContext: workspaceContext?.workspace_context || null,
+        workspaceContext: workspaceContext.workspace_context,
       });
       return {
         ...result,
         session_id: publicSessionId,
-        ...(workspaceContext || {}),
+        ...workspaceContext,
       };
     }
-    return { ...result, ...(workspaceContext || {}) };
+    return { ...result, ...workspaceContext };
   }
 
   async writeStdin(args) {

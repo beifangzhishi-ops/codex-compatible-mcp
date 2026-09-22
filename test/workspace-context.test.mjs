@@ -190,7 +190,11 @@ test('Controller uses projectless contexts and requires approval for registered 
       true,
     );
 
+    const projectless = await controller.workspaceContextManager.createProjectless(
+      'workspace-worker',
+    );
     const first = await controller.processManager.execCommand({
+      workspace_context: projectless.workspace_context,
       cmd: 'Write-Output PROJECTLESS_OK',
     });
     assert.match(first.output, /PROJECTLESS_OK/);
@@ -224,7 +228,10 @@ test('Controller uses projectless contexts and requires approval for registered 
       '+projectless only',
       '*** End Patch',
     ].join('\n');
-    const isolated = await applyPatch.handler({ patch: legacyPreamblePatch });
+    const isolated = await applyPatch.handler({
+      workspace_context: first.workspace_context,
+      patch: legacyPreamblePatch,
+    });
     assert.equal(isolated.structuredContent.workspace_kind, 'projectless');
     await assert.rejects(
       fs.readFile(path.join(legacyRoot, 'isolated.txt'), 'utf8'),
