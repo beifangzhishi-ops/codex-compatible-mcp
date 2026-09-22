@@ -79,6 +79,7 @@ function createProtocolServer(
     {
       title: 'CCM image preview',
       description: 'Renders view_image output and forwards the image into model context when the host supports MCP Apps image context.',
+      mimeType: 'text/html;profile=mcp-app',
     },
     async () => ({
       contents: [{

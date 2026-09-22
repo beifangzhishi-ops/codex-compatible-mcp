@@ -52,10 +52,12 @@ test('view_image exposes an MCP Apps image-context bridge', async () => {
       openWorldHint: false,
     });
     assert.equal(viewImage._meta.ui.resourceUri, VIEW_IMAGE_UI_URI);
+    assert.equal(viewImage._meta['ui/resourceUri'], VIEW_IMAGE_UI_URI);
     assert.equal(
       viewImage._meta['openai/outputTemplate'],
       VIEW_IMAGE_UI_URI,
     );
+    assert.ok(viewImage.outputSchema);
 
     const resource = await client.readResource({ uri: VIEW_IMAGE_UI_URI });
     assert.equal(resource.contents.length, 1);
