@@ -10,6 +10,7 @@ import {
   VIEW_IMAGE_LEGACY_UI_URI,
   VIEW_IMAGE_UI_HTML,
   VIEW_IMAGE_UI_URI,
+  VIEW_IMAGE_V3_UI_URI,
   VIEW_IMAGE_V2_UI_URI,
 } from '../src/ui/view-image-app.mjs';
 
@@ -80,6 +81,7 @@ test('view_image exposes an MCP Apps image-context bridge', async () => {
       'text/html;profile=mcp-app',
     );
     assert.equal(resource.contents[0].text, VIEW_IMAGE_UI_HTML);
+    assert.equal(resource.contents[0]._meta.ui.prefersBorder, false);
     assert.match(resource.contents[0].text, /ui\/initialize/);
     assert.match(resource.contents[0].text, /ui\/update-model-context/);
     assert.match(resource.contents[0].text, /ui\/message/);
@@ -88,6 +90,8 @@ test('view_image exposes an MCP Apps image-context bridge', async () => {
     assert.match(resource.contents[0].text, /openai:set_globals/);
     assert.match(resource.contents[0].text, /type: "image"/);
     assert.doesNotMatch(resource.contents[0].text, /uploadFile/);
+    assert.doesNotMatch(resource.contents[0].text, /<img\b/);
+    assert.match(resource.contents[0].text, /#frame \{ display: none !important; \}/);
 
     const legacyResource = await client.readResource({
       uri: VIEW_IMAGE_LEGACY_UI_URI,
@@ -100,6 +104,9 @@ test('view_image exposes an MCP Apps image-context bridge', async () => {
 
     const v2Resource = await client.readResource({ uri: VIEW_IMAGE_V2_UI_URI });
     assert.equal(v2Resource.contents[0].text, VIEW_IMAGE_UI_HTML);
+
+    const v3Resource = await client.readResource({ uri: VIEW_IMAGE_V3_UI_URI });
+    assert.equal(v3Resource.contents[0].text, VIEW_IMAGE_UI_HTML);
 
     const imageResult = await client.callTool({
       name: 'view_image',

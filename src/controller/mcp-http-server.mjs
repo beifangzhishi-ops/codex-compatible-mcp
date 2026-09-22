@@ -15,6 +15,7 @@ import {
   VIEW_IMAGE_LEGACY_UI_URI,
   VIEW_IMAGE_UI_HTML,
   VIEW_IMAGE_UI_URI,
+  VIEW_IMAGE_V3_UI_URI,
   VIEW_IMAGE_V2_UI_URI,
 } from '../ui/view-image-app.mjs';
 
@@ -77,6 +78,7 @@ function createProtocolServer(
 
   for (const [name, uri] of [
     ['ccm-view-image-ui', VIEW_IMAGE_UI_URI],
+    ['ccm-view-image-ui-v3', VIEW_IMAGE_V3_UI_URI],
     ['ccm-view-image-ui-v2', VIEW_IMAGE_V2_UI_URI],
     ['ccm-view-image-ui-v1', VIEW_IMAGE_LEGACY_UI_URI],
   ]) {
@@ -93,6 +95,7 @@ function createProtocolServer(
           uri,
           mimeType: 'text/html;profile=mcp-app',
           text: VIEW_IMAGE_UI_HTML,
+          _meta: { ui: { prefersBorder: false } },
         }],
       }),
     );

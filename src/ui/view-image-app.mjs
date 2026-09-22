@@ -1,4 +1,5 @@
-export const VIEW_IMAGE_UI_URI = 'ui://ccm/view-image-v3.html';
+export const VIEW_IMAGE_UI_URI = 'ui://ccm/view-image-v4.html';
+export const VIEW_IMAGE_V3_UI_URI = 'ui://ccm/view-image-v3.html';
 export const VIEW_IMAGE_V2_UI_URI = 'ui://ccm/view-image-v2.html';
 export const VIEW_IMAGE_LEGACY_UI_URI = 'ui://ccm/view-image-v1.html';
 
@@ -8,36 +9,24 @@ export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    :root { color-scheme: light dark; }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      padding: 8px;
-      font: 12px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: transparent;
-      color: var(--color-text-primary, inherit);
+    html, body {
+      margin: 0 !important;
+      padding: 0 !important;
+      width: 0 !important;
+      height: 0 !important;
+      min-width: 0 !important;
+      min-height: 0 !important;
+      overflow: hidden !important;
+      background: transparent !important;
     }
-    #frame { display: grid; gap: 6px; max-width: 100%; }
-    #preview {
-      display: none;
-      width: auto;
-      max-width: 100%;
-      max-height: 560px;
-      object-fit: contain;
-      border-radius: 6px;
-    }
-    #status { opacity: 0.72; overflow-wrap: anywhere; }
+    #frame { display: none !important; }
   </style>
 </head>
 <body>
-  <div id="frame">
-    <img id="preview" alt="CCM view_image preview">
-    <div id="status">Waiting for image result...</div>
-  </div>
+  <div id="frame" aria-hidden="true"><span id="status"></span></div>
   <script>
     (() => {
       const PROTOCOL_VERSION = "2026-01-26";
-      const preview = document.getElementById("preview");
       const status = document.getElementById("status");
       const pending = new Map();
       let nextId = 1;
@@ -96,9 +85,6 @@ export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
           image.data.slice(0, 48);
         if (key === lastImageKey) return;
         lastImageKey = key;
-
-        preview.src = "data:" + image.mimeType + ";base64," + image.data;
-        preview.style.display = "block";
 
         const imageContext = hostCapabilities &&
           hostCapabilities.updateModelContext &&

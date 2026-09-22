@@ -318,7 +318,8 @@ result to structured-only output. Other tools may use `structuredContent` as
 the standard optional structured companion to `content`.
 
 For MCP Apps-capable hosts, `view_image` also advertises a small `ui://`
-image preview. The view keeps the standard MCP image result, renders it, and
+bridge. The view is intentionally visually hidden: it keeps the standard MCP
+image result without rendering a duplicate preview in the chat, and
 uses the MCP Apps `ui/update-model-context` image content block when the host
 advertises that capability. When the host also supports `ui/message`, the app
 sends a short follow-up so the deferred image context is available to the model
