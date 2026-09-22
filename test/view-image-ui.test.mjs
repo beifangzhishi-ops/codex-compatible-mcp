@@ -176,13 +176,7 @@ test('view_image exposes an MCP Apps image-context bridge', async () => {
     const execTool = listed.tools.find((tool) => tool.name === 'exec');
     assert.ok(execTool);
     assert.equal(execTool._meta, undefined);
-    assert.equal(listed.tools.some((tool) => tool.name === 'view_image'), false);
-
-    const search = await client.callTool({
-      name: 'tool_search',
-      arguments: { query: 'view image' },
-    });
-    assert.equal(search.structuredContent.tools[0].qualified_name, 'ccm.view_image');
+    assert.equal(listed.tools.some((tool) => tool.name === 'view_image'), true);
 
     const resource = await client.readResource({ uri: VIEW_IMAGE_UI_URI });
     assert.equal(resource.contents.length, 1);
@@ -233,12 +227,27 @@ test('view_image exposes an MCP Apps image-context bridge', async () => {
     const v6Resource = await client.readResource({ uri: VIEW_IMAGE_V6_UI_URI });
     assert.equal(v6Resource.contents[0].text, VIEW_IMAGE_UI_HTML);
 
+    const workspaceContext = '00000000-0000-4000-8000-000000000001';
+    const directImageResult = await client.callTool({
+      name: 'view_image',
+      arguments: {
+        workspace_context: workspaceContext,
+        path: 'probe.png',
+      },
+    });
+    const directImage = directImageResult.content.find((item) => item.type === 'image');
+    assert.ok(directImage);
+    assert.equal(directImage.mimeType, 'image/png');
+
     const imageResult = await client.callTool({
       name: 'exec',
       arguments: {
         calls: [{
           tool: 'ccm.view_image',
-          arguments: { path: 'probe.png' },
+          arguments: {
+            workspace_context: workspaceContext,
+            path: 'probe.png',
+          },
         }],
         yield_time_ms: 1000,
       },
