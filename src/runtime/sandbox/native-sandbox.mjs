@@ -47,7 +47,7 @@ export class NativeSandboxBackend {
     shell,
     permissionProfile,
   }) {
-    if (permissionProfile === 'full-access') {
+    if (permissionProfile === 'full-access' || permissionProfile === 'trusted-git') {
       return {
         ...directShellInvocation({
           platform: environment.platform,

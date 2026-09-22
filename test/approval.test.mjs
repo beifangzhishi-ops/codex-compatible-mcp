@@ -156,3 +156,31 @@ test('Worker sandbox policy maps an approved escalation to full-access', () => {
     'full-access',
   );
 });
+
+test('RemoteProcessManager does not request approval for trusted remote Git', async () => {
+  const environmentRegistry = restrictedRegistry();
+  const workerHub = new FakeWorkerHub();
+  const approvalManager = new ApprovalManager();
+  const manager = new RemoteProcessManager({
+    environmentRegistry,
+    workerHub,
+    approvalManager,
+  });
+
+  try {
+    const result = await manager.execCommand({
+      environment_id: 'approval-worker',
+      cmd: 'git push origin main',
+      sandbox_permissions: 'require_escalated',
+      justification: 'Legacy caller requested escalation.',
+    });
+    assert.equal(result.approval_required, undefined);
+    assert.equal(result.exit_code, 0);
+    assert.equal(workerHub.calls.length, 1);
+    assert.equal(workerHub.calls[0].params.sandbox_permissions, 'use_default');
+    assert.equal(Object.hasOwn(workerHub.calls[0].params, 'approval_id'), false);
+    assert.equal(Object.hasOwn(workerHub.calls[0].params, 'justification'), false);
+  } finally {
+    await manager.close();
+  }
+});

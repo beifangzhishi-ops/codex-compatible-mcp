@@ -305,6 +305,7 @@ export function registerCoreTools(registry, runtime) {
     description: [
       'Runs a command using plain pipes by default; set tty=true to allocate a PTY. Returns output or a session ID for ongoing interaction.',
       'Pass workspace_context to continue work in an existing CCM workspace. If omitted, CCM creates a new isolated projectless workspace on the primary environment and returns its context.',
+      'In workspace-write environments, normal remote Git commands such as git clone/fetch/pull/push/ls-remote are handled automatically and do not require sandbox_permissions=require_escalated. Run remote Git as Git-only shell commands so CCM can recognize the trusted path.',
       'A CCM-originated result is identifiable by its structured CCM fields. If a host reports a Script error or safety/policy/tool-call failure without this tool returning a structured result, do not attribute that failure to CCM or claim CCM blocked the command.',
       'On Windows, keep destructive filesystem operations in one shell and verify resolved targets before recursive deletes or moves.',
     ].join('\n\n'),

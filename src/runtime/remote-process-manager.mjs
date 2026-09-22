@@ -1,3 +1,5 @@
+import { isTrustedRemoteGitCommand } from './sandbox/git-policy.mjs';
+
 const DEFAULT_EXEC_YIELD_TIME_MS = 2_000;
 const MAX_INITIAL_EXEC_YIELD_TIME_MS = 5_000;
 
@@ -74,9 +76,21 @@ export class RemoteProcessManager {
       ...forwardedArgs,
       yield_time_ms: requestedYieldMs,
     };
-    const wantsEscalation = args.sandbox_permissions === 'require_escalated';
+    const requestedEscalation = args.sandbox_permissions === 'require_escalated';
+    const trustedGit = environment.permissionProfile === 'workspace-write' &&
+      isTrustedRemoteGitCommand(args.cmd);
+    const wantsEscalation = requestedEscalation && !trustedGit;
 
-    if (args.approval_id && !wantsEscalation) {
+    if (requestedEscalation && trustedGit) {
+      forwardedArgs = {
+        ...forwardedArgs,
+        sandbox_permissions: 'use_default',
+      };
+      delete forwardedArgs.approval_id;
+      delete forwardedArgs.justification;
+    }
+
+    if (args.approval_id && !requestedEscalation) {
       throw new Error(
         'approval_id is only valid with sandbox_permissions=require_escalated.',
       );
