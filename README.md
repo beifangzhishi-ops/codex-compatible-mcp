@@ -316,7 +316,9 @@ Text tools return normal `content: [{ type: "text", ... }]` results. `view_image
 For MCP Apps-capable hosts, `view_image` also advertises a small `ui://`
 image preview. The view keeps the standard MCP image result, renders it, and
 uses the MCP Apps `ui/update-model-context` image content block when the host
-advertises that capability. This gives the model a visual-context path without
+advertises that capability. When the host also supports `ui/message`, the app
+sends a short follow-up so the deferred image context is available to the model
+on the next model turn. This gives the model a visual-context path without
 routing the image through `send_file`, file-resource materialization, or
 ChatGPT Library. Hosts without MCP Apps image-context support still receive the
 ordinary MCP `image` content unchanged.

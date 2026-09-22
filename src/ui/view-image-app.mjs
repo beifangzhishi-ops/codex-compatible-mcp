@@ -1,4 +1,4 @@
-export const VIEW_IMAGE_UI_URI = 'ui://ccm/view-image-v1.html';
+export const VIEW_IMAGE_UI_URI = 'ui://ccm/view-image-v2.html';
 
 export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
 <html lang="en">
@@ -107,8 +107,37 @@ export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
               height: meta.height || null
             }
           });
-          status.textContent =
-            "Image placed in model context without a file-transfer upload.";
+          const canSendMessage = hostCapabilities &&
+            hostCapabilities.message &&
+            hostCapabilities.message.text;
+          if (canSendMessage) {
+            const label = meta.path
+              ? " for " + meta.path
+              : "";
+            try {
+              await request("ui/message", {
+                role: "user",
+                content: [{
+                  type: "text",
+                  text:
+                    "CCM view_image added the requested local image" + label +
+                    " to model context. Continue the current task using the image now. " +
+                    "Do not call view_image again for the same image unless the user asks."
+                }]
+              });
+              status.textContent =
+                "Image placed in model context and a visual follow-up was triggered.";
+            } catch (messageError) {
+              status.textContent =
+                "Image placed in model context, but the automatic follow-up failed: " +
+                String(messageError && messageError.message
+                  ? messageError.message
+                  : messageError);
+            }
+          } else {
+            status.textContent =
+              "Image placed in model context. The host will expose it on the next user message.";
+          }
         } catch (error) {
           status.textContent =
             "Image rendered, but model-context forwarding failed: " +

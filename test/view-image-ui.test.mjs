@@ -68,6 +68,7 @@ test('view_image exposes an MCP Apps image-context bridge', async () => {
     assert.equal(resource.contents[0].text, VIEW_IMAGE_UI_HTML);
     assert.match(resource.contents[0].text, /ui\/initialize/);
     assert.match(resource.contents[0].text, /ui\/update-model-context/);
+    assert.match(resource.contents[0].text, /ui\/message/);
     assert.match(resource.contents[0].text, /type: "image"/);
     assert.doesNotMatch(resource.contents[0].text, /uploadFile/);
   } finally {
