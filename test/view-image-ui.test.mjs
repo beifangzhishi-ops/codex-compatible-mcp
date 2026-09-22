@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import vm from 'node:vm';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { FileTransferStore } from '../src/controller/file-transfer-store.mjs';
@@ -14,6 +15,104 @@ import {
   VIEW_IMAGE_V3_UI_URI,
   VIEW_IMAGE_V2_UI_URI,
 } from '../src/ui/view-image-app.mjs';
+
+function widgetScript() {
+  const start = VIEW_IMAGE_UI_HTML.indexOf('<script>') + '<script>'.length;
+  const end = VIEW_IMAGE_UI_HTML.indexOf('</script>', start);
+  return VIEW_IMAGE_UI_HTML.slice(start, end);
+}
+
+test('view_image ChatGPT fallback uploads temporary file and stores imageIds', async () => {
+  const listeners = new Map();
+  const status = { textContent: '' };
+  let widgetState = null;
+  let uploadOptions = null;
+  let uploadedFile = null;
+  let followUp = null;
+
+  class FakeFile {
+    constructor(parts, name, options) {
+      this.parts = parts;
+      this.name = name;
+      this.type = options?.type || '';
+    }
+  }
+
+  const parent = {
+    postMessage(message) {
+      if (message.method !== 'ui/initialize') return;
+      queueMicrotask(() => {
+        for (const listener of listeners.get('message') || []) {
+          listener({
+            source: parent,
+            data: {
+              jsonrpc: '2.0',
+              id: message.id,
+              result: { hostCapabilities: {} },
+            },
+          });
+        }
+      });
+    },
+  };
+
+  const window = {
+    parent,
+    openai: {
+      toolResponseMetadata: {
+        mcp_tool_result: {
+          content: [{
+            type: 'image',
+            mimeType: 'image/png',
+            data: 'iVBORw0KGgo=',
+          }],
+          _meta: { path: 'probe.png' },
+        },
+      },
+      async uploadFile(file, options) {
+        uploadedFile = file;
+        uploadOptions = options;
+        return { fileId: 'file_ccm_probe' };
+      },
+      setWidgetState(state) {
+        widgetState = state;
+      },
+      async sendFollowUpMessage(message) {
+        followUp = message;
+      },
+    },
+    addEventListener(name, listener) {
+      if (!listeners.has(name)) listeners.set(name, []);
+      listeners.get(name).push(listener);
+    },
+  };
+
+  vm.runInNewContext(widgetScript(), {
+    window,
+    document: { getElementById: () => status },
+    setTimeout,
+    clearTimeout,
+    queueMicrotask,
+    Uint8Array,
+    File: FakeFile,
+    atob: (value) => Buffer.from(value, 'base64').toString('binary'),
+  });
+
+  for (let attempt = 0; attempt < 20 && !widgetState; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  assert.ok(uploadedFile);
+  assert.equal(uploadedFile.name, 'probe.png');
+  assert.equal(uploadedFile.type, 'image/png');
+  assert.equal(uploadOptions.library, false);
+  assert.equal(widgetState.imageIds.length, 1);
+  assert.equal(widgetState.imageIds[0], 'file_ccm_probe');
+  assert.equal(widgetState.privateContent.fileId, 'file_ccm_probe');
+  assert.match(widgetState.modelContent, /Review the image/);
+  assert.ok(followUp);
+  assert.match(followUp.prompt, /Continue the current task using the image now/);
+});
 
 test('view_image exposes an MCP Apps image-context bridge', async () => {
   const environmentRegistry = {
