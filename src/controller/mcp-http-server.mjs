@@ -1,5 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import {
+  McpServer,
+  ResourceTemplate,
+} from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
@@ -13,6 +16,7 @@ const SERVER_INFO = { name: 'ccm', version: '0.1.0' };
 
 function createProtocolServer(
   toolRegistry,
+  runtime,
   maxToolResultBytes,
   maxFileResultBytes,
 ) {
@@ -35,6 +39,35 @@ function createProtocolServer(
       'Treat transient network failures carefully: a single timeout, DNS failure, connection reset, HTTP 502, or target-site 403/404/challenge does not mean a CCM environment is offline. Distinguish CCM transport, worker connectivity, command runtime, and target-site failures; verify environment health and retry transient network operations 2-3 times when appropriate.',
     ].join('\n'),
   });
+
+  server.registerResource(
+    'ccm-file-transfer',
+    new ResourceTemplate('ccm-file:///{token}', { list: undefined }),
+    {
+      title: 'CCM transferred file',
+      description: 'Temporary file transferred from a CCM environment.',
+    },
+    async (uri, variables) => {
+      const token = String(variables.token || '');
+      const entry = runtime.fileTransferStore?.get(token);
+      if (!entry) {
+        throw new Error('CCM file resource is unknown or expired: ' + uri);
+      }
+      return {
+        contents: [{
+          uri: entry.uri,
+          mimeType: entry.mime_type,
+          blob: entry.data,
+          _meta: {
+            filename: entry.filename,
+            byte_length: entry.byte_length,
+            sha256: entry.sha256,
+            source_environment_id: entry.environment_id,
+          },
+        }],
+      };
+    },
+  );
 
   for (const tool of toolRegistry.listDirect()) {
     server.registerTool(tool.name, {
@@ -97,6 +130,7 @@ export function createHttpController({
         }
         const protocolServer = createProtocolServer(
           toolRegistry,
+          runtime,
           maxToolResultBytes,
           maxFileResultBytes,
         );

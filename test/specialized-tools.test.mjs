@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { registerSpecializedTools } from '../src/tools/specialized-tools.mjs';
 import { ToolRegistry } from '../src/tools/tool-registry.mjs';
+import { FileTransferStore } from '../src/controller/file-transfer-store.mjs';
 
 function fakeRuntime() {
   const calls = [];
@@ -40,10 +41,11 @@ function fakeRuntime() {
         };
       },
     },
+    fileTransferStore: new FileTransferStore(),
   };
 }
 
-test('send_file returns an embedded resource without changing the direct tool surface', async () => {
+test('send_file returns a readable resource link without changing the direct tool surface', async () => {
   const runtime = fakeRuntime();
   runtime.environmentRegistry.resolve = (environmentId) => ({
     id: environmentId || 'windows-worker',
@@ -58,16 +60,22 @@ test('send_file returns an embedded resource without changing the direct tool su
     path: 'C:\\docs\\report.docx',
   });
   assert.equal(result.isError, undefined);
-  assert.equal(result.content[1].type, 'resource');
+  assert.equal(result.content[1].type, 'resource_link');
   assert.equal(
-    result.content[1].resource.mimeType,
+    result.content[1].mimeType,
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   );
+  assert.equal(result.content[1].size, 4);
+  assert.match(result.content[1].uri, /^ccm-file:\/\/\/[0-9a-f-]+$/i);
+  const token = result.content[1].uri.split('/').at(-1);
+  const stored = runtime.fileTransferStore.get(token);
+  assert.ok(stored);
   assert.equal(
-    Buffer.from(result.content[1].resource.blob, 'base64').toString(),
+    Buffer.from(stored.data, 'base64').toString(),
     'test',
   );
   assert.equal(result.structuredContent.filename, 'report.docx');
+  assert.equal(result.structuredContent.resource_uri, result.content[1].uri);
 });
 
 

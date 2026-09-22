@@ -38,27 +38,29 @@ function execResult(value, metadata = {}) {
   };
 }
 
-function fileResourceResult(value, environmentId) {
-  const uri = 'ccm-file:///' + encodeURIComponent(value.filename);
+function fileResourceResult(value, environmentId, fileTransferStore) {
+  if (!fileTransferStore) {
+    throw new Error('CCM file-transfer store is unavailable.');
+  }
+  const transfer = fileTransferStore.put(value, { environmentId });
   return {
     content: [
       {
         type: 'text',
         text: 'Attached ' + value.filename + ' from ' + environmentId +
-          ' (' + value.byte_length + ' bytes, sha256 ' + value.sha256 + ').',
+          ' (' + value.byte_length + ' bytes, sha256 ' + value.sha256 +
+          '). The file is available through the returned MCP resource link.',
       },
       {
-        type: 'resource',
-        resource: {
-          uri,
-          mimeType: value.mime_type,
-          blob: value.data,
-          _meta: {
-            filename: value.filename,
-            byte_length: value.byte_length,
-            sha256: value.sha256,
-            source_environment_id: environmentId,
-          },
+        type: 'resource_link',
+        uri: transfer.uri,
+        name: value.filename,
+        description: 'File transferred from CCM environment ' + environmentId,
+        mimeType: value.mime_type,
+        size: value.byte_length,
+        _meta: {
+          sha256: value.sha256,
+          source_environment_id: environmentId,
         },
       },
     ],
@@ -70,6 +72,7 @@ function fileResourceResult(value, environmentId) {
       mime_type: value.mime_type,
       byte_length: value.byte_length,
       sha256: value.sha256,
+      resource_uri: transfer.uri,
     },
   };
 }
@@ -199,7 +202,7 @@ export function registerSpecializedTools(registry, runtime) {
     },
     supportsParallel: true,
     description: [
-      'Send a file from a CCM environment to the GPT client as an embedded binary resource when the user actually needs the file in chat for preview, download, upload to another tool, or handoff.',
+      'Send a file from a CCM environment to the GPT client as an MCP resource link when the user actually needs the file in chat for preview, download, upload to another tool, or handoff.',
       'Do NOT use send_file merely so the model can inspect, review, analyze, or verify a local file. If the file can be examined inside CCM, prefer local reading, view_image, command-line inspection, or a temporary local preview instead. This avoids unnecessary file materialization and user approval prompts.',
       'Before calling send_file, make it clear to the user that the file needs to be transferred into chat. This preserves the original file bytes and does not use BMG or upload the file to ChatGPT Library.',
       'Use this for Word, PDF, Excel, PowerPoint, archives, images, and other local files only after locating the exact path and determining that an actual user-facing transfer is needed.',
@@ -224,7 +227,11 @@ export function registerSpecializedTools(registry, runtime) {
           environment_id: environment.id,
           path: args.path,
         });
-        return fileResourceResult(value, environment.id);
+        return fileResourceResult(
+          value,
+          environment.id,
+          runtime.fileTransferStore,
+        );
       } catch (error) {
         return toolError(error);
       }

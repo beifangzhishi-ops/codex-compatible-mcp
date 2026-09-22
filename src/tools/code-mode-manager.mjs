@@ -46,7 +46,9 @@ function compactStructured(value, maxStringChars) {
 
 function compactToolResult(result, maxTokens) {
   const passthroughContent = Array.isArray(result?.content)
-    ? result.content.filter((item) => item?.type === 'resource')
+    ? result.content.filter(
+        (item) => item?.type === 'resource' || item?.type === 'resource_link',
+      )
     : [];
   const sizeSafeResult = result && typeof result === 'object'
     ? {

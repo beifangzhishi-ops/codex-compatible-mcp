@@ -97,7 +97,7 @@ The exporter only recovers information present in the public Share payload. Info
 CCM ships optional Windows workflows ported from WCM without expanding the top-level MCP schema:
 
 - `ccm-extra.research_ppt_pipeline` returns the user-validated research PowerPoint production workflow, including production-mode selection, source/image review, canonical per-slide specs, mandatory `ccm-extra.send_file` delivery of Imagegen reference images, GPT decide-and-auto-advance handling of returned slide images, QA, mandatory whole-deck user review, and mode-specific delivery.
-- `ccm-extra.send_file` transfers an exact file from a selected CCM environment to the GPT client only when a user-facing handoff is actually needed (preview/download/upload to another tool). Do not use it merely for model-side inspection when the file can be read or viewed locally in CCM; prefer local reading, `view_image`, command-line inspection, or temporary local previews to avoid unnecessary materialization/approval prompts. The transfer does not use BMG or Library upload.
+- `ccm-extra.send_file` transfers an exact file from a selected CCM environment to the GPT client only when a user-facing handoff is actually needed (preview/download/upload to another tool). It returns a temporary MCP `resource_link`; after the client approves/materializes it, `resources/read` serves the exact file bytes from a bounded TTL cache. Do not use it merely for model-side inspection when the file can be read or viewed locally in CCM; prefer local reading, `view_image`, command-line inspection, or temporary local previews to avoid unnecessary materialization/approval prompts. The transfer does not use BMG or Library upload.
 - `ccm-extra.quark_upload` submits one or more files through that local Quark desktop session and can wait for verified completion.
 - `ccm-extra.bilibili_download_dash` downloads signed DASH video/audio URLs obtained from an authenticated browser session and remuxes them with `ffmpeg -c copy`.
 
@@ -264,6 +264,8 @@ The legacy `CCM_WORKER_HUB_HOST` variable is accepted as a fallback for both bin
 | `CCM_MAX_MCP_FILE_RESULT_BYTES` | 24 MiB | Serialized MCP result limit when returning an embedded file resource. |
 | `CCM_MAX_VIEW_IMAGE_BYTES` | 1 MiB | Maximum raw image size returned by `view_image`. |
 | `CCM_MAX_SEND_FILE_BYTES` | 12 MiB | Maximum raw file size returned by `ccm-extra.send_file`. |
+| `CCM_FILE_TRANSFER_TTL_MS` | 900000 ms | Lifetime of temporary `send_file` resource links. |
+| `CCM_FILE_TRANSFER_CACHE_BYTES` | 64 MiB | Maximum total raw bytes retained for temporary file-resource reads. |
 | `CCM_WORKER_RECONNECT_MS` | 1000 ms | Worker reconnect delay. |
 
 ## Sandbox and platform support

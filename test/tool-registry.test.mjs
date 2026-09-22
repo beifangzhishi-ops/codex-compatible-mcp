@@ -268,6 +268,45 @@ test('exec invokes deferred nested capabilities and wait resumes long cells', as
   codeModeManager.close();
 });
 
+test('exec passes resource links through without embedding file bytes', async () => {
+  const registry = new ToolRegistry();
+  registry.register(textTool({
+    name: 'send_file_link',
+    namespace: 'demo',
+    surfaces: { deferred: true, codeMode: true },
+    supportsParallel: true,
+    handler: async () => ({
+      content: [{
+        type: 'resource_link',
+        uri: 'ccm-file:///00000000-0000-4000-8000-000000000001',
+        name: 'report.docx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        size: 1234,
+      }],
+      structuredContent: { filename: 'report.docx' },
+    }),
+  }));
+
+  const { codeModeManager } = registerArchitectureTools(registry);
+  try {
+    const result = await registry.get('exec').handler({
+      calls: [{ tool: 'demo.send_file_link', arguments: {} }],
+      yield_time_ms: 1000,
+    });
+    assert.equal(result.isError, undefined);
+    const link = result.content.find((item) => item.type === 'resource_link');
+    assert.ok(link);
+    assert.equal(link.name, 'report.docx');
+    assert.equal(link.size, 1234);
+    assert.equal(
+      result.structuredContent.calls[0].result.content[0].type,
+      'resource_link',
+    );
+  } finally {
+    codeModeManager.close();
+  }
+});
+
 test('exec rejects unsafe parallelization and reports live nested sessions clearly', async () => {
   const registry = new ToolRegistry();
 

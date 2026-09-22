@@ -188,16 +188,25 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       },
     });
     assert.equal(sendFileResult.isError, undefined);
-    const resource = sendFileResult.content.find((item) => item.type === 'resource');
-    assert.ok(resource);
+    const resourceLink = sendFileResult.content.find(
+      (item) => item.type === 'resource_link',
+    );
+    assert.ok(resourceLink);
     assert.equal(
-      resource.resource.mimeType,
+      resourceLink.mimeType,
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     );
-    assert.deepEqual(Buffer.from(resource.resource.blob, 'base64'), docBytes);
+    assert.equal(resourceLink.size, docBytes.length);
     assert.equal(
-      sendFileResult.structuredContent.calls[0].result.content[1].data_omitted,
-      true,
+      sendFileResult.structuredContent.calls[0].result.content[1].type,
+      'resource_link',
+    );
+    const readFileResult = await client.readResource({ uri: resourceLink.uri });
+    assert.equal(readFileResult.contents.length, 1);
+    assert.equal(readFileResult.contents[0].mimeType, resourceLink.mimeType);
+    assert.deepEqual(
+      Buffer.from(readFileResult.contents[0].blob, 'base64'),
+      docBytes,
     );
 
     registry.register({
