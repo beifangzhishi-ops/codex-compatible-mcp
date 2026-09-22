@@ -1,20 +1,6 @@
 import * as z from 'zod/v4';
-import { appendFileSync, mkdirSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
 import { CodeModeManager } from './code-mode-manager.mjs';
-
-const VIEW_IMAGE_BRIDGE_DEBUG_PREFIX = '__ccm_view_image_bridge__:';
-
-function recordViewImageBridgeDebug(query) {
-  if (!query.startsWith(VIEW_IMAGE_BRIDGE_DEBUG_PREFIX)) return;
-  const logPath = resolve('.state', 'view-image-bridge.log');
-  mkdirSync(dirname(logPath), { recursive: true });
-  appendFileSync(
-    logPath,
-    `${new Date().toISOString()} ${query.slice(VIEW_IMAGE_BRIDGE_DEBUG_PREFIX.length)}\n`,
-    'utf8',
-  );
-}
+import { EXEC_IMAGE_BRIDGE_UI_URI } from '../ui/view-image-app.mjs';
 
 function jsonResult(value, text = null, extraContent = []) {
   return {
@@ -71,7 +57,6 @@ export function registerArchitectureTools(
     },
     handler: async (args) => {
       try {
-        recordViewImageBridgeDebug(args.query);
         const matches = registry.searchDeferred(args.query, {
           limit: args.limit,
         });
@@ -91,6 +76,11 @@ export function registerArchitectureTools(
     provider: 'ccm-runtime',
     provenance: 'ccm-runtime',
     surfaces: { direct: true },
+    mcpMeta: {
+      ui: { resourceUri: EXEC_IMAGE_BRIDGE_UI_URI },
+      'ui/resourceUri': EXEC_IMAGE_BRIDGE_UI_URI,
+      'openai/outputTemplate': EXEC_IMAGE_BRIDGE_UI_URI,
+    },
     tags: ['tools', 'code-mode', 'orchestration', 'batch'],
     description: [
       'Execute one or more ToolRegistry capabilities through CCM nested dispatch.',

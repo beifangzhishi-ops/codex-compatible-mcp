@@ -5,9 +5,11 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { FileTransferStore } from '../src/controller/file-transfer-store.mjs';
 import { createHttpController } from '../src/controller/mcp-http-server.mjs';
+import { registerArchitectureTools } from '../src/tools/architecture-tools.mjs';
 import { registerCoreTools } from '../src/tools/core-tools.mjs';
 import { ToolRegistry } from '../src/tools/tool-registry.mjs';
 import {
+  EXEC_IMAGE_BRIDGE_UI_URI,
   VIEW_IMAGE_LEGACY_UI_URI,
   VIEW_IMAGE_UI_HTML,
   VIEW_IMAGE_UI_URI,
@@ -154,6 +156,7 @@ test('view_image exposes an MCP Apps image-context bridge', async () => {
     },
   };
   const registry = registerCoreTools(new ToolRegistry(), runtime);
+  const { codeModeManager } = registerArchitectureTools(registry);
   const controller = createHttpController({
     toolRegistry: registry,
     runtime,
@@ -171,20 +174,26 @@ test('view_image exposes an MCP Apps image-context bridge', async () => {
   try {
     await client.connect(transport);
     const listed = await client.listTools();
-    const viewImage = listed.tools.find((tool) => tool.name === 'view_image');
-    assert.ok(viewImage);
-    assert.deepEqual(viewImage.annotations, {
-      readOnlyHint: true,
-      destructiveHint: false,
-      openWorldHint: false,
-    });
-    assert.equal(viewImage._meta.ui.resourceUri, VIEW_IMAGE_UI_URI);
-    assert.equal(viewImage._meta['ui/resourceUri'], VIEW_IMAGE_UI_URI);
+    const execTool = listed.tools.find((tool) => tool.name === 'exec');
+    assert.ok(execTool);
+    assert.equal(execTool._meta.ui.resourceUri, EXEC_IMAGE_BRIDGE_UI_URI);
+    assert.equal(execTool._meta['ui/resourceUri'], EXEC_IMAGE_BRIDGE_UI_URI);
     assert.equal(
-      viewImage._meta['openai/outputTemplate'],
-      VIEW_IMAGE_UI_URI,
+      execTool._meta['openai/outputTemplate'],
+      EXEC_IMAGE_BRIDGE_UI_URI,
     );
-    assert.equal(viewImage.outputSchema, undefined);
+    assert.equal(listed.tools.some((tool) => tool.name === 'view_image'), false);
+
+    const search = await client.callTool({
+      name: 'tool_search',
+      arguments: { query: 'view image' },
+    });
+    assert.equal(search.structuredContent.tools[0].qualified_name, 'ccm.view_image');
+
+    const execResource = await client.readResource({
+      uri: EXEC_IMAGE_BRIDGE_UI_URI,
+    });
+    assert.equal(execResource.contents[0].text, VIEW_IMAGE_UI_HTML);
 
     const resource = await client.readResource({ uri: VIEW_IMAGE_UI_URI });
     assert.equal(resource.contents.length, 1);
@@ -206,7 +215,6 @@ test('view_image exposes an MCP Apps image-context bridge', async () => {
     assert.match(resource.contents[0].text, /notifyIntrinsicHeight/);
     assert.match(resource.contents[0].text, /ui\/notifications\/size-changed/);
     assert.match(resource.contents[0].text, /requestClose/);
-    assert.match(resource.contents[0].text, /__ccm_view_image_bridge__/);
     assert.match(resource.contents[0].text, /openai:set_globals/);
     assert.match(resource.contents[0].text, /type: "image"/);
     assert.doesNotMatch(resource.contents[0].text, /<img\b/);
@@ -237,14 +245,21 @@ test('view_image exposes an MCP Apps image-context bridge', async () => {
     assert.equal(v6Resource.contents[0].text, VIEW_IMAGE_UI_HTML);
 
     const imageResult = await client.callTool({
-      name: 'view_image',
-      arguments: { path: 'probe.png' },
+      name: 'exec',
+      arguments: {
+        calls: [{
+          tool: 'ccm.view_image',
+          arguments: { path: 'probe.png' },
+        }],
+        yield_time_ms: 1000,
+      },
     });
-    assert.equal(imageResult.content[0].type, 'image');
-    assert.equal(imageResult.structuredContent, undefined);
-    assert.equal(imageResult._meta.path, 'probe.png');
+    const nestedImage = imageResult.content.find((item) => item.type === 'image');
+    assert.ok(nestedImage);
+    assert.equal(nestedImage.mimeType, 'image/png');
   } finally {
     await client.close().catch(() => {});
+    codeModeManager.close();
     await controller.close();
   }
 });

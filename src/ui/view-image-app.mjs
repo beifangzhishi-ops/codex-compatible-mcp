@@ -1,3 +1,4 @@
+export const EXEC_IMAGE_BRIDGE_UI_URI = 'ui://ccm/exec-image-bridge.html';
 export const VIEW_IMAGE_UI_URI = 'ui://ccm/view-image-v7.html';
 export const VIEW_IMAGE_V6_UI_URI = 'ui://ccm/view-image-v6.html';
 export const VIEW_IMAGE_V5_UI_URI = 'ui://ccm/view-image-v5.html';
@@ -38,21 +39,6 @@ export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
 
       function post(message) {
         window.parent.postMessage(message, "*");
-      }
-
-      async function report(phase, detail = "") {
-        const openai = window.openai;
-        if (!openai || typeof openai.callTool !== "function") return;
-        const safeDetail = String(detail || "")
-          .replace(/[\r\n]+/g, " ")
-          .slice(0, 240);
-        try {
-          await openai.callTool("tool_search", {
-            query: "__ccm_view_image_bridge__:" + phase +
-              (safeDetail ? ":" + safeDetail : ""),
-            limit: 1
-          });
-        } catch {}
       }
 
       function collapseUi() {
@@ -166,21 +152,14 @@ export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
         if (!openai ||
             typeof openai.uploadFile !== "function" ||
             typeof openai.setWidgetState !== "function") {
-          await report("file_bridge_unavailable", JSON.stringify({
-            uploadFile: !!(openai && typeof openai.uploadFile === "function"),
-            setWidgetState: !!(openai && typeof openai.setWidgetState === "function"),
-            sendFollowUpMessage: !!(openai && typeof openai.sendFollowUpMessage === "function")
-          }));
           return false;
         }
-        await report("upload_start", image.mimeType);
         const uploaded = await openai.uploadFile(
           imageFile(image, meta),
           { library: false }
         );
         const fileId = uploaded && uploaded.fileId;
         if (!fileId) throw new Error("ChatGPT uploadFile returned no fileId");
-        await report("upload_ok", "fileId=yes");
         openai.setWidgetState({
           modelContent: "Review the image supplied by CCM view_image.",
           privateContent: {
@@ -191,26 +170,17 @@ export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
           },
           imageIds: [fileId]
         });
-        await report("widget_state_ok", "imageIds=1");
         await triggerFollowUp(meta);
-        await report("followup_ok");
         return true;
       }
 
       async function bridgeResult(result) {
         collapseUi();
-        await report("bridge_result_received", JSON.stringify({
-          content: Array.isArray(result && result.content)
-            ? result.content.map((item) => item && item.type).filter(Boolean)
-            : []
-        }));
         const image = findImage(result);
         if (!image) {
-          await report("image_missing");
           await closeUi();
           return;
         }
-        await report("image_found", image.mimeType);
         const key = image.mimeType + ":" + image.data.length + ":" +
           image.data.slice(0, 48);
         if (key === lastImageKey) return;
@@ -224,7 +194,6 @@ export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
           hostCapabilities.updateModelContext &&
           hostCapabilities.updateModelContext.image;
         if (!imageContext) {
-          await report("image_context_capability_absent");
           try {
             if (await bridgeViaChatGptFile(image, meta)) {
               status.textContent =
@@ -233,7 +202,6 @@ export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
               return;
             }
           } catch (error) {
-            await report("file_bridge_error", error && error.message ? error.message : error);
             status.textContent =
               "ChatGPT file-state image bridge failed: " +
               String(error && error.message ? error.message : error);
@@ -245,7 +213,6 @@ export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
           return;
         }
         try {
-          await report("image_context_update_start");
           await request("ui/update-model-context", {
             content: [{
               type: "image",
@@ -259,14 +226,12 @@ export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
               height: meta.height || null
             }
           });
-          await report("image_context_update_ok");
           try {
             const triggered = await triggerFollowUp(meta);
             status.textContent = triggered
               ? "Image placed in model context and a visual follow-up was triggered."
               : "Image placed in model context for the next user message.";
           } catch (messageError) {
-            await report("followup_error", messageError && messageError.message ? messageError.message : messageError);
             status.textContent =
               "Image placed in model context, but the follow-up failed: " +
               String(messageError && messageError.message
@@ -275,7 +240,6 @@ export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
           }
           await closeUi();
         } catch (error) {
-          await report("image_context_error", error && error.message ? error.message : error);
           status.textContent =
             "Image rendered, but model-context forwarding failed: " +
             String(error && error.message ? error.message : error);
@@ -315,10 +279,6 @@ export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
 
       async function initialize() {
         collapseUi();
-        await report("initialize_start", JSON.stringify({
-          openai: !!window.openai,
-          toolResponseMetadata: !!(window.openai && window.openai.toolResponseMetadata)
-        }));
         try {
           const initialized = await request("ui/initialize", {
             protocolVersion: PROTOCOL_VERSION,
@@ -332,20 +292,15 @@ export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
           hostCapabilities = initialized && initialized.hostCapabilities
             ? initialized.hostCapabilities
             : {};
-          await report("initialize_ok", JSON.stringify(hostCapabilities));
           post({
             jsonrpc: "2.0",
             method: "ui/notifications/initialized"
           });
           const result = chatGptToolResult();
           if (result) {
-            await report("initial_tool_result_found");
             void bridgeResult(result);
-          } else {
-            await report("initial_tool_result_missing");
           }
         } catch (error) {
-          await report("initialize_error", error && error.message ? error.message : error);
           status.textContent =
             "Image bridge initialization failed: " +
             String(error && error.message ? error.message : error);

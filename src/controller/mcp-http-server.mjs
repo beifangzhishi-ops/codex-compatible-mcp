@@ -12,6 +12,7 @@ import {
   resolveMaxMcpToolResultBytes,
 } from './response-guard.mjs';
 import {
+  EXEC_IMAGE_BRIDGE_UI_URI,
   VIEW_IMAGE_LEGACY_UI_URI,
   VIEW_IMAGE_UI_HTML,
   VIEW_IMAGE_UI_URI,
@@ -80,6 +81,7 @@ function createProtocolServer(
   );
 
   for (const [name, uri] of [
+    ['ccm-exec-image-bridge-ui', EXEC_IMAGE_BRIDGE_UI_URI],
     ['ccm-view-image-ui', VIEW_IMAGE_UI_URI],
     ['ccm-view-image-ui-v6', VIEW_IMAGE_V6_UI_URI],
     ['ccm-view-image-ui-v5', VIEW_IMAGE_V5_UI_URI],

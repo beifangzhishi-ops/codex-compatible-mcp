@@ -57,7 +57,6 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       'respond_to_escalation',
       'select_workspace',
       'tool_search',
-      'view_image',
       'wait',
       'write_stdin',
     ]);
@@ -158,18 +157,29 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     );
     await fs.writeFile(path.join(workspaceRoot, 'tiny.png'), png);
     const imageResult = await client.callTool({
-      name: 'view_image',
+      name: 'exec',
       arguments: {
-        workspace_context: workspaceContext,
-        path: 'tiny.png',
+        calls: [{
+          tool: 'ccm.view_image',
+          arguments: {
+            workspace_context: workspaceContext,
+            path: 'tiny.png',
+          },
+        }],
+        yield_time_ms: 1000,
       },
     });
     assert.equal(imageResult.isError, undefined);
-    assert.equal(imageResult.content[0].type, 'image');
-    assert.equal(imageResult.content[0].mimeType, 'image/png');
+    const nestedImage = imageResult.content.find((item) => item.type === 'image');
+    assert.ok(nestedImage);
+    assert.equal(nestedImage.mimeType, 'image/png');
     assert.equal(
-      Buffer.from(imageResult.content[0].data, 'base64').length,
+      Buffer.from(nestedImage.data, 'base64').length,
       png.length,
+    );
+    assert.equal(
+      imageResult.structuredContent.calls[0].result.content[0].data_omitted,
+      true,
     );
 
     const docBytes = Buffer.alloc(3 * 1024 * 1024, 0x61);

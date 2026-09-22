@@ -47,7 +47,9 @@ function compactStructured(value, maxStringChars) {
 function compactToolResult(result, maxTokens) {
   const passthroughContent = Array.isArray(result?.content)
     ? result.content.filter(
-        (item) => item?.type === 'resource' || item?.type === 'resource_link',
+        (item) => item?.type === 'image' ||
+          item?.type === 'resource' ||
+          item?.type === 'resource_link',
       )
     : [];
   const sizeSafeResult = result && typeof result === 'object'
@@ -55,6 +57,14 @@ function compactToolResult(result, maxTokens) {
         ...result,
         content: Array.isArray(result.content)
           ? result.content.map((item) => {
+              if (item?.type === 'image') {
+                return {
+                  type: 'image',
+                  mimeType: item.mimeType,
+                  byte_length: Buffer.from(item.data || '', 'base64').length,
+                  data_omitted: true,
+                };
+              }
               if (item?.type !== 'resource') return item;
               return {
                 type: 'resource',

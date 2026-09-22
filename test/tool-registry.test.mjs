@@ -307,6 +307,38 @@ test('exec passes resource links through without embedding file bytes', async ()
   }
 });
 
+test('exec passes image content through while compacting nested image bytes', async () => {
+  const registry = new ToolRegistry();
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2F+QAAAAASUVORK5CYII=';
+  registry.register(textTool({
+    name: 'nested_image',
+    namespace: 'demo',
+    surfaces: { deferred: true, codeMode: true },
+    supportsParallel: true,
+    handler: async () => ({
+      content: [{ type: 'image', mimeType: 'image/png', data: png }],
+    }),
+  }));
+
+  const { codeModeManager } = registerArchitectureTools(registry);
+  try {
+    const result = await registry.get('exec').handler({
+      calls: [{ tool: 'demo.nested_image', arguments: {} }],
+      yield_time_ms: 1000,
+    });
+    const image = result.content.find((item) => item.type === 'image');
+    assert.ok(image);
+    assert.equal(image.mimeType, 'image/png');
+    assert.equal(image.data, png);
+    assert.equal(
+      result.structuredContent.calls[0].result.content[0].data_omitted,
+      true,
+    );
+  } finally {
+    codeModeManager.close();
+  }
+});
+
 test('exec rejects unsafe parallelization and reports live nested sessions clearly', async () => {
   const registry = new ToolRegistry();
 
