@@ -11,6 +11,7 @@ import {
   VIEW_IMAGE_LEGACY_UI_URI,
   VIEW_IMAGE_UI_HTML,
   VIEW_IMAGE_UI_URI,
+  VIEW_IMAGE_V5_UI_URI,
   VIEW_IMAGE_V4_UI_URI,
   VIEW_IMAGE_V3_UI_URI,
   VIEW_IMAGE_V2_UI_URI,
@@ -29,6 +30,8 @@ test('view_image ChatGPT fallback uploads temporary file and stores imageIds', a
   let uploadOptions = null;
   let uploadedFile = null;
   let followUp = null;
+  let intrinsicHeight = null;
+  let closeCount = 0;
 
   class FakeFile {
     constructor(parts, name, options) {
@@ -80,6 +83,12 @@ test('view_image ChatGPT fallback uploads temporary file and stores imageIds', a
       async sendFollowUpMessage(message) {
         followUp = message;
       },
+      notifyIntrinsicHeight(value) {
+        intrinsicHeight = value;
+      },
+      async requestClose() {
+        closeCount += 1;
+      },
     },
     addEventListener(name, listener) {
       if (!listeners.has(name)) listeners.set(name, []);
@@ -112,6 +121,8 @@ test('view_image ChatGPT fallback uploads temporary file and stores imageIds', a
   assert.match(widgetState.modelContent, /Review the image/);
   assert.ok(followUp);
   assert.match(followUp.prompt, /Continue the current task using the image now/);
+  assert.equal(intrinsicHeight.height, 0);
+  assert.ok(closeCount >= 1);
 });
 
 test('view_image exposes an MCP Apps image-context bridge', async () => {
@@ -191,6 +202,9 @@ test('view_image exposes an MCP Apps image-context bridge', async () => {
     assert.match(resource.contents[0].text, /setWidgetState/);
     assert.match(resource.contents[0].text, /imageIds/);
     assert.match(resource.contents[0].text, /library: false/);
+    assert.match(resource.contents[0].text, /notifyIntrinsicHeight/);
+    assert.match(resource.contents[0].text, /ui\/notifications\/size-changed/);
+    assert.match(resource.contents[0].text, /requestClose/);
     assert.match(resource.contents[0].text, /openai:set_globals/);
     assert.match(resource.contents[0].text, /type: "image"/);
     assert.doesNotMatch(resource.contents[0].text, /<img\b/);
@@ -213,6 +227,9 @@ test('view_image exposes an MCP Apps image-context bridge', async () => {
 
     const v4Resource = await client.readResource({ uri: VIEW_IMAGE_V4_UI_URI });
     assert.equal(v4Resource.contents[0].text, VIEW_IMAGE_UI_HTML);
+
+    const v5Resource = await client.readResource({ uri: VIEW_IMAGE_V5_UI_URI });
+    assert.equal(v5Resource.contents[0].text, VIEW_IMAGE_UI_HTML);
 
     const imageResult = await client.callTool({
       name: 'view_image',

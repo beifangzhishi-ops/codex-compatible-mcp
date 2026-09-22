@@ -1,4 +1,5 @@
-export const VIEW_IMAGE_UI_URI = 'ui://ccm/view-image-v5.html';
+export const VIEW_IMAGE_UI_URI = 'ui://ccm/view-image-v6.html';
+export const VIEW_IMAGE_V5_UI_URI = 'ui://ccm/view-image-v5.html';
 export const VIEW_IMAGE_V4_UI_URI = 'ui://ccm/view-image-v4.html';
 export const VIEW_IMAGE_V3_UI_URI = 'ui://ccm/view-image-v3.html';
 export const VIEW_IMAGE_V2_UI_URI = 'ui://ccm/view-image-v2.html';
@@ -36,6 +37,29 @@ export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
 
       function post(message) {
         window.parent.postMessage(message, "*");
+      }
+
+      function collapseUi() {
+        const openai = window.openai;
+        try {
+          if (openai && typeof openai.notifyIntrinsicHeight === "function") {
+            openai.notifyIntrinsicHeight({ height: 0 });
+          }
+        } catch {}
+        post({
+          jsonrpc: "2.0",
+          method: "ui/notifications/size-changed",
+          params: { height: 0, width: 0 }
+        });
+      }
+
+      async function closeUi() {
+        collapseUi();
+        const openai = window.openai;
+        if (!openai || typeof openai.requestClose !== "function") return;
+        try {
+          await openai.requestClose();
+        } catch {}
       }
 
       function request(method, params, timeoutMs = 5000) {
@@ -149,8 +173,12 @@ export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
       }
 
       async function bridgeResult(result) {
+        collapseUi();
         const image = findImage(result);
-        if (!image) return;
+        if (!image) {
+          await closeUi();
+          return;
+        }
         const key = image.mimeType + ":" + image.data.length + ":" +
           image.data.slice(0, 48);
         if (key === lastImageKey) return;
@@ -168,15 +196,18 @@ export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
             if (await bridgeViaChatGptFile(image, meta)) {
               status.textContent =
                 "Image added through ChatGPT file state for the next model turn.";
+              await closeUi();
               return;
             }
           } catch (error) {
             status.textContent =
               "ChatGPT file-state image bridge failed: " +
               String(error && error.message ? error.message : error);
+            await closeUi();
             return;
           }
           status.textContent = "No supported image-to-model bridge is available.";
+          await closeUi();
           return;
         }
         try {
@@ -205,10 +236,12 @@ export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
                 ? messageError.message
                 : messageError);
           }
+          await closeUi();
         } catch (error) {
           status.textContent =
             "Image rendered, but model-context forwarding failed: " +
             String(error && error.message ? error.message : error);
+          await closeUi();
         }
       }
 
@@ -243,6 +276,7 @@ export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
       });
 
       async function initialize() {
+        collapseUi();
         try {
           const initialized = await request("ui/initialize", {
             protocolVersion: PROTOCOL_VERSION,
@@ -266,6 +300,7 @@ export const VIEW_IMAGE_UI_HTML = String.raw`<!doctype html>
           status.textContent =
             "Image bridge initialization failed: " +
             String(error && error.message ? error.message : error);
+          await closeUi();
         }
       }
 

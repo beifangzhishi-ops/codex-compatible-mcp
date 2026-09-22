@@ -329,6 +329,11 @@ resource materialization and keeps the image out of ChatGPT Library while still
 using ChatGPT's documented file-ID path for model-visible images. Hosts without
 either bridge still receive the ordinary MCP `image` content unchanged.
 
+The bridge also reports zero intrinsic size and requests that ChatGPT close the
+widget after handoff. This keeps the background-only bridge from leaving an
+empty CCM card in the conversation when the host honors those UI lifecycle
+requests.
+
 ## Security notes
 
 Both the MCP HTTP server and WorkerHub bind to loopback by default. v0.1 does not provide authentication or TLS for the WorkerHub. Do not expose it directly to an untrusted network.
