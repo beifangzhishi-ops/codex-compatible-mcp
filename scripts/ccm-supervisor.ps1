@@ -103,7 +103,7 @@ try {
             if(-not $envInfo){
                 $envInfo=$health.environments | Select-Object -First 1
             }
-            Log ("ready gateway={0} env={1} permission={2}" -f $gateway.Id,$envInfo.id,$envInfo.permission_profile)
+            Log ("ready gateway={0} env={1} backend={2}" -f $gateway.Id,$envInfo.id,$envInfo.backend)
 
             while(-not $gateway.HasExited){
                 if(-not (LauncherAlive)){

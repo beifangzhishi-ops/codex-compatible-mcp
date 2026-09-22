@@ -14,7 +14,7 @@ try {
     $health=Invoke-RestMethod 'http://127.0.0.1:18209/ccm/health' -TimeoutSec 3
     Write-Output ("controller: {0}; default={1}" -f $health.status,$health.default_environment_id)
     @($health.environments) | ForEach-Object {
-        Write-Output ("{0}: backend={1}; permission={2}" -f $_.id,$_.backend,$_.permission_profile)
+        Write-Output ("{0}: backend={1}" -f $_.id,$_.backend)
     }
 } catch { Write-Output 'controller health: unavailable' }
 
