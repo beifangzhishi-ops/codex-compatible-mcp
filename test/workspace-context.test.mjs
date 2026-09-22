@@ -65,6 +65,46 @@ test('WorkspaceRegistry keeps registered and projectless workspaces separate', a
   }
 });
 
+test('WorkspaceRegistry accepts a UTF-8 BOM in persisted state', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-workspace-bom-'));
+  const projectRoot = path.join(tempRoot, 'project');
+  const stateFile = path.join(tempRoot, 'state', 'workspaces.json');
+  await fs.mkdir(projectRoot, { recursive: true });
+  await fs.mkdir(path.dirname(stateFile), { recursive: true });
+  await fs.writeFile(
+    stateFile,
+    '\uFEFF' + JSON.stringify({
+      version: 1,
+      workspaces: [{
+        id: 'bom-project',
+        root: projectRoot,
+        created_at: '2026-09-22T00:00:00.000Z',
+      }],
+    }),
+    'utf8',
+  );
+
+  const environments = new EnvironmentRegistry({ resolvePaths: false });
+  environments.register({
+    id: 'bom-worker',
+    platform: 'windows',
+    cwd: projectRoot,
+    workspaceRoots: [projectRoot],
+    permissionProfile: 'workspace-write',
+  });
+
+  try {
+    const registry = new WorkspaceRegistry({
+      environmentRegistry: environments,
+      stateFile,
+      seedLegacyWorkspace: false,
+    });
+    assert.equal(registry.resolve('bom-project').root, await fs.realpath(projectRoot));
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test('Controller uses projectless contexts and requires approval for registered workspaces', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-contexts-'));
   const legacyRoot = path.join(tempRoot, 'existing-project');

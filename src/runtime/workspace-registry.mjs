@@ -63,7 +63,8 @@ export class WorkspaceRegistry {
 
   #load() {
     if (!this.stateFile || !fs.existsSync(this.stateFile)) return;
-    const parsed = JSON.parse(fs.readFileSync(this.stateFile, 'utf8'));
+    const text = fs.readFileSync(this.stateFile, 'utf8').replace(/^\uFEFF/, '');
+    const parsed = JSON.parse(text);
     for (const value of parsed?.workspaces || []) {
       if (!value?.id || !value?.root) continue;
       this.registered.set(String(value.id), {
