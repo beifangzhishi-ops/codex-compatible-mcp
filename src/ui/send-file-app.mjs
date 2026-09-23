@@ -94,6 +94,8 @@ export const SEND_FILE_UI_HTML = String.raw`<!doctype html>
       let nextId = 1;
       let current = null;
       let materializingKey = "";
+      let lastResult = null;
+      let lastResource = null;
 
       const fileName = document.getElementById("file-name");
       const fileMeta = document.getElementById("file-meta");
@@ -263,6 +265,8 @@ export const SEND_FILE_UI_HTML = String.raw`<!doctype html>
 
       async function processResult(result) {
         const resource = findResourceLink(result);
+        lastResult = result || null;
+        lastResource = resource;
         const restored = restoredState();
         if (!resource) {
           if (restored) {
@@ -317,9 +321,20 @@ export const SEND_FILE_UI_HTML = String.raw`<!doctype html>
         download.disabled = true;
         setStatus("Preparing download…");
         try {
-          const response = await openai.getFileDownloadUrl({
-            fileId: current.fileId
-          });
+          let response;
+          try {
+            response = await openai.getFileDownloadUrl({
+              fileId: current.fileId
+            });
+          } catch (firstError) {
+            if (!lastResult || !lastResource) throw firstError;
+            setStatus("Refreshing saved file…");
+            current = await materialize(lastResult, lastResource);
+            render(lastResource, current);
+            response = await openai.getFileDownloadUrl({
+              fileId: current.fileId
+            });
+          }
           const downloadUrl = response && response.downloadUrl;
           if (!downloadUrl) {
             throw new Error("ChatGPT returned no download URL.");

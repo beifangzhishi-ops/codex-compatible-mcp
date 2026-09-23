@@ -295,6 +295,134 @@ test('send_file widget reuses persisted fileId without re-uploading', async () =
   assert.equal(elements.get('file-name').textContent, 'deck.zip');
 });
 
+test('send_file widget rematerializes the MCP resource when a saved fileId is stale', async () => {
+  const listeners = new Map();
+  const elements = new Map([
+    ['file-name', fakeElement()],
+    ['file-meta', fakeElement()],
+    ['status', fakeElement()],
+    ['download', fakeElement()],
+    ['icon', fakeElement()],
+  ]);
+  let readCount = 0;
+  let uploadCount = 0;
+  let widgetState = null;
+  let clickedAnchor = null;
+
+  const parent = {
+    postMessage(message) {
+      if (!Object.hasOwn(message, 'id')) return;
+      let result = {};
+      if (message.method === 'ui/initialize') {
+        result = { hostCapabilities: {} };
+      } else if (message.method === 'resources/read') {
+        readCount += 1;
+        result = {
+          contents: [{
+            uri: message.params.uri,
+            mimeType: 'application/zip',
+            blob: Buffer.from('test').toString('base64'),
+          }],
+        };
+      }
+      queueMicrotask(() => {
+        for (const listener of listeners.get('message') || []) {
+          listener({
+            source: parent,
+            data: { jsonrpc: '2.0', id: message.id, result },
+          });
+        }
+      });
+    },
+  };
+  const window = {
+    parent,
+    openai: {
+      widgetState: {
+        privateContent: {
+          source: 'ccm.send_file',
+          fileId: 'file_stale',
+          filename: 'deck.zip',
+          mimeType: 'application/zip',
+          size: 4,
+          sha256: 'sha-test',
+        },
+      },
+      toolResponseMetadata: { mcp_tool_result: toolResult() },
+      async uploadFile() {
+        uploadCount += 1;
+        return { fileId: 'file_recovered' };
+      },
+      setWidgetState(state) {
+        widgetState = state;
+        this.widgetState = state;
+      },
+      async getFileDownloadUrl({ fileId }) {
+        if (fileId === 'file_stale') throw new Error('saved file expired');
+        assert.equal(fileId, 'file_recovered');
+        return { downloadUrl: 'https://files.example.test/recovered' };
+      },
+      notifyIntrinsicHeight() {},
+    },
+    addEventListener(name, listener) {
+      if (!listeners.has(name)) listeners.set(name, []);
+      listeners.get(name).push(listener);
+    },
+  };
+  const document = {
+    body: {
+      appendChild(anchor) {
+        clickedAnchor = anchor;
+      },
+    },
+    getElementById(id) {
+      return elements.get(id);
+    },
+    createElement() {
+      return {
+        href: '',
+        download: '',
+        rel: '',
+        style: {},
+        click() { this.clicked = true; },
+        remove() {},
+      };
+    },
+  };
+
+  vm.runInNewContext(widgetScript(), {
+    window,
+    document,
+    setTimeout,
+    clearTimeout,
+    queueMicrotask,
+    Uint8Array,
+    File: class {},
+    atob: (value) => Buffer.from(value, 'base64').toString('binary'),
+    Number,
+    String,
+    Object,
+    Map,
+    Promise,
+    Error,
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(readCount, 0);
+  assert.equal(uploadCount, 0);
+
+  await elements.get('download').click();
+  for (let attempt = 0; attempt < 30 && !clickedAnchor; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(readCount, 1);
+  assert.equal(uploadCount, 1);
+  assert.equal(widgetState.privateContent.fileId, 'file_recovered');
+  assert.equal(clickedAnchor.href, 'https://files.example.test/recovered');
+  assert.equal(clickedAnchor.clicked, true);
+  assert.equal(elements.get('status').textContent, 'Ready');
+});
+
 test('send_file UI uses a versioned MCP Apps resource URI', () => {
   assert.equal(SEND_FILE_UI_URI, 'ui://ccm/send-file-v1.html');
   assert.match(SEND_FILE_UI_HTML, /resources\/read/);

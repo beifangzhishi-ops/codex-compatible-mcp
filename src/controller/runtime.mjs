@@ -45,7 +45,10 @@ export function createControllerRuntime(options = {}) {
     workerHub,
     workspaceContextManager,
   });
-  const fileTransferStore = options.fileTransferStore || new FileTransferStore();
+  const fileTransferStore = options.fileTransferStore || new FileTransferStore({
+    stateDir: options.fileTransferStateDir ||
+      path.join(installRoot, '.state', 'file-transfers'),
+  });
   const planManager = options.planManager || new PlanManager({
     stateDir: options.planStateDir || path.join(installRoot, '.state', 'plans'),
   });

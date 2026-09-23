@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { FileTransferStore } from '../src/controller/file-transfer-store.mjs';
@@ -82,5 +84,115 @@ test('MCP resource_link can be materialized later through resources/read', async
   } finally {
     await client.close().catch(() => {});
     await controller.close();
+  }
+});
+
+test('MCP file resource survives Controller recreation when the bridge store is persisted', async () => {
+  const root = path.resolve('.cache', 'test-file-transfer-resource');
+  await fs.mkdir(root, { recursive: true });
+  const stateDir = await fs.mkdtemp(path.join(root, 'restart-'));
+  const bytes = Buffer.from('survives-controller-restart');
+  let resourceUri;
+
+  try {
+    const firstStore = new FileTransferStore({ stateDir, ttlMs: 0 });
+    const firstRuntime = {
+      fileTransferStore: firstStore,
+      environmentRegistry: {
+        defaultEnvironmentId: null,
+        listPublic() { return []; },
+      },
+      async close() { firstStore.close(); },
+    };
+    const firstRegistry = new ToolRegistry();
+    firstRegistry.register({
+      name: 'emit_file_link',
+      provider: 'test',
+      provenance: 'test',
+      surfaces: { direct: true },
+      description: 'Return a persistent bridge file resource link.',
+      inputSchema: {},
+      handler: async () => {
+        const entry = firstStore.put({
+          path: 'restart.txt',
+          filename: 'restart.txt',
+          mime_type: 'text/plain',
+          byte_length: bytes.length,
+          sha256: 'restart-sha',
+          data: bytes.toString('base64'),
+        }, { environmentId: 'test-worker' });
+        return {
+          content: [{
+            type: 'resource_link',
+            uri: entry.uri,
+            name: entry.filename,
+            mimeType: entry.mime_type,
+            size: entry.byte_length,
+          }],
+        };
+      },
+    });
+    const firstController = createHttpController({
+      toolRegistry: firstRegistry,
+      runtime: firstRuntime,
+      port: 0,
+    });
+    await firstController.start();
+    const firstClient = new Client({
+      name: 'ccm-resource-restart-first',
+      version: '0.1.0',
+    });
+    const firstTransport = new StreamableHTTPClientTransport(
+      new URL(
+        'http://127.0.0.1:' + firstController.address.port + '/ccm/mcp',
+      ),
+    );
+    try {
+      await firstClient.connect(firstTransport);
+      const linked = await firstClient.callTool({
+        name: 'emit_file_link',
+        arguments: {},
+      });
+      resourceUri = linked.content[0].uri;
+    } finally {
+      await firstClient.close().catch(() => {});
+      await firstController.close();
+    }
+
+    const secondStore = new FileTransferStore({ stateDir, ttlMs: 0 });
+    const secondRuntime = {
+      fileTransferStore: secondStore,
+      environmentRegistry: {
+        defaultEnvironmentId: null,
+        listPublic() { return []; },
+      },
+      async close() { secondStore.close(); },
+    };
+    const secondController = createHttpController({
+      toolRegistry: new ToolRegistry(),
+      runtime: secondRuntime,
+      port: 0,
+    });
+    await secondController.start();
+    const secondClient = new Client({
+      name: 'ccm-resource-restart-second',
+      version: '0.1.0',
+    });
+    const secondTransport = new StreamableHTTPClientTransport(
+      new URL(
+        'http://127.0.0.1:' + secondController.address.port + '/ccm/mcp',
+      ),
+    );
+    try {
+      await secondClient.connect(secondTransport);
+      const read = await secondClient.readResource({ uri: resourceUri });
+      assert.deepEqual(Buffer.from(read.contents[0].blob, 'base64'), bytes);
+      assert.equal(read.contents[0]._meta.filename, 'restart.txt');
+    } finally {
+      await secondClient.close().catch(() => {});
+      await secondController.close();
+    }
+  } finally {
+    await fs.rm(stateDir, { recursive: true, force: true });
   }
 });
