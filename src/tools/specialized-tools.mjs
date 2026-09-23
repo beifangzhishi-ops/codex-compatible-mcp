@@ -525,7 +525,11 @@ export function registerSpecializedTools(registry, runtime) {
         const ttl = Number(args.ttl_seconds || 300);
         const command = oneTimeLinkCommand(args, ttl);
         const result = await runOneTimeLinkToCompletion(runtime, args, command);
-        const oneTimeUrl = String(result.output || '').trim().split(/\r?\n/).filter(Boolean).at(-1);
+        const oneTimeUrl = String(result.output || '')
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter((line) => /^https:\/\/\S+$/i.test(line))
+          .at(-1);
         if (!/^https:\/\//i.test(oneTimeUrl || '')) {
           throw new Error('One-time key helper did not return an HTTPS URL.');
         }

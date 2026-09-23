@@ -254,7 +254,11 @@ test('one-time key link accepts separate descriptor paths without reconstructing
   runtime.processManager.execCommand = async (args) => {
     runtime.calls.push(args);
     return {
-      output: 'https://ccm.example.test/ccm-once/random-token\r\n',
+      output: [
+        'https://ccm.example.test/ccm-once/random-token',
+        'tailscale warning emitted after the URL',
+        '',
+      ].join('\r\n'),
       exit_code: 0,
     };
   };
