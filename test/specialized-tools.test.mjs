@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { registerSpecializedTools } from '../src/tools/specialized-tools.mjs';
+import { SEND_FILE_UI_URI } from '../src/ui/send-file-app.mjs';
 import { ToolRegistry } from '../src/tools/tool-registry.mjs';
 import { FileTransferStore } from '../src/controller/file-transfer-store.mjs';
 
@@ -79,6 +80,14 @@ test('send_file is direct and returns a readable resource link using workspace_c
   const registry = new ToolRegistry();
   registerSpecializedTools(registry, runtime);
   assert.equal(registry.get('ccm-extra.send_file').surfaces.direct, true);
+  assert.equal(
+    registry.get('ccm-extra.send_file').mcpMeta.ui.resourceUri,
+    SEND_FILE_UI_URI,
+  );
+  assert.equal(
+    registry.get('ccm-extra.send_file').mcpMeta['openai/outputTemplate'],
+    SEND_FILE_UI_URI,
+  );
 
   const result = await registry.get('ccm-extra.send_file').handler({
     workspace_context: '00000000-0000-4000-8000-000000000001',

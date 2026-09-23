@@ -199,7 +199,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     );
 
     const docBytes = Buffer.alloc(3 * 1024 * 1024, 0x61);
-    await fs.writeFile(path.join(tempRoot, 'preview.docx'), docBytes);
+    await fs.writeFile(path.join(workspaceRoot, 'preview.docx'), docBytes);
     const sendFileResult = await client.callTool({
       name: 'exec',
       arguments: {

@@ -23,6 +23,10 @@ import {
   VIEW_IMAGE_V3_UI_URI,
   VIEW_IMAGE_V2_UI_URI,
 } from '../ui/view-image-app.mjs';
+import {
+  SEND_FILE_UI_HTML,
+  SEND_FILE_UI_URI,
+} from '../ui/send-file-app.mjs';
 
 const SERVER_INFO = { name: 'ccm', version: '0.1.0' };
 
@@ -103,6 +107,24 @@ function createProtocolServer(
         }],
       };
     },
+  );
+
+  server.registerResource(
+    'ccm-send-file-ui',
+    SEND_FILE_UI_URI,
+    {
+      title: 'CCM file transfer',
+      description: 'Persistent ChatGPT file-transfer card.',
+      mimeType: 'text/html;profile=mcp-app',
+    },
+    async () => ({
+      contents: [{
+        uri: SEND_FILE_UI_URI,
+        mimeType: 'text/html;profile=mcp-app',
+        text: SEND_FILE_UI_HTML,
+        _meta: { ui: { prefersBorder: true } },
+      }],
+    }),
   );
 
   for (const [name, uri] of [

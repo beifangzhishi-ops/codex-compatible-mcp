@@ -5,6 +5,10 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { FileTransferStore } from '../src/controller/file-transfer-store.mjs';
 import { createHttpController } from '../src/controller/mcp-http-server.mjs';
 import { ToolRegistry } from '../src/tools/tool-registry.mjs';
+import {
+  SEND_FILE_UI_HTML,
+  SEND_FILE_UI_URI,
+} from '../src/ui/send-file-app.mjs';
 
 test('MCP resource_link can be materialized later through resources/read', async () => {
   const store = new FileTransferStore();
@@ -69,6 +73,12 @@ test('MCP resource_link can be materialized later through resources/read', async
     assert.equal(read.contents[0].mimeType, resourceLink.mimeType);
     assert.deepEqual(Buffer.from(read.contents[0].blob, 'base64'), bytes);
     assert.equal(read.contents[0]._meta.filename, 'report.docx');
+
+    const ui = await client.readResource({ uri: SEND_FILE_UI_URI });
+    assert.equal(ui.contents.length, 1);
+    assert.equal(ui.contents[0].mimeType, 'text/html;profile=mcp-app');
+    assert.equal(ui.contents[0].text, SEND_FILE_UI_HTML);
+    assert.equal(ui.contents[0]._meta.ui.prefersBorder, true);
   } finally {
     await client.close().catch(() => {});
     await controller.close();

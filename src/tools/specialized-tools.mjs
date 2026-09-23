@@ -4,6 +4,7 @@ import {
   RESEARCH_PPT_PIPELINE_VERSION,
   getResearchPptPipeline,
 } from './research-ppt-pipeline.mjs';
+import { SEND_FILE_UI_URI } from '../ui/send-file-app.mjs';
 
 function toolError(error) {
   return {
@@ -205,6 +206,11 @@ export function registerSpecializedTools(registry, runtime) {
     tags: ['file', 'attachment', 'preview', 'transfer', 'gpt'],
     environmentRequirements: {
       capabilities: ['sendFile'],
+    },
+    mcpMeta: {
+      ui: { resourceUri: SEND_FILE_UI_URI },
+      'ui/resourceUri': SEND_FILE_UI_URI,
+      'openai/outputTemplate': SEND_FILE_UI_URI,
     },
     supportsParallel: true,
     description: [
