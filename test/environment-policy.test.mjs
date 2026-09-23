@@ -19,10 +19,9 @@ test('public environment metadata hides internal directories and permission topo
   assert.equal(environment.workspace_roots, undefined);
   assert.equal(environment.permission_profile, undefined);
   assert.equal(environment.filesystem_policy, undefined);
-  assert.deepEqual(environment.filesystem_access, {
-    read_scope: 'host',
-    write_scope: 'workspace',
-  });
+  assert.equal(environment.filesystem_access, undefined);
+  assert.equal(environment.sandbox_read_scope, 'host');
+  assert.equal(environment.sandbox_write_scope, 'context_root');
 
   const internal = registry.resolve('worker');
   assert.equal(internal.cwd, 'C:\\work\\project');
@@ -50,20 +49,16 @@ test('public filesystem access summary follows the effective permission profile'
   const byId = Object.fromEntries(
     registry.listPublic().map((environment) => [environment.id, environment]),
   );
-  assert.deepEqual(byId.ro.filesystem_access, {
-    read_scope: 'host',
-    write_scope: 'none',
-  });
-  assert.deepEqual(byId.ww.filesystem_access, {
-    read_scope: 'host',
-    write_scope: 'workspace',
-  });
-  assert.deepEqual(byId.full.filesystem_access, {
-    read_scope: 'host',
-    write_scope: 'host',
-  });
-  assert.deepEqual(byId.future.filesystem_access, {
-    read_scope: 'restricted',
-    write_scope: 'restricted',
-  });
+  assert.equal(byId.ro.sandbox_read_scope, 'host');
+  assert.equal(byId.ro.sandbox_write_scope, 'none');
+  assert.equal(byId.ww.sandbox_read_scope, 'host');
+  assert.equal(byId.ww.sandbox_write_scope, 'context_root');
+  assert.equal(byId.full.sandbox_read_scope, 'host');
+  assert.equal(byId.full.sandbox_write_scope, 'host');
+  assert.equal(byId.future.sandbox_read_scope, 'restricted');
+  assert.equal(byId.future.sandbox_write_scope, 'restricted');
+  assert.equal(byId.ro.filesystem_access, undefined);
+  assert.equal(byId.ww.filesystem_access, undefined);
+  assert.equal(byId.full.filesystem_access, undefined);
+  assert.equal(byId.future.filesystem_access, undefined);
 });

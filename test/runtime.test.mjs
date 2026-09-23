@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRuntime } from '../src/runtime/index.mjs';
@@ -67,6 +68,32 @@ test('workspace-write can reuse an existing sandbox workspace ACL', async () => 
     assert.match(second.output, /second/);
   } finally {
     runtime.close();
+  }
+});
+
+test('workspace-write can read outside the context root but cannot write there', async () => {
+  const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-host-read-'));
+  const outsidePath = path.join(outsideDir, 'outside.txt');
+  fs.writeFileSync(outsidePath, 'outside-readable', 'utf8');
+  const literal = outsidePath.replaceAll("'", "''");
+  const runtime = runtimeFor('workspace-write');
+  try {
+    const read = await runtime.processManager.execCommand({
+      cmd: "Get-Content -LiteralPath '" + literal + "' -ErrorAction Stop",
+    });
+    assert.equal(read.exit_code, 0);
+    assert.match(read.output, /outside-readable/);
+
+    const write = await runtime.processManager.execCommand({
+      cmd:
+        "Set-Content -LiteralPath '" + literal +
+        "' -Value blocked -ErrorAction Stop",
+    });
+    assert.notEqual(write.exit_code, 0);
+    assert.equal(fs.readFileSync(outsidePath, 'utf8'), 'outside-readable');
+  } finally {
+    runtime.close();
+    fs.rmSync(outsideDir, { recursive: true, force: true });
   }
 });
 

@@ -136,6 +136,26 @@ test('core tool surface exposes approval-card workspace actions directly and kee
     registry.get('resolve_pending_action').mcpMeta.ui.visibility,
     ['app'],
   );
+  assert.match(
+    registry.get('list_environments').description,
+    /sandbox_read_scope.*sandbox_write_scope/,
+  );
+  assert.match(
+    registry.get('create_projectless_context').description,
+    /absolute paths outside the projectless root/,
+  );
+  assert.match(
+    registry.get('select_workspace').description,
+    /Do not select a workspace merely to read or search/,
+  );
+  assert.match(
+    registry.get('register_workspace').description,
+    /Do not register a directory merely to gain read access/,
+  );
+  assert.match(
+    registry.get('exec_command').description,
+    /does not narrow filesystem reads below the environment's sandbox_read_scope/,
+  );
 
   for (const name of [
     'create_projectless_context',

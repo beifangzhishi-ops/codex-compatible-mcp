@@ -14,28 +14,28 @@ function defaultShell(platform) {
   return { type: 'bash', path: '/bin/bash' };
 }
 
-function publicFilesystemAccess(permissionProfile) {
+function publicSandboxScopes(permissionProfile) {
   if (permissionProfile === 'read-only') {
     return {
-      read_scope: 'host',
-      write_scope: 'none',
+      sandbox_read_scope: 'host',
+      sandbox_write_scope: 'none',
     };
   }
   if (permissionProfile === 'workspace-write') {
     return {
-      read_scope: 'host',
-      write_scope: 'workspace',
+      sandbox_read_scope: 'host',
+      sandbox_write_scope: 'context_root',
     };
   }
   if (permissionProfile === 'full-access') {
     return {
-      read_scope: 'host',
-      write_scope: 'host',
+      sandbox_read_scope: 'host',
+      sandbox_write_scope: 'host',
     };
   }
   return {
-    read_scope: 'restricted',
-    write_scope: 'restricted',
+    sandbox_read_scope: 'restricted',
+    sandbox_write_scope: 'restricted',
   };
 }
 
@@ -104,7 +104,7 @@ export class EnvironmentRegistry {
       platform: environment.platform,
       shell: environment.shell,
       capabilities: environment.capabilities,
-      filesystem_access: publicFilesystemAccess(environment.permissionProfile),
+      ...publicSandboxScopes(environment.permissionProfile),
       backend: environment.backend,
       is_default: environment.id === this.defaultEnvironmentId,
     }));

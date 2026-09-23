@@ -316,7 +316,7 @@ export function registerCoreTools(registry, runtime) {
     surfaces: { direct: true, codeMode: true },
     tags: ['environment', 'worker', 'capabilities'],
     supportsParallel: true,
-    description: 'List CCM execution environments, platform/shell metadata, capabilities, effective high-level filesystem read/write scope, backend, and default selection. Internal bootstrap directories, raw permission profiles, and filesystem permission topology are intentionally not exposed.',
+    description: 'List CCM execution environments, platform/shell metadata, capabilities, independent effective sandbox_read_scope and sandbox_write_scope values, backend, and default selection. sandbox_read_scope describes where ordinary commands may read; sandbox_write_scope describes where ordinary commands may write. Internal bootstrap directories, raw permission profiles, and filesystem permission topology are intentionally not exposed.',
     inputSchema: {},
     handler: async () => jsonResult({
       default_environment_id: runtime.environmentRegistry.defaultEnvironmentId,
@@ -362,6 +362,7 @@ export function registerCoreTools(registry, runtime) {
     description: [
       'Create a projectless workspace_context for temporary execution without entering or registering a real project.',
       'Use this whenever a target environment is known but the user did not explicitly select a project. If environment_id is omitted, CCM uses the primary environment.',
+      'A projectless context is sufficient for read-only host inspection when list_environments reports sandbox_read_scope=host: exec_command may use absolute paths outside the projectless root. The projectless root is the execution cwd/restricted-write root, not the read boundary.',
       'Projectless context creation does not require workspace approval. Do not register Temp, Documents, a drive root, or another arbitrary directory merely to obtain an execution context.',
     ].join('\n\n'),
     inputSchema: {
@@ -398,7 +399,7 @@ export function registerCoreTools(registry, runtime) {
     description: [
       'Enter a registered workspace and return a workspace_context for subsequent CCM development calls.',
       'Workspace approval establishes the selected project execution context.',
-      'Use this only when the user explicitly intends to work in a registered project. For temporary execution without a selected project, use create_projectless_context instead.',
+      'Use this only when the user explicitly intends to work in a registered project. Do not select a workspace merely to read or search a path that is already readable under sandbox_read_scope=host; use create_projectless_context for temporary execution without a selected project.',
       'Direct calls render the CCM approval card. The user approves or denies the frozen workspace action inside the card; CCM completes an approved entry and returns workspace_context without a model retry.',
       'Code Mode calls retain the legacy approval_id/respond_to_escalation/retry flow for compatibility because nested tool results cannot render the approval app.',
     ].join('\n\n'),
@@ -492,7 +493,7 @@ export function registerCoreTools(registry, runtime) {
     tags: ['workspace', 'project', 'approval', 'register'],
     description: [
       'Register a project directory on a Worker and immediately return a workspace_context for it. With create_if_missing=true, one approved flow may create the missing directory, register it, and enter it.',
-      'Use this only when the user explicitly intends to register that concrete directory as a project. Do not register a temporary directory merely to obtain an execution context; use create_projectless_context instead.',
+      'Use this only when the user explicitly intends to register that concrete directory as a project. Do not register a directory merely to gain read access to a path that is already readable under sandbox_read_scope=host; use create_projectless_context instead when only temporary execution context is needed.',
       'Registration expands CCM project access and always requires explicit user approval. Direct calls render the CCM approval card; an approved frozen action is created/registered/entered by CCM without a model retry.',
       'Code Mode calls retain the legacy approval_id/respond_to_escalation/retry flow for compatibility because nested tool results cannot render the approval app.',
       'This workspace approval authorizes only the create/register/enter action. It is not authorization to begin implementation when the user is still planning.',
@@ -598,8 +599,8 @@ export function registerCoreTools(registry, runtime) {
     supportsParallel: true,
     description: [
       'Runs a command using plain pipes by default; set tty=true to allocate a PTY. Returns output or a session ID for ongoing interaction.',
-      'workspace_context is required and already determines the environment and workspace. Do not pass or infer a separate environment for this command.',
-      'If no project has been selected, first discover ccm.create_projectless_context with tool_search and invoke it through exec; then pass the returned workspace_context here.',
+      'workspace_context is required and determines the Worker, cwd/session ownership, and restricted-write root. It does not narrow filesystem reads below the environment\'s sandbox_read_scope. Do not pass or infer a separate environment for this command.',
+      'If no project has been selected, first discover ccm.create_projectless_context with tool_search and invoke it through exec; then pass the returned workspace_context here. When sandbox_read_scope=host, that projectless context is sufficient for absolute-path reads anywhere readable on the selected Worker; do not select/register the target path merely to inspect it.',
       'In workspace-write environments, normal remote Git commands such as git clone/fetch/pull/push/ls-remote are handled automatically and do not require sandbox_permissions=require_escalated. Run remote Git as Git-only shell commands so CCM can recognize the trusted path.',
       'For a non-Git command that genuinely requires full-access outside a workspace-write sandbox, use the direct request_escalated_exec tool. Do not start a new approval with sandbox_permissions=require_escalated; that legacy parameter is retained only for migration of an already-issued approval_id.',
       'A CCM-originated result is identifiable by its structured CCM fields. If a host reports a Script error or safety/policy/tool-call failure without this tool returning a structured result, do not attribute that failure to CCM or claim CCM blocked the command.',
@@ -607,8 +608,8 @@ export function registerCoreTools(registry, runtime) {
     ].join('\n\n'),
     inputSchema: {
       cmd: z.string().min(1).describe('Shell command to execute.'),
-      workspace_context: z.string().uuid().describe('Existing workspace context. Obtain one with create_projectless_context, select_workspace, or register_workspace before executing.'),
-      workdir: z.string().optional().describe('Relative subdirectory inside the selected workspace. Defaults to the workspace root.'),
+      workspace_context: z.string().uuid().describe('Existing execution context. It selects the Worker and context root; obtain one with create_projectless_context, select_workspace, or register_workspace before executing. It is not itself the filesystem read boundary.'),
+      workdir: z.string().optional().describe('Relative subdirectory inside the selected context root. Defaults to the context root.'),
       tty: z.boolean().optional().describe('True allocates a PTY; false or omitted uses plain pipes.'),
       yield_time_ms: z.number().int().max(30_000).nonnegative().optional().describe('Wait before the initial command call yields output or a session. Defaults to 2000 ms. Values above 5000 ms are accepted for compatibility but are clamped to 5000 ms; long-running commands continue in a session and should be resumed with write_stdin.'),
       max_output_tokens: z.number().int().positive().optional().describe('Output token budget. Defaults to 10000 tokens.'),
@@ -622,7 +623,7 @@ export function registerCoreTools(registry, runtime) {
       try {
         if (!args.workspace_context) {
           throw new Error(
-            'exec_command requires workspace_context. Use ccm.create_projectless_context through tool_search + exec when no project is selected.',
+            'exec_command requires workspace_context for Worker routing/cwd. Use ccm.create_projectless_context through tool_search + exec when no project is selected; the target read path does not need to be selected as a workspace when sandbox_read_scope=host.',
           );
         }
         if (args.sandbox_permissions === 'require_escalated' &&
@@ -806,7 +807,7 @@ export function registerCoreTools(registry, runtime) {
     inputSchema: {
       patch: z.string().min(1).describe('Codex-style patch text beginning with *** Begin Patch.'),
       workspace_context: z.string().uuid().describe('Existing workspace context.'),
-      workdir: z.string().optional().describe('Relative subdirectory inside the selected workspace.'),
+      workdir: z.string().optional().describe('Relative subdirectory inside the selected context root.'),
     },
     handler: async (args) => {
       try {
@@ -833,12 +834,12 @@ export function registerCoreTools(registry, runtime) {
     environmentRequirements: { capabilities: ['viewImage'] },
     supportsParallel: true,
     description: [
-      'Read a bounded image from the selected CCM workspace and return it as MCP image content.',
+      'Read a bounded image from the selected CCM context root and return it as MCP image content.',
       'If the user has not selected a project, automatically obtain a projectless context first through ccm.create_projectless_context; do not ask the user to choose or register a temporary directory.',
       'This direct tool is also available through exec for nested or batched image calls.',
     ].join(' '),
     inputSchema: {
-      path: z.string().min(1).describe('Image path relative to the selected workspace root.'),
+      path: z.string().min(1).describe('Image path relative to the selected context root.'),
       workspace_context: z.string().uuid().describe('Existing workspace context.'),
     },
     handler: async (args) => {
