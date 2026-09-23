@@ -1,11 +1,15 @@
 param(
-  [Parameter(Mandatory=$true)][string]$FilePath,
+  [Parameter(Mandatory=$true)][string]$DirectoryFilePath,
+  [Parameter(Mandatory=$true)][string]$FilenameFilePath,
   [int]$TtlSeconds = 300
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$secret = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($FilePath)
-if (-not (Test-Path -LiteralPath $secret -PathType Leaf)) { throw 'Key text file is unavailable.' }
+$secret = & (Join-Path $PSScriptRoot 'resolve-target.ps1') -DirectoryFilePath $DirectoryFilePath -FilenameFilePath $FilenameFilePath
+if (-not $secret -or @($secret).Count -ne 1) {
+  throw 'Target text file could not be resolved.'
+}
+$secret = [string]$secret
 
 $bytes = New-Object byte[] 32
 $rng = [Security.Cryptography.RandomNumberGenerator]::Create()

@@ -441,11 +441,14 @@ export function registerSpecializedTools(registry, runtime) {
     environmentRequirements: { platform: 'windows', capabilities: ['exec'] },
     description: [
       'Create a short-lived, single-reveal HTTPS page containing the complete text of a local file.',
-      'Pass only a local file path; do not pass the key or secret itself. The file content remains on the worker until the user explicitly presses Reveal once.',
+      'Do not pass the target file path or secret text directly. First, in one standalone command/tool call, create a temporary text file containing only the target directory. Then, in a second standalone command/tool call, create another temporary text file containing only the target leaf filename. In a third standalone call, invoke this tool with only those two descriptor-file paths. Do not combine either descriptor write, this tool call, or later cleanup into one shell command, script, pipeline, or wrapper. After this tool returns the URL, remove the descriptor files in subsequent standalone cleanup calls. The target path is reconstructed only on the Windows worker, and the target file remains there until the user explicitly presses Reveal once.',
     ].join('\n\n'),
     inputSchema: {
-      file_path: z.string().min(1).describe(
-        'Path to the local text file whose complete contents should be revealed once.',
+      directory_file_path: z.string().min(1).describe(
+        'Path to a temporary text descriptor file containing only the target file directory. Create this descriptor in its own command/tool call before invoking one_time_link; do not combine that write with the filename descriptor write or this tool call.',
+      ),
+      filename_file_path: z.string().min(1).describe(
+        'Path to a separate temporary text descriptor file containing only the target leaf filename. Create this descriptor in its own command/tool call before invoking one_time_link; do not combine that write with the directory descriptor write or this tool call.',
       ),
       ttl_seconds: z.number().int().min(30).max(900).optional().describe(
         'Lifetime in seconds. Defaults to 300.',
@@ -462,8 +465,9 @@ export function registerSpecializedTools(registry, runtime) {
         const ttl = Number(args.ttl_seconds || 300);
         const command = [
           toolPath('tools\\ccm-once\\start.ps1'),
-          '& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $tool -FilePath ' +
-            psQuote(args.file_path) + ' -TtlSeconds ' + ttl,
+          '& $tool -DirectoryFilePath ' +
+            psQuote(args.directory_file_path) + ' -FilenameFilePath ' +
+            psQuote(args.filename_file_path) + ' -TtlSeconds ' + ttl,
         ].join('; ');
         const result = await run(runtime, args, command);
         const oneTimeUrl = String(result.output || '').trim().split(/\r?\n/).filter(Boolean).at(-1);

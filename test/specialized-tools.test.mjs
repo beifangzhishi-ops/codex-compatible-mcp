@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { registerSpecializedTools } from '../src/tools/specialized-tools.mjs';
 import { SEND_FILE_UI_URI } from '../src/ui/send-file-app.mjs';
 import { ToolRegistry } from '../src/tools/tool-registry.mjs';
@@ -233,7 +237,7 @@ test('ChatGPT Share export can use the default Git-ignored cache output', async 
   assert.equal(runtime.calls[0].cmd.includes(' --output '), false);
 });
 
-test('one-time key link accepts a file path without exposing file contents', async () => {
+test('one-time key link accepts separate descriptor paths without reconstructing target path', async () => {
   const runtime = fakeRuntime();
   const registry = new ToolRegistry();
   registerSpecializedTools(registry, runtime);
@@ -247,15 +251,92 @@ test('one-time key link accepts a file path without exposing file contents', asy
   };
   const result = await registry.get('ccm-extra.one_time_link').handler({
     environment_id: 'worker-b',
-    file_path: 'C:\\secrets\\api-key.txt',
+    directory_file_path: 'C:\\temp\\directory.txt',
+    filename_file_path: 'C:\\temp\\filename.txt',
     ttl_seconds: 180,
   });
   assert.equal(result.isError, undefined);
   assert.equal(result.structuredContent.one_time_url, 'https://ccm.example.test/ccm-once/random-token');
   assert.equal(result.structuredContent.expires_in_seconds, 180);
   assert.match(runtime.calls[0].cmd, /ccm-once\\start\.ps1/);
-  assert.match(runtime.calls[0].cmd, /-FilePath 'C:\\secrets\\api-key\.txt'/);
+  assert.match(runtime.calls[0].cmd, /-DirectoryFilePath 'C:\\temp\\directory\.txt'/);
+  assert.match(runtime.calls[0].cmd, /-FilenameFilePath 'C:\\temp\\filename\.txt'/);
   assert.match(runtime.calls[0].cmd, /-TtlSeconds 180/);
+  assert.equal(runtime.calls[0].cmd.includes('C:\\secrets\\api-key.txt'), false);
+  assert.equal(runtime.calls[0].cmd.includes('-FilePath'), false);
+  assert.equal(runtime.calls[0].cmd.includes('powershell.exe'), false);
+});
+
+test('one-time key link schema requires descriptor paths and documents separate operations', () => {
+  const runtime = fakeRuntime();
+  const registry = new ToolRegistry();
+  registerSpecializedTools(registry, runtime);
+  const tool = registry.get('ccm-extra.one_time_link');
+  assert.equal(Object.hasOwn(tool.inputSchema, 'file_path'), false);
+  assert.equal(Object.hasOwn(tool.inputSchema, 'directory_file_path'), true);
+  assert.equal(Object.hasOwn(tool.inputSchema, 'filename_file_path'), true);
+  assert.match(tool.description, /standalone command\/tool call/);
+  assert.match(tool.description, /Do not combine/);
+});
+
+test('one-time target resolver validates descriptor files and leaf filenames locally', async (t) => {
+  if (process.platform !== 'win32') {
+    t.skip('Windows-only one-time-link resolver');
+    return;
+  }
+
+  const execFileAsync = promisify(execFile);
+  const root = await fs.mkdtemp(path.join(process.cwd(), '.tmp-ccm-once-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const directoryDescriptor = path.join(root, 'directory.txt');
+  const filenameDescriptor = path.join(root, 'filename.txt');
+  const target = path.join(root, 'target.txt');
+  const resolverPath = fileURLToPath(new URL('../tools/ccm-once/resolve-target.ps1', import.meta.url));
+
+  await fs.writeFile(target, 'test-only');
+  await fs.writeFile(directoryDescriptor, root);
+  await fs.writeFile(filenameDescriptor, 'target.txt');
+
+  const invoke = async (
+    dirFile = directoryDescriptor,
+    nameFile = filenameDescriptor,
+  ) => execFileAsync('powershell.exe', [
+    '-NoProfile',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-File',
+    resolverPath,
+    '-DirectoryFilePath',
+    dirFile,
+    '-FilenameFilePath',
+    nameFile,
+  ]);
+
+  let resolved;
+  try {
+    resolved = await invoke();
+  } catch (error) {
+    if (error?.code === 'EPERM') {
+      t.skip('CCM restricted sandbox blocks child-process spawning');
+      return;
+    }
+    throw error;
+  }
+  assert.equal(resolved.stdout.trim().toLowerCase(), target.toLowerCase());
+
+  await fs.writeFile(filenameDescriptor, '..\\target.txt');
+  await assert.rejects(invoke(), /leaf filename/);
+
+  await fs.writeFile(filenameDescriptor, '');
+  await assert.rejects(invoke(), /Filename descriptor is empty/);
+
+  await fs.writeFile(filenameDescriptor, 'target.txt\nother.txt');
+  await assert.rejects(invoke(), /exactly one value/);
+
+  await assert.rejects(
+    invoke(path.join(root, 'missing-directory.txt'), filenameDescriptor),
+    /Directory descriptor file is unavailable/,
+  );
 });
 
 test('ChatGPT schema refresh keeps CCM approval credentials local to the worker', async () => {
