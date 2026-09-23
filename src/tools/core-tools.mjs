@@ -121,7 +121,7 @@ export function registerCoreTools(registry, runtime) {
     surfaces: { direct: true, codeMode: true },
     tags: ['environment', 'worker', 'capabilities'],
     supportsParallel: true,
-    description: 'List CCM execution environments, platform/shell metadata, capabilities, backend, and default selection. Internal bootstrap directories and filesystem permission topology are intentionally not exposed.',
+    description: 'List CCM execution environments, platform/shell metadata, capabilities, effective high-level filesystem read/write scope, backend, and default selection. Internal bootstrap directories, raw permission profiles, and filesystem permission topology are intentionally not exposed.',
     inputSchema: {},
     handler: async () => jsonResult({
       default_environment_id: runtime.environmentRegistry.defaultEnvironmentId,
@@ -259,14 +259,16 @@ export function registerCoreTools(registry, runtime) {
     surfaces: { deferred: true, codeMode: true },
     tags: ['workspace', 'project', 'approval', 'register'],
     description: [
-      'Hot-register a new project directory on a Worker and immediately return a workspace_context for it.',
+      'Register a project directory on a Worker and immediately return a workspace_context for it. With create_if_missing=true, one approved flow may create the missing directory, register it, and enter it.',
       'Use this only when the user explicitly intends to register that concrete directory as a project. Do not register a temporary directory merely to obtain an execution context; use create_projectless_context instead.',
-      'Registration expands CCM project access and always requires explicit user approval. Call once without approval_id, stop for user approval, call respond_to_escalation, then retry with the exact same target and approval_id.',
+      'Registration expands CCM project access and always requires explicit user approval. If create_if_missing=true, the approval is also narrowly scoped to creating that exact directory if it is still missing. Call once without approval_id, stop for user approval, call respond_to_escalation, then retry with the exact same target, create_if_missing value, and approval_id.',
+      'This workspace approval authorizes only the create/register/enter action. It is not authorization to begin implementation when the user is still planning.',
     ].join('\n\n'),
     inputSchema: {
       environment_id: z.string().describe('Environment whose Worker owns the directory.'),
       path: z.string().min(1).describe('Absolute project directory path on the selected Worker.'),
       workspace_id: z.string().min(1).optional().describe('Optional Worker-local workspace id. Defaults to a safe form of the directory name.'),
+      create_if_missing: z.boolean().optional().describe('Create the target directory after approval if it is missing. Defaults to false.'),
       approval_id: z.string().uuid().optional().describe('One-shot approval id returned by the pending registration request.'),
     },
     handler: async (args) => {
@@ -275,19 +277,27 @@ export function registerCoreTools(registry, runtime) {
         const inspected = await runtime.workerHub.call(
           environment.id,
           'inspect_workspace_path',
-          { path: args.path, workspace_id: args.workspace_id },
+          {
+            path: args.path,
+            workspace_id: args.workspace_id,
+            create_if_missing: Boolean(args.create_if_missing),
+          },
           { timeoutMs: 10_000 },
         );
         const intent = {
           environment_id: environment.id,
           workspace_id: inspected.workspace_id,
           workspace_root: inspected.root,
+          create_if_missing: Boolean(args.create_if_missing),
         };
         if (!args.approval_id) {
+          const action = inspected.create_required
+            ? 'create, register, and enter workspace '
+            : 'register and enter workspace ';
           const approval = runtime.approvalManager.requestWorkspaceAction(
             'register_workspace',
             intent,
-            'Allow CCM to register and enter workspace ' +
+            'Allow CCM to ' + action +
               environment.id + ' / ' + inspected.workspace_id +
               ' at ' + inspected.root + '?',
           );
@@ -311,6 +321,8 @@ export function registerCoreTools(registry, runtime) {
           {
             path: inspected.root,
             workspace_id: inspected.workspace_id,
+            create_if_missing: Boolean(args.create_if_missing),
+            approved_root: inspected.root,
           },
           { timeoutMs: 10_000 },
         );

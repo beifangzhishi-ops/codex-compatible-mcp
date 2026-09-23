@@ -78,6 +78,61 @@ test('WorkspaceRegistry keeps registered and projectless workspaces separate', a
   }
 });
 
+test('WorkspaceRegistry creates a missing approved project directory only when requested', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-workspace-create-'));
+  const legacyRoot = path.join(tempRoot, 'legacy-project');
+  const missingRoot = path.join(tempRoot, 'new-project', 'nested');
+  await fs.mkdir(legacyRoot, { recursive: true });
+
+  const environments = new EnvironmentRegistry({ resolvePaths: false });
+  environments.register({
+    id: 'workspace-create-test',
+    platform: 'windows',
+    cwd: legacyRoot,
+    workspaceRoots: [legacyRoot],
+    permissionProfile: 'full-access',
+  });
+  const registry = new WorkspaceRegistry({
+    environmentRegistry: environments,
+    stateFile: path.join(tempRoot, 'state', 'workspaces.json'),
+    seedLegacyWorkspace: false,
+  });
+
+  try {
+    assert.throws(
+      () => registry.inspectPath(missingRoot, 'new-project'),
+      /does not exist/,
+    );
+    const inspected = registry.inspectPath(missingRoot, 'new-project', {
+      createIfMissing: true,
+    });
+    assert.equal(inspected.create_required, true);
+    await assert.rejects(fs.stat(missingRoot), /ENOENT/);
+
+    assert.throws(
+      () => registry.register({
+        workspace_id: 'new-project',
+        path: inspected.root,
+        create_if_missing: true,
+        approved_root: path.join(tempRoot, 'different-approved-root'),
+      }),
+      /approved target/,
+    );
+    await assert.rejects(fs.stat(missingRoot), /ENOENT/);
+
+    const registered = registry.register({
+      workspace_id: 'new-project',
+      path: inspected.root,
+      create_if_missing: true,
+      approved_root: inspected.root,
+    });
+    assert.equal((await fs.stat(missingRoot)).isDirectory(), true);
+    assert.equal(registered.root, await fs.realpath(missingRoot));
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test('WorkspaceContextManager persists contexts across controller instances', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-context-state-'));
   const stateFile = path.join(tempRoot, 'workspace-contexts.json');
@@ -161,7 +216,6 @@ test('Controller uses projectless contexts and requires approval for registered 
   const newRoot = path.join(tempRoot, 'new-project');
   const projectlessRoot = path.join(tempRoot, 'projectless');
   await fs.mkdir(legacyRoot, { recursive: true });
-  await fs.mkdir(newRoot, { recursive: true });
 
   const controller = createControllerRuntime({ workerPort: 0 });
   const workspaceStateFile = path.join(tempRoot, 'state', 'workspaces.json');
@@ -272,19 +326,41 @@ test('Controller uses projectless contexts and requires approval for registered 
       environment_id: 'workspace-worker',
       workspace_id: 'new-project',
       path: newRoot,
+      create_if_missing: true,
     });
     assert.equal(registerPending.structuredContent.approval_required, true);
+    assert.equal(registerPending.structuredContent.create_if_missing, true);
+    assert.match(registerPending.structuredContent.justification, /create, register, and enter/i);
+    await assert.rejects(fs.stat(newRoot), /ENOENT/);
     controller.approvalManager.respond(
       registerPending.structuredContent.approval_id,
       'approve',
     );
+    const mismatchedRegistration = await register.handler({
+      environment_id: 'workspace-worker',
+      workspace_id: 'new-project',
+      path: newRoot,
+      create_if_missing: false,
+      approval_id: registerPending.structuredContent.approval_id,
+    });
+    assert.equal(mismatchedRegistration.isError, true);
+    assert.match(mismatchedRegistration.content[0].text, /does not exist|does not match/i);
+    await assert.rejects(fs.stat(newRoot), /ENOENT/);
+
     const registered = await register.handler({
       environment_id: 'workspace-worker',
       workspace_id: 'new-project',
       path: newRoot,
+      create_if_missing: true,
       approval_id: registerPending.structuredContent.approval_id,
     });
     assert.equal(registered.structuredContent.workspace_id, 'new-project');
+    assert.equal(registered.structuredContent.workspace_kind, 'registered');
+    assert.equal(
+      registered.structuredContent.workspace_root,
+      await fs.realpath(newRoot),
+    );
+    assert.equal((await fs.stat(newRoot)).isDirectory(), true);
     assert.equal(worker.workspaceRegistry.list().length, 2);
 
     const oldContext = selected.structuredContent.workspace_context;

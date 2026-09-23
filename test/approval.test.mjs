@@ -104,6 +104,37 @@ test('ApprovalManager binds a grant to one exact execution and expires it', () =
   );
 });
 
+test('ApprovalManager binds workspace creation permission into the exact intent', () => {
+  const approvals = new ApprovalManager();
+  const intent = {
+    environment_id: 'approval-worker',
+    workspace_id: 'new-project',
+    workspace_root: 'C:\\projects\\new-project',
+    create_if_missing: true,
+  };
+  const pending = approvals.requestWorkspaceAction(
+    'register_workspace',
+    intent,
+    'Create and register this workspace?',
+  );
+  assert.equal(pending.create_if_missing, true);
+  approvals.respond(pending.approval_id, 'approve');
+  assert.throws(
+    () => approvals.consumeWorkspaceAction(
+      pending.approval_id,
+      'register_workspace',
+      { ...intent, create_if_missing: false },
+    ),
+    /does not match/,
+  );
+  const consumed = approvals.consumeWorkspaceAction(
+    pending.approval_id,
+    'register_workspace',
+    intent,
+  );
+  assert.equal(consumed.state, 'consumed');
+});
+
 test('RemoteProcessManager executes only after one matching approval', async () => {
   const environmentRegistry = restrictedRegistry();
   const workerHub = new FakeWorkerHub();

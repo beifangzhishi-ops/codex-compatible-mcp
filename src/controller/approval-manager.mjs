@@ -25,6 +25,7 @@ function workspaceIntentFor(operation, args = {}) {
     workspace_root: args.workspace_root == null
       ? null
       : String(args.workspace_root),
+    create_if_missing: Boolean(args.create_if_missing),
   };
 }
 
@@ -174,6 +175,7 @@ export class ApprovalManager {
         operation: request.intent.operation,
         workspace_id: request.intent.workspace_id,
         workspace_root: request.intent.workspace_root,
+        create_if_missing: request.intent.create_if_missing,
       };
     }
     return {

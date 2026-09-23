@@ -21,13 +21,21 @@ function runtimeStub() {
       }),
     },
     workerHub: {
-      call: async (_environmentId, method) => {
+      call: async (_environmentId, method, params = {}) => {
         if (method === 'list_workspaces') return { workspaces: [] };
         if (method === 'get_workspace') {
           return {
             workspace_id: 'project',
             kind: 'registered',
             root: 'C:\\work\\project',
+          };
+        }
+        if (method === 'inspect_workspace_path') {
+          return {
+            workspace_id: params.workspace_id || 'new-project',
+            root: params.path,
+            exists: !params.create_if_missing,
+            create_required: Boolean(params.create_if_missing),
           };
         }
         throw new Error('unexpected worker method: ' + method);
@@ -46,6 +54,7 @@ function runtimeStub() {
         environment_id: intent.environment_id,
         workspace_id: intent.workspace_id,
         workspace_root: intent.workspace_root,
+        create_if_missing: Boolean(intent.create_if_missing),
         justification,
       }),
     },
@@ -140,6 +149,24 @@ test('core tool surface keeps workspace lifecycle deferred and common operations
     const pending = select.structuredContent.calls[0].result.structured_content;
     assert.equal(pending.approval_required, true);
     assert.doesNotMatch(pending.justification, /read access/i);
+
+    const register = await registry.get('exec').handler({
+      calls: [{
+        tool: 'ccm.register_workspace',
+        arguments: {
+          environment_id: 'noha',
+          workspace_id: 'new-project',
+          path: 'C:\\work\\new-project',
+          create_if_missing: true,
+        },
+      }],
+      yield_time_ms: 1000,
+    });
+    const registerPending =
+      register.structuredContent.calls[0].result.structured_content;
+    assert.equal(registerPending.approval_required, true);
+    assert.equal(registerPending.create_if_missing, true);
+    assert.match(registerPending.justification, /create, register, and enter/i);
   } finally {
     codeModeManager.close();
   }

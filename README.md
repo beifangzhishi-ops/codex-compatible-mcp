@@ -42,7 +42,7 @@ CCM Controller
 
 Every execution environment uses the same Remote Worker protocol. The machine hosting the Controller is not a special execution backend: by default, `npm start` launches a normal Remote Worker locally and connects it through loopback.
 
-Registered workspaces are owned by each Worker, not by the Controller. Entering or hot-registering a real project requires one-shot user approval and returns an opaque `workspace_context`. Normal development tools carry only that context. Workspace contexts are persisted by the Controller and remain valid across Controller or Worker restarts. Worker-local projectless mappings are persisted as well, so a surviving projectless directory can be resumed after a Worker restart.
+Registered workspaces are owned by each Worker, not by the Controller. Entering or hot-registering a real project requires one-shot user approval and returns an opaque `workspace_context`. `ccm.register_workspace` already combines registration and entry; with `create_if_missing=true`, the same one-shot approval may also create the exact missing project directory before registration, so a new project does not need a separate shell mkdir approval followed by workspace approval. Normal development tools carry only the resulting context. Workspace contexts are persisted by the Controller and remain valid across Controller or Worker restarts. Worker-local projectless mappings are persisted as well, so a surviving projectless directory can be resumed after a Worker restart.
 
 An environment does not expose a default workspace or default working directory to the MCP client. Worker bootstrap cwd is an internal/legacy runtime seed only; it is not a project-location hint, a default project, or the parent directory for newly created projects. CCM deliberately has no "Projects Root" policy: project placement comes from the user or the upper-layer orchestrator.
 
@@ -75,7 +75,7 @@ When adding stateful features, choose an identity according to the feature's rea
 
 | Tool | Purpose |
 | --- | --- |
-| `list_environments` | Show connected execution environments and capabilities. |
+| `list_environments` | Show connected execution environments, capabilities, and coarse effective filesystem read/write scope. |
 | `exec_command` | Run a native shell command inside an existing `workspace_context`. |
 | `respond_to_escalation` | Record an explicit user decision for a pending one-shot CCM approval. |
 | `write_stdin` | Write to or poll a live process session returned by `exec_command`. |
@@ -97,7 +97,7 @@ These are core CCM operations but intentionally stay off the top-level MCP schem
 | `ccm.create_projectless_context` | Create a temporary projectless context on a chosen Worker, or on the primary Worker when no environment is specified. |
 | `ccm.list_workspaces` | Discover registered projects on one Worker without entering them. |
 | `ccm.select_workspace` | Enter an explicitly selected registered project after user approval. |
-| `ccm.register_workspace` | Register and enter an explicitly selected project directory after user approval. |
+| `ccm.register_workspace` | Register and enter an explicitly selected project directory after user approval; optionally create that exact missing directory with `create_if_missing=true` under the same approval. |
 | `ccm.plan_patch` | Create or update one durable Plan using Codex-style patch syntax and an explicit opaque `plan_id`. |
 | `ccm.plan_read` | Read, range-read, or search only the Plan identified by `plan_id`; reading does not change planning/implementation workflow. |
 
@@ -107,7 +107,7 @@ CCM provides durable Plan storage without implementing a Controller-side "Plan M
 
 `ccm.plan_patch` omits `plan_id` only for the first write. That call creates a Plan and returns an opaque UUID; later reads/patches carry that id explicitly, so Plan identity is independent of MCP transport sessions. Managed Plans are stored centrally under ignored Controller state at `.state/plans/<plan_id>.md`; no public list/delete/search-other-Plans capability is exposed and v0.1 does not automatically expire or garbage-collect Plan files.
 
-Plan patches reuse the normal Codex-style patch grammar but target one virtual file only: creation uses `*** Add File: plan.md`, and updates use `*** Update File: plan.md`. The real `.state` path is never accepted as a tool argument. `ccm.plan_read` is intentionally lifecycle-neutral so implementation can consult a Plan repeatedly without re-entering planning behavior.
+Plan patches reuse the normal Codex-style patch grammar but target one virtual file only: creation uses `*** Add File: plan.md`, and updates use `*** Update File: plan.md`. The real `.state` path is never accepted as a tool argument. Keep the logical Plan current rather than append-only: rewrite or remove completed, invalidated, obsolete, or superseded items while preserving active constraints and unresolved decisions. Unless the user explicitly instructs execution/implementation, Plan work remains planning; imperative wording, completed inspection, workspace approval, registration approval, or sandbox escalation approval does not itself authorize implementation. `ccm.plan_read` is intentionally lifecycle-neutral so implementation can consult a Plan repeatedly without re-entering planning behavior.
 
 ## ToolRegistry and Code Mode
 
@@ -324,7 +324,7 @@ The legacy `CCM_WORKER_HUB_HOST` variable is accepted as a fallback for both bin
 
 Windows is the current fully supported restricted-execution platform.
 
-`read-only` and `workspace-write` command execution use the CCM Windows native sandbox helper. The public environment-discovery surface intentionally does not expose internal bootstrap directories or filesystem permission topology; operational callers should attempt the requested operation normally and use the explicit one-shot escalation flow when a restricted execution needs it. PTY sessions use a Rust ConPTY backend aligned with the useful parts of Codex's current Windows PTY implementation. `full-access` runs with the Worker's normal host permissions.
+`read-only` and `workspace-write` command execution use the CCM Windows native sandbox helper. The public environment-discovery surface intentionally does not expose internal bootstrap directories, raw permission profiles, or filesystem permission topology, but `list_environments` does expose a coarse `filesystem_access` summary derived from the current effective profile. In the current Windows restricted sandbox, `read-only` reports host read / no write, `workspace-write` reports host read / workspace write, and `full-access` reports host read / host write. Callers should therefore treat workspace boundaries and read boundaries separately: a read outside the selected workspace should be attempted normally when `read_scope=host`, without requesting escalation merely because the path is outside the workspace. PTY sessions use a Rust ConPTY backend aligned with the useful parts of Codex's current Windows PTY implementation. `full-access` runs with the Worker's normal host permissions.
 
 Restricted command execution on Linux/macOS is not implemented yet and **fails closed** rather than silently running unsandboxed. A Linux/macOS Worker therefore currently needs `CCM_PERMISSION_PROFILE=full-access` for shell execution.
 

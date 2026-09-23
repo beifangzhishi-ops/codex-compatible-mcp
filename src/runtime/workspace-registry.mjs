@@ -28,6 +28,37 @@ function canonicalDirectory(value) {
   return real;
 }
 
+function inspectDirectoryTarget(value, { allowMissing = false } = {}) {
+  const requested = path.resolve(String(value || ''));
+  if (fs.existsSync(requested)) {
+    return {
+      root: canonicalDirectory(requested),
+      exists: true,
+    };
+  }
+  if (!allowMissing) {
+    throw new Error('Workspace path does not exist: ' + requested);
+  }
+
+  let ancestor = requested;
+  while (!fs.existsSync(ancestor)) {
+    const parent = path.dirname(ancestor);
+    if (parent === ancestor) {
+      throw new Error('No existing ancestor for workspace path: ' + requested);
+    }
+    ancestor = parent;
+  }
+  if (!fs.statSync(ancestor).isDirectory()) {
+    throw new Error('Workspace path ancestor is not a directory: ' + ancestor);
+  }
+  const realAncestor = fs.realpathSync.native(ancestor);
+  const suffix = path.relative(ancestor, requested);
+  return {
+    root: path.resolve(realAncestor, suffix),
+    exists: false,
+  };
+}
+
 function pathKey(value) {
   const resolved = path.resolve(value);
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
@@ -138,20 +169,53 @@ export class WorkspaceRegistry {
       .sort((left, right) => left.workspace_id.localeCompare(right.workspace_id));
   }
 
-  inspectPath(value, workspaceId = null) {
+  inspectPath(value, workspaceId = null, { createIfMissing = false } = {}) {
     if (!path.isAbsolute(String(value || ''))) {
       throw new Error('Workspace path must be absolute.');
     }
-    const root = canonicalDirectory(value);
+    const inspected = inspectDirectoryTarget(value, {
+      allowMissing: Boolean(createIfMissing),
+    });
+    const root = inspected.root;
     const suggestedId = safeWorkspaceId(workspaceId || path.basename(root));
     return {
       workspace_id: suggestedId,
       root,
+      exists: inspected.exists,
+      create_required: !inspected.exists,
     };
   }
 
-  register({ workspace_id: workspaceId, path: workspacePath } = {}) {
-    const inspected = this.inspectPath(workspacePath, workspaceId);
+  register({
+    workspace_id: workspaceId,
+    path: workspacePath,
+    create_if_missing: createIfMissing = false,
+    approved_root: approvedRoot = null,
+  } = {}) {
+    let inspected = this.inspectPath(workspacePath, workspaceId, {
+      createIfMissing,
+    });
+    if (approvedRoot != null &&
+        pathKey(inspected.root) !== pathKey(approvedRoot)) {
+      throw new Error(
+        'Workspace path does not match the approved target.',
+      );
+    }
+    if (!inspected.exists) {
+      fs.mkdirSync(inspected.root, { recursive: true });
+      const real = canonicalDirectory(inspected.root);
+      if (approvedRoot != null && pathKey(real) !== pathKey(approvedRoot)) {
+        throw new Error(
+          'Created workspace path does not match the approved target.',
+        );
+      }
+      inspected = {
+        ...inspected,
+        root: real,
+        exists: true,
+        create_required: false,
+      };
+    }
     const id = inspected.workspace_id;
     const sameRoot = [...this.registered.values()].find(
       (workspace) => pathKey(workspace.root) === pathKey(inspected.root),

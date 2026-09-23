@@ -23,6 +23,10 @@ test('Plan tools stay deferred, carry ids explicitly, and keep reads lifecycle-n
     assert.equal(readTool.surfaces.deferred, true);
     assert.equal(readTool.surfaces.codeMode, true);
     assert.match(patchTool.description, /Planning guidance/);
+    assert.match(patchTool.description, /Keep the durable Plan current/);
+    assert.match(patchTool.description, /Execution gate/);
+    assert.match(patchTool.description, /workspace approval/);
+    assert.match(patchTool.description, /does not count as execution authorization/);
     assert.match(readTool.description, /lifecycle-neutral/);
 
     const search = await registry.get('ccm.tool_search').handler({ query: 'plan patch' });
