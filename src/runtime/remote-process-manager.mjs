@@ -121,9 +121,10 @@ export class RemoteProcessManager {
     const scriptName = parsed.script.replace(/'/g, "''");
     const probe = [
       "$p=Get-Content -Raw -LiteralPath package.json | ConvertFrom-Json",
-      "$prop=$p.scripts.PSObject.Properties['" + scriptName + "']",
-      "if($null -eq $prop){exit 42}",
-      "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([string]$prop.Value))",
+      "$value=$p.scripts | Select-Object -ExpandProperty '" + scriptName +
+        "' -ErrorAction SilentlyContinue",
+      "if($null -eq $value){exit 42}",
+      "[string]$value | ConvertTo-Json -Compress",
     ].join('; ');
     const result = await this.workerHub.call(
       environment.id,
@@ -145,16 +146,19 @@ export class RemoteProcessManager {
         'Could not resolve package.json script "' + parsed.script + '" for persistent approval.',
       );
     }
-    const encoded = String(result?.output || '').trim();
-    if (!encoded) {
+    const serialized = String(result?.output || '').trim();
+    if (!serialized) {
       throw new Error(
         'Package script "' + parsed.script + '" resolved to an empty policy probe.',
       );
     }
     let scriptText;
     try {
-      scriptText = Buffer.from(encoded, 'base64').toString('utf8');
+      scriptText = JSON.parse(serialized);
     } catch {
+      throw new Error('Package script policy probe returned invalid data.');
+    }
+    if (typeof scriptText !== 'string' || scriptText.length === 0) {
       throw new Error('Package script policy probe returned invalid data.');
     }
     return {

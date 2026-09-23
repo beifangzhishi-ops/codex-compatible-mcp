@@ -99,6 +99,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
       let approval = null;
       let approvalNonce = null;
       let busy = false;
+      let retryDecision = null;
 
       const title = document.getElementById("title");
       const justification = document.getElementById("justification");
@@ -142,6 +143,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         if (!structured) return false;
         approval = structured;
         approvalNonce = hidden.approval_nonce || null;
+        retryDecision = null;
         const workspaceAction = structured.kind === "workspace";
         title.textContent = workspaceAction
           ? (structured.operation === "register_workspace"
@@ -278,6 +280,10 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         if (approval.kind === "workspace" && decision === "approve_workspace") {
           return;
         }
+        if (approval.kind !== "workspace" &&
+            (decision === "approve" || decision === "approve_workspace")) {
+          retryDecision = decision;
+        }
         setBusy(true);
         const workspaceAction = approval.kind === "workspace";
         setStatus(
@@ -302,7 +308,13 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
           approval = { ...approval, ...structured };
           if (structured.state === "approved_retryable") {
             approve.textContent = "Retry approved action";
-            setStatus(structured.output || "The action was not dispatched. You can retry the same frozen action.", true);
+            setStatus(
+              structured.output ||
+                (retryDecision === "approve_workspace"
+                  ? "The action was not dispatched. Retry will keep the workspace policy approval."
+                  : "The action was not dispatched. You can retry the same frozen action."),
+              true
+            );
             setBusy(false);
             deny.disabled = false;
             return;
@@ -344,7 +356,9 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         }
       }
 
-      approve.addEventListener("click", () => { void resolve("approve"); });
+      approve.addEventListener("click", () => {
+        void resolve(retryDecision || "approve");
+      });
       approveAlways.addEventListener("click", () => {
         if (approval?.kind !== "workspace") void resolve("approve_workspace");
       });

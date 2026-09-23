@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { ApprovalManager } from '../src/controller/approval-manager.mjs';
+import { hashPackageScript } from '../src/controller/exec-policy-store.mjs';
 import { EnvironmentRegistry } from '../src/runtime/environment-registry.mjs';
 import { RemoteProcessManager } from '../src/runtime/remote-process-manager.mjs';
 import { resolvePermissionProfile } from '../src/runtime/sandbox/sandbox-policy.mjs';
@@ -614,6 +615,128 @@ test('approval can persist a workspace execution policy and reuse it', async () 
       workerHub.calls[1].params.sandbox_permissions,
       'approved_escalated',
     );
+  } finally {
+    await manager.close();
+  }
+});
+
+test('package-script workspace approval uses a restricted-compatible policy probe', async () => {
+  const environmentRegistry = restrictedRegistry();
+  const approvalManager = new ApprovalManager();
+  const calls = [];
+  const workerHub = new EventEmitter();
+  workerHub.call = async function call(environmentId, method, params) {
+      calls.push({ environmentId, method, params });
+      if (params.sandbox_permissions === 'use_default') {
+        assert.match(params.cmd, /ConvertTo-Json -Compress/);
+        assert.doesNotMatch(params.cmd, /ToBase64String|Text\.Encoding/);
+        return {
+          chunk_id: 'probe',
+          wall_time_seconds: 0.01,
+          output: '"node --test"\r\n',
+          exit_code: 0,
+        };
+      }
+      return {
+        chunk_id: 'exec',
+        wall_time_seconds: 0.01,
+        output: 'TEST_OK',
+        exit_code: 0,
+      };
+  };
+  let allowedPackageScript = null;
+  const execPolicyStore = {
+    match() {
+      return null;
+    },
+    allow({ packageScript }) {
+      allowedPackageScript = packageScript;
+      return {
+        rule_id: '22222222-2222-4222-8222-222222222222',
+        decision: 'allow',
+      };
+    },
+  };
+  const manager = new RemoteProcessManager({
+    environmentRegistry,
+    workerHub,
+    approvalManager,
+    workspaceContextManager: fakeWorkspaceContextManager(),
+    execPolicyStore,
+  });
+
+  try {
+    const prepared = await manager.prepareEscalatedCommand({
+      workspace_context: '00000000-0000-4000-8000-000000000001',
+      cmd: 'npm test',
+      justification: 'Persist npm test?',
+    });
+    const resolved = await manager.resolvePendingExecution({
+      approval_id: prepared.value.approval_id,
+      approval_nonce: prepared.approvalNonce,
+      decision: 'approve_workspace',
+    });
+    assert.equal(resolved.state, 'consumed');
+    assert.equal(resolved.policy_saved, true);
+    assert.deepEqual(allowedPackageScript, {
+      package_manager: 'npm',
+      script: 'test',
+      script_sha256: hashPackageScript('node --test'),
+    });
+    assert.equal(calls.length, 3);
+    assert.equal(calls[0].params.sandbox_permissions, 'use_default');
+    assert.equal(calls[1].params.sandbox_permissions, 'use_default');
+    assert.equal(calls[2].params.sandbox_permissions, 'approved_escalated');
+  } finally {
+    await manager.close();
+  }
+});
+
+test('package-script probe failure stays retryable without dispatching', async () => {
+  const environmentRegistry = restrictedRegistry();
+  const approvalManager = new ApprovalManager();
+  const calls = [];
+  const workerHub = new EventEmitter();
+  workerHub.call = async function call(environmentId, method, params) {
+      calls.push({ environmentId, method, params });
+      return {
+        chunk_id: 'probe',
+        wall_time_seconds: 0.01,
+        output: '',
+        exit_code: 42,
+      };
+  };
+  const manager = new RemoteProcessManager({
+    environmentRegistry,
+    workerHub,
+    approvalManager,
+    workspaceContextManager: fakeWorkspaceContextManager(),
+    execPolicyStore: {
+      match() {
+        return null;
+      },
+      allow() {
+        throw new Error('must not save');
+      },
+    },
+  });
+
+  try {
+    const prepared = await manager.prepareEscalatedCommand({
+      workspace_context: '00000000-0000-4000-8000-000000000001',
+      cmd: 'npm test',
+      justification: 'Persist npm test?',
+    });
+    const resolved = await manager.resolvePendingExecution({
+      approval_id: prepared.value.approval_id,
+      approval_nonce: prepared.approvalNonce,
+      decision: 'approve_workspace',
+    });
+    assert.equal(resolved.state, 'approved_retryable');
+    assert.match(resolved.output, /Could not resolve package\.json script "test"/);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].params.sandbox_permissions, 'use_default');
+    assert.equal(calls[1].params.sandbox_permissions, 'use_default');
   } finally {
     await manager.close();
   }

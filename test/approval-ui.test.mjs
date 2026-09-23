@@ -113,6 +113,14 @@ test('approval app keeps its capability in result _meta and resolves only the fr
     assert.match(resource.contents[0].text, /approve_workspace/);
     assert.match(
       resource.contents[0].text,
+      /retryDecision \|\| "approve"/,
+    );
+    assert.match(
+      resource.contents[0].text,
+      /retryDecision === "approve_workspace"/,
+    );
+    assert.match(
+      resource.contents[0].text,
       /approveAlways\.hidden = workspaceAction/,
     );
     assert.match(
