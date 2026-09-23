@@ -183,6 +183,38 @@ async function run(runtime, args, command) {
   });
 }
 
+async function runOneTimeLinkToCompletion(runtime, args, command) {
+  if (!runtime.workspaceContextManager) {
+    throw new Error('Workspace context manager is unavailable.');
+  }
+  const context = await runtime.workspaceContextManager.createProjectless(
+    args.environment_id,
+  );
+  let result = await runtime.processManager.execCommand({
+    workspace_context: context.workspace_context,
+    cmd: command,
+    yield_time_ms: args.yield_time_ms,
+    max_output_tokens: args.max_output_tokens,
+  });
+  let output = String(result.output || '');
+
+  for (let poll = 0; result.session_id !== undefined && poll < 6; poll += 1) {
+    result = await runtime.processManager.writeStdin({
+      workspace_context: context.workspace_context,
+      session_id: result.session_id,
+      chars: '',
+      yield_time_ms: 5_000,
+      max_output_tokens: args.max_output_tokens,
+    });
+    output += String(result.output || '');
+  }
+
+  if (result.session_id !== undefined) {
+    throw new Error('One-time key helper did not complete within 30 seconds.');
+  }
+  return { ...result, output };
+}
+
 export function registerSpecializedTools(registry, runtime) {
   registry.register({
     namespace: 'ccm-extra',
@@ -492,7 +524,7 @@ export function registerSpecializedTools(registry, runtime) {
         const environment = resolveWindowsEnvironment(runtime, args.environment_id);
         const ttl = Number(args.ttl_seconds || 300);
         const command = oneTimeLinkCommand(args, ttl);
-        const result = await run(runtime, args, command);
+        const result = await runOneTimeLinkToCompletion(runtime, args, command);
         const oneTimeUrl = String(result.output || '').trim().split(/\r?\n/).filter(Boolean).at(-1);
         if (!/^https:\/\//i.test(oneTimeUrl || '')) {
           throw new Error('One-time key helper did not return an HTTPS URL.');

@@ -56,6 +56,15 @@ function fakeRuntime() {
           exit_code: 0,
         };
       },
+      async writeStdin(args) {
+        calls.push({ writeStdin: args });
+        return {
+          chunk_id: 'continued-test',
+          wall_time_seconds: 0.02,
+          output: '',
+          exit_code: 0,
+        };
+      },
     },
     fileService: {
       async sendFile(args) {
@@ -269,6 +278,82 @@ test('one-time key link accepts separate descriptor paths without reconstructing
   assert.equal(runtime.calls[0].cmd.includes('start.ps1'), false);
   assert.equal(runtime.calls[0].cmd.includes('powershell.exe'), false);
   assert.equal(runtime.calls[0].cmd.includes('resolve-target.ps1'), false);
+});
+
+test('one-time key link waits for a yielded helper session before parsing the URL', async () => {
+  const runtime = fakeRuntime();
+  const registry = new ToolRegistry();
+  registerSpecializedTools(registry, runtime);
+  runtime.calls.length = 0;
+  runtime.processManager.execCommand = async (args) => {
+    runtime.calls.push(args);
+    return {
+      chunk_id: 'first',
+      wall_time_seconds: 5,
+      output: 'helper still running\r\n',
+      session_id: 42,
+    };
+  };
+  runtime.processManager.writeStdin = async (args) => {
+    runtime.calls.push({ writeStdin: args });
+    return {
+      chunk_id: 'second',
+      wall_time_seconds: 9,
+      output: 'https://ccm.example.test/ccm-once/yielded-token\r\n',
+      exit_code: 0,
+    };
+  };
+
+  const result = await registry.get('ccm-extra.one_time_link').handler({
+    environment_id: 'worker-b',
+    directory_file_path: 'C:\\temp\\directory.txt',
+    filename_file_path: 'C:\\temp\\filename.txt',
+    yield_time_ms: 5000,
+  });
+
+  assert.equal(result.isError, undefined);
+  assert.equal(
+    result.structuredContent.one_time_url,
+    'https://ccm.example.test/ccm-once/yielded-token',
+  );
+  assert.deepEqual(runtime.calls[1].writeStdin, {
+    workspace_context: '00000000-0000-4000-8000-000000000001',
+    session_id: 42,
+    chars: '',
+    yield_time_ms: 5000,
+    max_output_tokens: undefined,
+  });
+});
+
+test('one-time key link fails clearly when the helper remains live too long', async () => {
+  const runtime = fakeRuntime();
+  const registry = new ToolRegistry();
+  registerSpecializedTools(registry, runtime);
+  runtime.calls.length = 0;
+  runtime.processManager.execCommand = async (args) => {
+    runtime.calls.push(args);
+    return {
+      output: '',
+      session_id: 7,
+    };
+  };
+  runtime.processManager.writeStdin = async (args) => {
+    runtime.calls.push({ writeStdin: args });
+    return {
+      output: '',
+      session_id: 7,
+    };
+  };
+
+  const result = await registry.get('ccm-extra.one_time_link').handler({
+    environment_id: 'worker-b',
+    directory_file_path: 'C:\\temp\\directory.txt',
+    filename_file_path: 'C:\\temp\\filename.txt',
+  });
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /did not complete within 30 seconds/);
+  assert.equal(runtime.calls.length, 7);
 });
 
 test('one-time key link schema requires descriptor paths and documents separate operations', () => {
