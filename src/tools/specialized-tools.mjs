@@ -1,9 +1,4 @@
 ﻿import * as z from 'zod/v4';
-import {
-  RESEARCH_PPT_PIPELINE_SECTIONS,
-  RESEARCH_PPT_PIPELINE_VERSION,
-  getResearchPptPipeline,
-} from './research-ppt-pipeline.mjs';
 import { SEND_FILE_UI_URI } from '../ui/send-file-app.mjs';
 
 function toolError(error) {
@@ -140,63 +135,6 @@ async function run(runtime, args, command) {
 }
 
 export function registerSpecializedTools(registry, runtime) {
-  registry.register({
-    namespace: 'ccm-extra',
-    name: 'research_ppt_pipeline',
-    provider: 'ccm-specialized',
-    provenance: 'user-validated-research-ppt-workflow',
-    surfaces: { deferred: true, codeMode: true },
-    tags: [
-      'ppt',
-      'powerpoint',
-      'research',
-      'academic',
-      'presentation',
-      'imagegen',
-      'workflow',
-      'slides',
-    ],
-    supportsParallel: true,
-    description: [
-      'Return the user-validated research PowerPoint production workflow used for academic/research decks.',
-      'Use this before or during a research-PPT project to recover the latest agreed process: Mode A vs Mode B, visual-density calibration, source and image review, canonical per-slide production specs, full-pack self-audit, mandatory CCM send_file reference-image handoff, fresh-chat Imagegen generation, GPT decide-and-auto-advance review of returned slides, whole-deck QA, mandatory user whole-deck review, and mode-specific final delivery.',
-      'The workflow is guidance for orchestration; it does not itself generate images or PowerPoint files.',
-    ].join('\n\n'),
-    inputSchema: {
-      section: z.enum([
-        'full',
-        ...RESEARCH_PPT_PIPELINE_SECTIONS,
-      ]).optional().describe(
-        'Workflow section to return. Defaults to full.',
-      ),
-      mode: z.enum([
-        'auto',
-        'imagegen_assisted',
-        'zero_imagegen_final',
-      ]).optional().describe(
-        'Optional production mode hint. auto returns the general workflow; the other values append the relevant mode reminder.',
-      ),
-    },
-    handler: async (args) => {
-      try {
-        const section = args.section || 'full';
-        const mode = args.mode || 'auto';
-        const workflow = getResearchPptPipeline(section, mode);
-        return {
-          content: [{ type: 'text', text: workflow }],
-          structuredContent: {
-            capability: 'research_ppt_pipeline',
-            version: RESEARCH_PPT_PIPELINE_VERSION,
-            section,
-            mode,
-            workflow,
-          },
-        };
-      } catch (error) {
-        return toolError(error);
-      }
-    },
-  });
   registry.register({
     namespace: 'ccm-extra',
     name: 'send_file',
