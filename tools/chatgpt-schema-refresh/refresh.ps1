@@ -346,7 +346,7 @@ function Find-Installed([string]$Name) {
 }
 
 function Rename-Connector([object]$Connector,[string]$NewName) {
-    Click $Connector.selector
+    Click-Element $Connector
     Start-Sleep -Milliseconds 600
     $actions=$null
     foreach($label in @('插件操作','Plugin actions')){

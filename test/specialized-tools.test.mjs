@@ -270,6 +270,10 @@ test('ChatGPT schema refresh keeps CCM approval credentials local to the worker'
   assert.equal(/Invoke-Bmg[^\n]*approval_secret/.test(script), false);
   assert.match(script, /suffix\[0\] -gt \[char\]127/);
   assert.match(script, /StartsWith\(\$Name,\[StringComparison\]::Ordinal\)/);
+  assert.match(
+    script,
+    /function Rename-Connector[\s\S]*?Click-Element \$Connector/,
+  );
 });
 
 test('Bilibili deferred tool passes signed DASH URLs without exposing them in result metadata', async () => {
