@@ -331,6 +331,16 @@ function Find-Installed([string]$Name) {
            $text -eq ($Name + 'Allow all')){
             return $element
         }
+        # bmgctl is executed through cmd.exe and some Windows code-page
+        # combinations can mojibake the localized permission suffix while
+        # preserving the connector name. Accept a non-ASCII suffix, but do
+        # not let "CCM" match the distinct ASCII-named "CCM Old" entry.
+        if($text.StartsWith($Name,[StringComparison]::Ordinal)){
+            $suffix=$text.Substring($Name.Length)
+            if($suffix -and $suffix[0] -gt [char]127){
+                return $element
+            }
+        }
     }
     return $null
 }
