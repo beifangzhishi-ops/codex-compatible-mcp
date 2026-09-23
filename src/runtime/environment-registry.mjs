@@ -72,6 +72,7 @@ export class EnvironmentRegistry {
         applyPatch: false,
         viewImage: false,
         sendFile: false,
+        receiveFile: false,
         ...(environment.capabilities || {}),
       },
       backend: environment.backend || 'native',
@@ -130,6 +131,7 @@ export function createLocalEnvironmentRegistry({
       applyPatch: true,
       viewImage: true,
       sendFile: true,
+      receiveFile: true,
     },
     backend: 'native',
   });

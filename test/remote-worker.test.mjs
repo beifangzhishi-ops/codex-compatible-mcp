@@ -484,13 +484,25 @@ test('Worker disconnect unregisters its environment', async () => {
 });
 
 
-test('Remote Worker owns apply_patch, view_image, and send_file filesystem work', async () => {
+test('Remote Worker owns apply_patch, view_image, send_file, and receive_file filesystem work', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-worker-files-'));
   const controller = createControllerRuntime({ workerPort: 0 });
   const worker = workerRuntime('worker-files', {
     cwd: tempRoot,
     permissionProfile: 'workspace-write',
   });
+  const receivedCalls = [];
+  worker.fileService.receiveFile = async (params) => {
+    receivedCalls.push(params);
+    return {
+      path: path.join(tempRoot, params.destination || 'incoming.txt'),
+      filename: path.basename(params.destination || 'incoming.txt'),
+      mime_type: params.file.mime_type || 'application/octet-stream',
+      byte_length: 4,
+      sha256: 'receive-hash',
+      file_id: params.file.file_id,
+    };
+  };
   let client = null;
 
   await controller.start();
@@ -551,6 +563,25 @@ test('Remote Worker owns apply_patch, view_image, and send_file filesystem work'
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     );
     assert.deepEqual(Buffer.from(file.data, 'base64'), docBytes);
+
+    const incoming = {
+      download_url: 'https://files.example.test/download',
+      file_id: 'file_remote',
+      mime_type: 'text/plain',
+      file_name: 'incoming.txt',
+    };
+    const received = await controller.fileService.receiveFile({
+      workspace_context: workspaceContext.workspace_context,
+      file: incoming,
+      destination: 'nested\\incoming.txt',
+    });
+    assert.equal(received.file_id, 'file_remote');
+    assert.equal(received.environment_id, 'worker-files');
+    assert.equal(receivedCalls.length, 1);
+    assert.deepEqual(receivedCalls[0].file, incoming);
+    assert.equal(receivedCalls[0].destination, 'nested\\incoming.txt');
+    assert.equal(receivedCalls[0].workspace_id, seeded.workspace_id);
+    assert.equal(receivedCalls[0].expected_workspace_root, seeded.root);
   } finally {
     await client?.close().catch(() => {});
     worker.close();

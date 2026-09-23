@@ -201,6 +201,8 @@ export class RemoteWorkerClient {
         return this.runtime.fileService.viewImage(params);
       case 'send_file':
         return this.runtime.fileService.sendFile(params);
+      case 'receive_file':
+        return this.runtime.fileService.receiveFile(params);
       case 'list_workspaces':
         return { workspaces: this.runtime.workspaceRegistry.list() };
       case 'get_workspace':

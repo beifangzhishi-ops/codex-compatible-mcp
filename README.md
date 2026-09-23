@@ -86,6 +86,7 @@ When adding stateful features, choose an identity according to the feature's rea
 | `apply_patch` | Apply a Codex-style patch inside an existing `workspace_context`. |
 | `view_image` | Read and validate a bounded image inside an existing `workspace_context`. |
 | `send_file` | Transfer a file from the Worker selected by `workspace_context` to the client. |
+| `receive_file` | Receive one ChatGPT file and save it inside the Worker context selected by `workspace_context`. |
 | `tool_search` | Discover deferred ToolRegistry capabilities without expanding the top-level MCP schema. |
 | `exec` | Dispatch one or more nested registered capabilities, sequentially or safely in parallel. |
 | `wait` | Resume a nested `exec` cell that yielded before completion. |
@@ -127,7 +128,7 @@ The direct MCP surface is intentionally kept small and stable. New ordinary capa
 
 Keeping ordinary additions off the Direct surface prevents routine feature work from changing the client's top-level MCP schema. In particular, adding a deferred capability should **not require deleting and recreating the CCM integration in ChatGPT or another MCP client**. Updating CCM server code may still require restarting the Controller and/or Worker processes so the new implementation is loaded; that is separate from recreating the client integration.
 
-Do not promote a capability to Direct merely for convenience. Keep non-interactive workspace discovery/context helpers deferred, and prefer deferred `ccm-extra.*` or other namespaced capabilities for specialized workflows. Approval-gated `select_workspace` / `register_workspace` and the common operational file tools `apply_patch`, `view_image`, and `send_file` are intentionally Direct.
+Do not promote a capability to Direct merely for convenience. Keep non-interactive workspace discovery/context helpers deferred, and prefer deferred `ccm-extra.*` or other namespaced capabilities for specialized workflows. Approval-gated `select_workspace` / `register_workspace` and the common operational file tools `apply_patch`, `view_image`, `send_file`, and `receive_file` are intentionally Direct.
 
 CCM deliberately does not embed a second JavaScript interpreter for Code Mode. The host application remains responsible for loops, branching, and data processing. CCM's `exec/wait` pair is a bounded structured dispatcher over ToolRegistry capabilities. `state=completed` is terminal. If nested dispatch has finished but an `exec_command` leaves a live process session, CCM returns `state=awaiting_io` with `next_operation=write_stdin` until those process sessions are continued separately.
 
@@ -149,13 +150,14 @@ The exporter only recovers information present in the public Share payload. Info
 
 ### Bundled specialized capabilities
 
-CCM ships optional Windows workflows ported from WCM. Specialized workflows remain deferred; `ccm-extra.send_file` is the direct file-transfer exception:
+CCM ships optional Windows workflows ported from WCM. Specialized workflows remain deferred; file handoff is exposed through the direct `ccm-extra.send_file` and `ccm-extra.receive_file` tools:
 
 - `ccm-extra.send_file` is strictly single-file: one call transfers one exact file from a selected CCM environment to the GPT client. If multiple files are needed, invoke `send_file` sequentially once per file and wait for each call to return before starting the next; do not issue concurrent/parallel `send_file` calls. Use it only when a user-facing handoff is actually needed (preview/download/upload to another tool). It returns an MCP `resource_link`; `resources/read` serves the exact file bytes from a bounded Controller-side bridge cache that is persisted under ignored `.state/file-transfers` and survives Controller restarts. By default the bridge has no time-based expiry and is bounded by `CCM_FILE_TRANSFER_CACHE_BYTES`; an optional positive `CCM_FILE_TRANSFER_TTL_MS` can impose a TTL. In ChatGPT, the associated MCP App materializes that resource once into a conversation-scoped ChatGPT file with `library:false`, persists its stable `fileId` in widget state, and requests a fresh temporary download URL on each click. This keeps the attachment usable after the tool turn finishes without saving it to the ChatGPT Library. Do not use `send_file` merely for model-side inspection when the file can be read or viewed locally in CCM; prefer local reading, `view_image`, command-line inspection, or temporary local previews to avoid unnecessary materialization/approval prompts. The transfer does not use BMG.
+- `ccm-extra.receive_file` is the inverse Direct-only handoff. ChatGPT supplies exactly one native file parameter (`download_url`, `file_id`, and optional MIME/name), and the selected Worker streams that temporary HTTPS URL directly into its current context root. `destination` is workspace-relative only, overwrite is opt-in, redirects and resolved targets are SSRF-checked, and the completed file is published from a same-directory temporary file with SHA-256 metadata. Multiple files must be received sequentially. ChatGPT Files owns Library discovery; CCM only receives the specific file already selected/authorized by ChatGPT and does not enumerate the user's Library, route bytes through BMG, or use the Controller `FileTransferStore`.
 - `ccm-extra.quark_upload` submits one or more files through that local Quark desktop session and can wait for verified completion.
 - `ccm-extra.bilibili_download_dash` downloads signed DASH video/audio URLs obtained from an authenticated browser session and remuxes them with `ffmpeg -c copy`.
 
-Discover deferred specialized workflows with `tool_search` (for example, `quark upload` or `bilibili`) and invoke them through `exec`. `send_file` is available directly and is also callable through `exec`. Long uploads/downloads may return a live process session; continue that session with the top-level `write_stdin` tool.
+Discover deferred specialized workflows with `tool_search` (for example, `quark upload` or `bilibili`) and invoke them through `exec`. `send_file` is available directly and is also callable through `exec`; `receive_file` is Direct-only because ChatGPT native file-parameter injection occurs on the top-level tool call. Long uploads/downloads may return a live process session; continue that session with the top-level `write_stdin` tool.
 
 The Quark helper reuses only the login state of the local Quark desktop client and does not export account credentials. The Bilibili helper intentionally leaves authenticated `playurl` discovery to the browser/BMG layer and accepts only the resulting short-lived signed media URLs; it does not export cookies or attempt to bypass account/quality restrictions.
 
@@ -320,6 +322,7 @@ The legacy `CCM_WORKER_HUB_HOST` variable is accepted as a fallback for both bin
 | `CCM_MAX_MCP_FILE_RESULT_BYTES` | 24 MiB | Serialized MCP result limit when returning an embedded file resource. |
 | `CCM_MAX_VIEW_IMAGE_BYTES` | 1 MiB | Maximum raw image size returned by `view_image`. |
 | `CCM_MAX_SEND_FILE_BYTES` | 12 MiB | Maximum raw file size returned by `ccm-extra.send_file`. |
+| `CCM_MAX_RECEIVE_FILE_BYTES` | 512 MiB | Maximum raw file size accepted by `ccm-extra.receive_file`; the default matches ChatGPT's current per-file hard upload limit. |
 | `CCM_FILE_TRANSFER_TTL_MS` | 0 (disabled) | Optional positive TTL for persisted `send_file` bridge resources. |
 | `CCM_FILE_TRANSFER_CACHE_BYTES` | 64 MiB | Maximum total raw bytes retained in the persisted file-transfer bridge cache; oldest entries are evicted first. |
 | `CCM_WORKER_RECONNECT_MS` | 1000 ms | Worker reconnect delay. |

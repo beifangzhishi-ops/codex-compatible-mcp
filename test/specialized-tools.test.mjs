@@ -66,6 +66,18 @@ function fakeRuntime() {
           data: Buffer.from('test').toString('base64'),
         };
       },
+      async receiveFile(args) {
+        calls.push({ receiveFile: args });
+        return {
+          environment_id: 'worker-a',
+          path: 'C:\\temp\\projectless-test\\incoming.txt',
+          filename: 'incoming.txt',
+          mime_type: args.file.mime_type || 'application/octet-stream',
+          byte_length: 4,
+          sha256: 'receive-sha256',
+          file_id: args.file.file_id,
+        };
+      },
     },
     fileTransferStore: new FileTransferStore(),
   };
@@ -145,6 +157,44 @@ test('send_file is direct and returns a readable resource link using workspace_c
   });
   assert.equal(sequential.isError, undefined);
   assert.equal(sequential.structuredContent.state, 'completed');
+});
+
+test('receive_file is Direct-only and advertises a native ChatGPT file parameter', async () => {
+  const runtime = fakeRuntime();
+  const registry = new ToolRegistry();
+  registerSpecializedTools(registry, runtime);
+  const receiveFile = registry.get('ccm-extra.receive_file');
+  assert.ok(receiveFile);
+  assert.equal(receiveFile.surfaces.direct, true);
+  assert.equal(receiveFile.surfaces.codeMode, false);
+  assert.equal(receiveFile.supportsParallel, false);
+  assert.deepEqual(receiveFile.mcpMeta['openai/fileParams'], ['file']);
+  assert.match(receiveFile.description, /exactly one ChatGPT file per call/i);
+  assert.match(receiveFile.description, /sequentially/i);
+  assert.match(receiveFile.description, /Never issue concurrent or parallel/i);
+
+  const input = {
+    download_url: 'https://files.example.test/download',
+    file_id: 'file_incoming',
+    mime_type: 'text/plain',
+    file_name: 'incoming.txt',
+  };
+  const result = await receiveFile.handler({
+    workspace_context: '00000000-0000-4000-8000-000000000001',
+    file: input,
+    destination: 'incoming.txt',
+  });
+  assert.equal(result.isError, undefined);
+  assert.equal(result.structuredContent.capability, 'receive_file');
+  assert.equal(result.structuredContent.file_id, 'file_incoming');
+  assert.deepEqual(runtime.calls.at(-1), {
+    receiveFile: {
+      workspace_context: '00000000-0000-4000-8000-000000000001',
+      file: input,
+      destination: 'incoming.txt',
+      overwrite: false,
+    },
+  });
 });
 
 

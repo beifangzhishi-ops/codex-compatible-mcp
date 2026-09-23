@@ -36,6 +36,7 @@ export function createWorkerRuntime(options = {}) {
     workspaceRegistry,
     maxViewImageBytes: options.maxViewImageBytes,
     maxSendFileBytes: options.maxSendFileBytes,
+    maxReceiveFileBytes: options.maxReceiveFileBytes,
   });
 
   return {

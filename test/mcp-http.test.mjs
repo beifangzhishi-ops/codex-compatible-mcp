@@ -56,6 +56,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       'exec',
       'exec_command',
       'list_environments',
+      'receive_file',
       'register_workspace',
       'request_escalated_exec',
       'resolve_pending_action',
@@ -67,6 +68,21 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       'wait',
       'write_stdin',
     ]);
+    const receiveFileTool = listed.tools.find((tool) => tool.name === 'receive_file');
+    assert.ok(receiveFileTool);
+    assert.deepEqual(receiveFileTool._meta?.['openai/fileParams'], ['file']);
+    assert.deepEqual(
+      receiveFileTool.inputSchema.properties.file.required,
+      ['download_url', 'file_id'],
+    );
+    assert.equal(
+      receiveFileTool.inputSchema.properties.file.additionalProperties,
+      false,
+    );
+    assert.deepEqual(
+      Object.keys(receiveFileTool.inputSchema.properties.file.properties).sort(),
+      ['download_url', 'file_id', 'file_name', 'mime_type'],
+    );
     assert.deepEqual(
       listed.tools.find((tool) => tool.name === 'resolve_pending_action')
         ?._meta?.ui?.visibility,

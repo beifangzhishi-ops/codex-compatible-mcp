@@ -22,6 +22,7 @@ function environmentRegistry() {
           applyPatch: true,
           viewImage: true,
           sendFile: true,
+          receiveFile: true,
         },
       };
     },
@@ -59,6 +60,16 @@ class FakeWorkerHub extends EventEmitter {
         byte_length: 1,
         sha256: 'test',
         data: 'AA==',
+      };
+    }
+    if (method === 'receive_file') {
+      return {
+        path: params.destination,
+        filename: path.basename(params.destination || 'incoming.txt'),
+        mime_type: params.file.mime_type || 'application/octet-stream',
+        byte_length: 4,
+        sha256: 'received',
+        file_id: params.file.file_id,
       };
     }
     return {
@@ -125,6 +136,45 @@ test('send_file uses context to select Worker without imposing workspace read bo
 
   await assert.rejects(
     fileService.sendFile({ path: outsidePath }),
+    /requires workspace_context/,
+  );
+});
+
+test('receive_file uses context to select Worker and forwards only a relative destination', async () => {
+  const workerHub = new FakeWorkerHub();
+  const fileService = new RemoteFileService({
+    environmentRegistry: environmentRegistry(),
+    workerHub,
+    workspaceContextManager: workspaceContextManager(),
+  });
+  const file = {
+    download_url: 'https://files.example.test/download',
+    file_id: 'file_route',
+    file_name: 'route.txt',
+  };
+  const result = await fileService.receiveFile({
+    workspace_context: CONTEXT_ID,
+    file,
+    destination: 'nested\\route.txt',
+  });
+
+  assert.equal(result.environment_id, 'worker-a');
+  assert.equal(result.workspace_context, CONTEXT_ID);
+  assert.deepEqual(workerHub.calls[0], {
+    environmentId: 'worker-a',
+    method: 'receive_file',
+    params: {
+      file,
+      destination: 'nested\\route.txt',
+      overwrite: false,
+      environment_id: 'worker-a',
+      workspace_id: 'projectless-test',
+      expected_workspace_root: 'C:\\Users\\test\\Documents\\CCM\\projectless-test',
+    },
+  });
+
+  await assert.rejects(
+    fileService.receiveFile({ file }),
     /requires workspace_context/,
   );
 });

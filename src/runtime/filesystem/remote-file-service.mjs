@@ -114,4 +114,29 @@ export class RemoteFileService {
     );
     return { ...result, ...execution.workspaceContext };
   }
+
+  async receiveFile(args) {
+    const execution = this.#resolveExecution(args);
+    const environment = execution.environment;
+    if (!environment.capabilities?.receiveFile) {
+      throw new Error(
+        'Environment does not support receive_file: ' + environment.id,
+      );
+    }
+
+    const result = await this.workerHub.call(
+      environment.id,
+      'receive_file',
+      {
+        file: args.file,
+        destination: args.destination,
+        overwrite: args.overwrite === true,
+        environment_id: environment.id,
+        workspace_id: execution.workspaceId,
+        expected_workspace_root: execution.workspaceContext.workspace_root,
+      },
+      { timeoutMs: 330_000 },
+    );
+    return { ...result, ...execution.workspaceContext };
+  }
 }

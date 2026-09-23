@@ -73,6 +73,27 @@ function fileResourceResult(value, environmentId, fileTransferStore) {
   };
 }
 
+function receivedFileResult(value, environmentId) {
+  return {
+    content: [{
+      type: 'text',
+      text: 'Received ' + value.filename + ' into ' + environmentId +
+        ' at ' + value.path + ' (' + value.byte_length +
+        ' bytes, sha256 ' + value.sha256 + ').',
+    }],
+    structuredContent: {
+      capability: 'receive_file',
+      environment_id: environmentId,
+      path: value.path,
+      filename: value.filename,
+      mime_type: value.mime_type,
+      byte_length: value.byte_length,
+      sha256: value.sha256,
+      file_id: value.file_id,
+    },
+  };
+}
+
 function psQuote(value) {
   return "'" + String(value).replaceAll("'", "''") + "'";
 }
@@ -179,6 +200,61 @@ export function registerSpecializedTools(registry, runtime) {
           value.environment_id,
           runtime.fileTransferStore,
         );
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  });
+
+  registry.register({
+    namespace: 'ccm-extra',
+    name: 'receive_file',
+    provider: 'ccm-specialized',
+    provenance: 'ccm-native-file-transfer',
+    surfaces: { direct: true, codeMode: false },
+    tags: ['file', 'attachment', 'transfer', 'gpt', 'receive'],
+    environmentRequirements: {
+      capabilities: ['receiveFile'],
+    },
+    mcpMeta: {
+      'openai/fileParams': ['file'],
+    },
+    supportsParallel: false,
+    description: [
+      'Receive exactly one ChatGPT file per call and save it to the Worker selected by workspace_context. For multiple files, call receive_file sequentially and wait for each call to return before starting the next. Never issue concurrent or parallel receive_file calls.',
+      'The file field is a native ChatGPT file parameter. Use this for a file attached to the current conversation or for a specific Library file that ChatGPT has already found and authorized. Do not ask the user to re-upload a Library file when ChatGPT Files can identify it directly.',
+      'workspace_context is required and determines the Worker and context root. receive_file writes only inside that context root. destination must be relative; absolute paths and workspace escapes are rejected.',
+      'If destination is omitted, the sanitized ChatGPT file_name is used at the context root. Existing files are not replaced unless overwrite=true.',
+      'The Worker downloads the temporary ChatGPT URL directly; CCM does not route the file bytes through BMG or the Controller file-transfer cache.',
+    ].join('\\n\\n'),
+    inputSchema: {
+      file: z.object({
+        download_url: z.string().url(),
+        file_id: z.string().min(1),
+        mime_type: z.string().optional(),
+        file_name: z.string().optional(),
+      }).strict().describe(
+        'Exactly one ChatGPT file object. For multiple files, invoke receive_file sequentially once per file; do not call receive_file in parallel.',
+      ),
+      workspace_context: z.string().uuid().describe(
+        'Existing workspace context used to determine the target Worker and context root.',
+      ),
+      destination: z.string().min(1).optional().describe(
+        'Optional path relative to the selected context root. Absolute paths and workspace escapes are rejected. Defaults to the sanitized ChatGPT file_name.',
+      ),
+      overwrite: z.boolean().optional().describe(
+        'Replace an existing regular file at destination. Defaults to false.',
+      ),
+    },
+    handler: async (args) => {
+      try {
+        const value = await runtime.fileService.receiveFile({
+          workspace_context: args.workspace_context,
+          file: args.file,
+          destination: args.destination,
+          overwrite: args.overwrite === true,
+        });
+        return receivedFileResult(value, value.environment_id);
       } catch (error) {
         return toolError(error);
       }
