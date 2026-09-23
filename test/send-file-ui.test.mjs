@@ -66,6 +66,7 @@ test('send_file widget materializes MCP resource into a non-Library ChatGPT file
     ['icon', fakeElement()],
   ]);
   let readCount = 0;
+  let uploadCount = 0;
   let uploadOptions = null;
   let uploadedFile = null;
   let widgetState = null;
@@ -115,6 +116,7 @@ test('send_file widget materializes MCP resource into a non-Library ChatGPT file
       widgetState: null,
       toolResponseMetadata: { mcp_tool_result: toolResult() },
       async uploadFile(file, options) {
+        uploadCount += 1;
         uploadedFile = file;
         uploadOptions = options;
         return { fileId: 'file_ccm_deck' };
@@ -191,6 +193,20 @@ test('send_file widget materializes MCP resource into a non-Library ChatGPT file
   assert.equal(widgetState.privateContent.sha256, 'sha-test');
   assert.equal(elements.get('download').disabled, false);
   assert.equal(elements.get('file-name').textContent, 'deck.zip');
+
+  for (const listener of listeners.get('message') || []) {
+    listener({
+      source: parent,
+      data: {
+        jsonrpc: '2.0',
+        method: 'ui/notifications/tool-result',
+        params: toolResult(),
+      },
+    });
+  }
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(readCount, 1);
+  assert.equal(uploadCount, 1);
 
   await elements.get('download').click();
   for (let attempt = 0; attempt < 20 && !clickedAnchor; attempt += 1) {

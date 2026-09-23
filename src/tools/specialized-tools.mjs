@@ -150,9 +150,10 @@ export function registerSpecializedTools(registry, runtime) {
       'ui/resourceUri': SEND_FILE_UI_URI,
       'openai/outputTemplate': SEND_FILE_UI_URI,
     },
-    supportsParallel: true,
+    supportsParallel: false,
     description: [
-      'Send a file from a CCM environment to the GPT client as an MCP resource link when the user actually needs the file in chat for preview, download, upload to another tool, or handoff.',
+      'Send exactly one file per call from a CCM environment to the GPT client as an MCP resource link. If the user needs multiple files, call send_file sequentially and wait for each call to return before starting the next. Never issue concurrent or parallel send_file calls.',
+      'Use send_file only when the user actually needs the file in chat for preview, download, upload to another tool, or handoff.',
       'workspace_context is required and determines the Worker. Relative paths are resolved from that context root; absolute paths remain absolute on the selected Worker.',
       'If the user has not selected a project, automatically obtain a projectless context first through ccm.create_projectless_context; do not ask the user to choose or register a temporary directory.',
       'Do NOT use send_file merely so the model can inspect, review, analyze, or verify a local file. If the file can be examined inside CCM, prefer local reading, view_image, command-line inspection, or a temporary local preview instead. This avoids unnecessary file materialization and user approval prompts.',
@@ -161,7 +162,7 @@ export function registerSpecializedTools(registry, runtime) {
     ].join('\n\n'),
     inputSchema: {
       path: z.string().min(1).describe(
-        'File path on the Worker selected by workspace_context. Relative paths resolve from the selected context root; absolute paths remain absolute.',
+        'Exactly one file path on the Worker selected by workspace_context. Relative paths resolve from the selected context root; absolute paths remain absolute. For multiple files, invoke send_file sequentially once per file and wait for each call to return before issuing the next; do not call send_file in parallel.',
       ),
       workspace_context: z.string().uuid().describe(
         'Existing workspace context used to determine the Worker that owns the file.',

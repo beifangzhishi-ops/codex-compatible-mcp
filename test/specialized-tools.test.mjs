@@ -5,6 +5,7 @@ import { registerSpecializedTools } from '../src/tools/specialized-tools.mjs';
 import { SEND_FILE_UI_URI } from '../src/ui/send-file-app.mjs';
 import { ToolRegistry } from '../src/tools/tool-registry.mjs';
 import { FileTransferStore } from '../src/controller/file-transfer-store.mjs';
+import { registerArchitectureTools } from '../src/tools/architecture-tools.mjs';
 
 function fakeRuntime() {
   const calls = [];
@@ -79,13 +80,21 @@ test('send_file is direct and returns a readable resource link using workspace_c
   });
   const registry = new ToolRegistry();
   registerSpecializedTools(registry, runtime);
-  assert.equal(registry.get('ccm-extra.send_file').surfaces.direct, true);
+  const sendFile = registry.get('ccm-extra.send_file');
+  assert.equal(sendFile.surfaces.direct, true);
+  assert.equal(sendFile.surfaces.codeMode, true);
+  assert.equal(sendFile.supportsParallel, false);
+  assert.match(sendFile.description, /exactly one file per call/i);
+  assert.match(sendFile.description, /sequentially/i);
+  assert.match(sendFile.description, /never issue concurrent or parallel/i);
+  assert.match(sendFile.inputSchema.path.description, /exactly one file path/i);
+  assert.match(sendFile.inputSchema.path.description, /do not call send_file in parallel/i);
   assert.equal(
-    registry.get('ccm-extra.send_file').mcpMeta.ui.resourceUri,
+    sendFile.mcpMeta.ui.resourceUri,
     SEND_FILE_UI_URI,
   );
   assert.equal(
-    registry.get('ccm-extra.send_file').mcpMeta['openai/outputTemplate'],
+    sendFile.mcpMeta['openai/outputTemplate'],
     SEND_FILE_UI_URI,
   );
 
@@ -110,6 +119,32 @@ test('send_file is direct and returns a readable resource link using workspace_c
   );
   assert.equal(result.structuredContent.filename, 'report.docx');
   assert.equal(result.structuredContent.resource_uri, result.content[1].uri);
+
+  registerArchitectureTools(registry);
+  const rejected = await registry.get('exec').handler({
+    calls: [{
+      tool: 'ccm-extra.send_file',
+      arguments: {
+        workspace_context: '00000000-0000-4000-8000-000000000001',
+        path: 'C:\\docs\\second.docx',
+      },
+    }],
+    parallel: true,
+  });
+  assert.equal(rejected.isError, true);
+  assert.match(rejected.content[0].text, /parallel-call support/);
+
+  const sequential = await registry.get('exec').handler({
+    calls: [{
+      tool: 'ccm-extra.send_file',
+      arguments: {
+        workspace_context: '00000000-0000-4000-8000-000000000001',
+        path: 'C:\\docs\\second.docx',
+      },
+    }],
+  });
+  assert.equal(sequential.isError, undefined);
+  assert.equal(sequential.structuredContent.state, 'completed');
 });
 
 
