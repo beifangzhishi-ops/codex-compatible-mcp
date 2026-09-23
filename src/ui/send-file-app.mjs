@@ -181,6 +181,20 @@ export const SEND_FILE_UI_HTML = String.raw`<!doctype html>
         return privateContent;
       }
 
+      function recoveryResource(state) {
+        if (!state || typeof state.resourceUri !== "string" ||
+            !state.resourceUri.startsWith("ccm-file:///") ||
+            typeof state.filename !== "string" || !state.filename) {
+          return null;
+        }
+        return {
+          uri: state.resourceUri,
+          name: state.filename,
+          mimeType: state.mimeType || "application/octet-stream",
+          size: state.size
+        };
+      }
+
       function sourceSha(result) {
         return result && result.structuredContent &&
           typeof result.structuredContent.sha256 === "string"
@@ -191,7 +205,7 @@ export const SEND_FILE_UI_HTML = String.raw`<!doctype html>
       function stateMatches(result, state, resource) {
         if (!state) return false;
         const sha = sourceSha(result);
-        if (sha && state.sha256 && sha !== state.sha256) return false;
+        if (sha && state.sha256 !== sha) return false;
         if (resource?.name && state.filename &&
             resource.name !== state.filename) return false;
         return true;
@@ -219,7 +233,29 @@ export const SEND_FILE_UI_HTML = String.raw`<!doctype html>
         ) || null;
       }
 
-      async function materialize(result, resource) {
+      function persistState(next) {
+        const openai = window.openai;
+        if (typeof openai?.setWidgetState === "function") {
+          openai.setWidgetState({ privateContent: next });
+        }
+        return next;
+      }
+
+      function withRecoveryResource(state, result, resource) {
+        if (!state || !resource?.uri) return state;
+        const sha256 = state.sha256 || sourceSha(result);
+        if (state.resourceUri === resource.uri &&
+            (!sha256 || state.sha256 === sha256)) {
+          return state;
+        }
+        return persistState({
+          ...state,
+          resourceUri: resource.uri,
+          sha256
+        });
+      }
+
+      async function materialize(result, resource, fallbackSha = null) {
         const openai = window.openai;
         if (!openai || typeof openai.uploadFile !== "function") {
           throw new Error(
@@ -255,12 +291,10 @@ export const SEND_FILE_UI_HTML = String.raw`<!doctype html>
           filename: resource.name,
           mimeType,
           size: bytes.length,
-          sha256: sourceSha(result)
+          sha256: sourceSha(result) || fallbackSha,
+          resourceUri: resource.uri
         };
-        if (typeof openai.setWidgetState === "function") {
-          openai.setWidgetState({ privateContent: next });
-        }
-        return next;
+        return persistState(next);
       }
 
       async function processResult(result) {
@@ -281,7 +315,7 @@ export const SEND_FILE_UI_HTML = String.raw`<!doctype html>
         }
         render(resource, restored);
         if (stateMatches(result, restored, resource)) {
-          current = restored;
+          current = withRecoveryResource(restored, result, resource);
           download.disabled = false;
           setStatus("Ready");
           return;
@@ -327,10 +361,27 @@ export const SEND_FILE_UI_HTML = String.raw`<!doctype html>
               fileId: current.fileId
             });
           } catch (firstError) {
-            if (!lastResult || !lastResource) throw firstError;
+            const resource = lastResource || recoveryResource(current);
+            if (!resource) throw firstError;
             setStatus("Refreshing saved file…");
-            current = await materialize(lastResult, lastResource);
-            render(lastResource, current);
+            try {
+              current = await materialize(
+                lastResult,
+                resource,
+                current.sha256 || null
+              );
+            } catch (recoveryError) {
+              throw new Error(
+                "Saved ChatGPT file expired and the CCM recovery resource " +
+                "could not be read: " +
+                String(
+                  recoveryError && recoveryError.message
+                    ? recoveryError.message
+                    : recoveryError
+                )
+              );
+            }
+            render(resource, current);
             response = await openai.getFileDownloadUrl({
               fileId: current.fileId
             });
