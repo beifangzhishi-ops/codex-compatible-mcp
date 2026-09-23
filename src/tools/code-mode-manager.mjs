@@ -173,16 +173,33 @@ function compactToolResult(result, maxTokens) {
 }
 
 function liveSessionFrom(event) {
-  const sessionId = event?.result?.structured_content?.session_id;
-  return Number.isInteger(sessionId)
-    ? { call_index: event.call_index, tool: event.tool, session_id: sessionId }
-    : null;
+  const structured = event?.result?.structured_content;
+  const sessionId = structured?.session_id;
+  if (!Number.isInteger(sessionId)) return null;
+  return {
+    call_index: event.call_index,
+    tool: event.tool,
+    session_id: sessionId,
+    ...(structured?.workspace_context
+      ? { workspace_context: structured.workspace_context }
+      : {}),
+    ...(structured?.environment_id
+      ? { environment_id: structured.environment_id }
+      : {}),
+    ...(structured?.workspace_id
+      ? { workspace_id: structured.workspace_id }
+      : {}),
+    ...(structured?.operation_id
+      ? { operation_id: structured.operation_id }
+      : {}),
+  };
 }
 
 export class CodeModeManager {
-  constructor({ registry } = {}) {
+  constructor({ registry, sessionInspector = null } = {}) {
     if (!registry) throw new Error('CodeModeManager requires a ToolRegistry.');
     this.registry = registry;
+    this.sessionInspector = sessionInspector;
     this.jobs = new Map();
   }
 
@@ -201,7 +218,17 @@ export class CodeModeManager {
 
     const liveSessions = job.events
       .map(liveSessionFrom)
-      .filter(Boolean);
+      .filter(Boolean)
+      .filter((session) => {
+        if (!this.sessionInspector ||
+            typeof this.sessionInspector.isSessionLive !== 'function') {
+          return true;
+        }
+        return this.sessionInspector.isSessionLive(
+          session.session_id,
+          session.workspace_context || null,
+        );
+      });
     const state = running
       ? 'running'
       : liveSessions.length > 0

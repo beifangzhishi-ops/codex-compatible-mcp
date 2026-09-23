@@ -27,6 +27,10 @@ import {
   SEND_FILE_UI_HTML,
   SEND_FILE_UI_URI,
 } from '../ui/send-file-app.mjs';
+import {
+  APPROVAL_UI_HTML,
+  APPROVAL_UI_URI,
+} from '../ui/approval-app.mjs';
 
 const SERVER_INFO = { name: 'ccm', version: '0.1.0' };
 
@@ -40,7 +44,7 @@ function createProtocolServer(
     capabilities: { tools: { listChanged: true } },
     instructions: [
       'CCM is a Codex-compatible execution harness.',
-      'Use exec_command for shell/repository work and write_stdin for live sessions. exec_command requires an existing workspace_context.',
+      'Use exec_command for ordinary shell/repository work and write_stdin for live sessions. Both require the workspace_context that owns the operation; copy workspace_context together with session_id when continuing a live process.',
       'Use list_environments when environment selection is unclear.',
       'Use tool_search to discover deferred capabilities without expanding the top-level MCP schema.',
       'When the user explicitly asks to plan, discuss before implementation, or re-plan and a durable multi-turn Plan is useful, discover ccm.plan_patch / ccm.plan_read through tool_search. plan_patch carries Codex-style planning discipline: inspect discoverable facts without tracked-state mutation, resolve user intent/tradeoffs, then resolve implementation/test details until the Plan is decision-complete; keep the Plan current by removing or rewriting stale, completed, invalidated, or superseded content. Unless the user clearly and explicitly instructs execution/implementation, remain in planning. Imperative task wording, Plan updates, completed inspection, workspace approval, registration approval, or sandbox escalation approval is not execution authorization. CCM does not maintain a Plan-Mode state machine. Once the user explicitly asks to execute/implement, continue implementation; plan_read is a neutral reference lookup and never switches the workflow back to planning.',
@@ -54,10 +58,10 @@ function createProtocolServer(
       'CCM error semantics: distinguish CCM results from host/tool-call failures. A normal CCM exec_command result contains CCM fields such as chunk_id, wall_time_seconds, output, exit_code/session_id, or approval_required. If the host returns a Script error or other failure without a CCM structured result, do not attribute it to CCM: the command may not have been dispatched to the CCM worker.',
       'CCM itself does not perform or report GPT/OpenAI safety review. Do not describe host-side safety/policy/tool-call errors as CCM refusals. Only describe a refusal as CCM-originated when CCM returns an explicit CCM error/result that says so.',
       'Runtime, shell, path, non-zero exit, timeout, network, HTTP, DNS, proxy, and target-site errors are execution/target failures, not CCM safety refusals. Verify the relevant layer before assigning a cause.',
-      'If exec_command with sandbox_permissions=require_escalated returns approval_required, do not continue or approve it yourself. Show the environment, command, requested full-access scope, and justification to the user, then wait for an explicit user reply.',
-      'Only after an explicit user approval, call respond_to_escalation with decision=approve, then retry the exact same exec_command with the returned approval_id. Approval is one-shot and changing the command or execution context requires a new request.',
+      'When a workspace-write command genuinely requires full-access, call the direct request_escalated_exec tool instead of exec_command(sandbox_permissions=require_escalated). request_escalated_exec freezes the exact action and renders the CCM approval card; it does not execute the command itself.',
+      'The user approves or denies escalated execution inside the CCM approval card. Do not call resolve_pending_action yourself, do not call respond_to_escalation for execution approvals, and do not reconstruct or retry the command after the approval card is shown. CCM resumes only the frozen action after the card decision.',
       'Deferred select_workspace/register_workspace calls may also return a nested approval_required result through exec. Show that request to the user, wait for explicit approval, call respond_to_escalation, then retry the same deferred workspace call through exec with its approval_id.',
-      'If the user denies or cancels, call respond_to_escalation with decision=deny and do not run the escalated command.',
+      'respond_to_escalation remains only for legacy workspace access approvals such as select_workspace/register_workspace. Execution approval requests created by request_escalated_exec cannot be resolved through it.',
       'Treat transient network failures carefully: a single timeout, DNS failure, connection reset, HTTP 502, or target-site 403/404/challenge does not mean a CCM environment is offline. Distinguish CCM transport, worker connectivity, command runtime, and target-site failures; verify environment health and retry transient network operations 2-3 times when appropriate.',
     ].join('\n'),
   });
@@ -122,6 +126,24 @@ function createProtocolServer(
         uri: SEND_FILE_UI_URI,
         mimeType: 'text/html;profile=mcp-app',
         text: SEND_FILE_UI_HTML,
+        _meta: { ui: { prefersBorder: true } },
+      }],
+    }),
+  );
+
+  server.registerResource(
+    'ccm-approval-ui',
+    APPROVAL_UI_URI,
+    {
+      title: 'CCM execution approval',
+      description: 'User approval card for one frozen full-access CCM command.',
+      mimeType: 'text/html;profile=mcp-app',
+    },
+    async () => ({
+      contents: [{
+        uri: APPROVAL_UI_URI,
+        mimeType: 'text/html;profile=mcp-app',
+        text: APPROVAL_UI_HTML,
         _meta: { ui: { prefersBorder: true } },
       }],
     }),

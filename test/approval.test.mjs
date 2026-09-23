@@ -104,6 +104,119 @@ test('ApprovalManager binds a grant to one exact execution and expires it', () =
   );
 });
 
+test('ApprovalManager app approvals require the card nonce and resume one frozen action', () => {
+  const approvals = new ApprovalManager();
+  const workspace = {
+    workspace_context: '00000000-0000-4000-8000-000000000001',
+    environment_id: 'approval-worker',
+    workspace_id: 'approval-workspace',
+    workspace_kind: 'registered',
+    workspace_root: 'C:\\workspace',
+  };
+  const prepared = approvals.requestExecutionForApp(
+    {
+      workspace_context: workspace.workspace_context,
+      cmd: 'Write-Output APP_APPROVED',
+      yield_time_ms: 500,
+      max_output_tokens: 1234,
+      justification: 'Allow the frozen app action?',
+    },
+    'approval-worker',
+    { workspace, hostSession: 'chat-session-a' },
+  );
+
+  assert.equal(prepared.request.state, 'pending');
+  assert.equal(typeof prepared.request.operation_id, 'string');
+  assert.equal(Object.hasOwn(prepared.request, 'approval_nonce'), false);
+  assert.equal(typeof prepared.approvalNonce, 'string');
+  assert.throws(
+    () => approvals.respond(prepared.request.approval_id, 'approve'),
+    /approval card/i,
+  );
+  assert.throws(
+    () => approvals.claimAppExecution(
+      prepared.request.approval_id,
+      'wrong-secret',
+      'chat-session-a',
+    ),
+    /nonce is invalid/i,
+  );
+  assert.throws(
+    () => approvals.claimAppExecution(
+      prepared.request.approval_id,
+      prepared.approvalNonce,
+      'chat-session-b',
+    ),
+    /different host session/i,
+  );
+
+  const claimed = approvals.claimAppExecution(
+    prepared.request.approval_id,
+    prepared.approvalNonce,
+    'chat-session-a',
+  );
+  assert.equal(claimed.request.state, 'dispatching');
+  assert.equal(claimed.action.cmd, 'Write-Output APP_APPROVED');
+  assert.equal(claimed.action.workspace_id, 'approval-workspace');
+  assert.equal(claimed.action.yield_time_ms, 500);
+  assert.equal(claimed.action.max_output_tokens, 1234);
+
+  const retryable = approvals.markAppExecutionRetryable(
+    prepared.request.approval_id,
+  );
+  assert.equal(retryable.state, 'approved_retryable');
+  const retried = approvals.claimAppExecution(
+    prepared.request.approval_id,
+    prepared.approvalNonce,
+    'chat-session-a',
+  );
+  assert.equal(retried.request.state, 'dispatching');
+  const consumed = approvals.markAppExecutionConsumed(
+    prepared.request.approval_id,
+  );
+  assert.equal(consumed.state, 'consumed');
+  assert.throws(
+    () => approvals.claimAppExecution(
+      prepared.request.approval_id,
+      prepared.approvalNonce,
+      'chat-session-a',
+    ),
+    /cannot dispatch from state=consumed/i,
+  );
+});
+
+test('ApprovalManager does not expire an action while it is dispatching', () => {
+  let now = Date.UTC(2026, 8, 23, 7, 0, 0);
+  const approvals = new ApprovalManager({
+    ttlMs: 1000,
+    now: () => now,
+  });
+  const workspace = {
+    workspace_context: '00000000-0000-4000-8000-000000000001',
+    environment_id: 'approval-worker',
+    workspace_id: 'approval-workspace',
+    workspace_kind: 'registered',
+    workspace_root: 'C:\\workspace',
+  };
+  const prepared = approvals.requestExecutionForApp(
+    {
+      workspace_context: workspace.workspace_context,
+      cmd: 'Write-Output LONG_RUNNING',
+    },
+    'approval-worker',
+    { workspace },
+  );
+  approvals.claimAppExecution(
+    prepared.request.approval_id,
+    prepared.approvalNonce,
+  );
+  now += 2000;
+  const consumed = approvals.markAppExecutionConsumed(
+    prepared.request.approval_id,
+  );
+  assert.equal(consumed.state, 'consumed');
+});
+
 test('ApprovalManager binds workspace creation permission into the exact intent', () => {
   const approvals = new ApprovalManager();
   const intent = {
@@ -191,6 +304,145 @@ test('RemoteProcessManager executes only after one matching approval', async () 
       }),
       /not approved/,
     );
+  } finally {
+    await manager.close();
+  }
+});
+
+test('RemoteProcessManager app approval executes only the frozen action', async () => {
+  const environmentRegistry = restrictedRegistry();
+  const workerHub = new FakeWorkerHub();
+  const approvalManager = new ApprovalManager();
+  const manager = new RemoteProcessManager({
+    environmentRegistry,
+    workerHub,
+    approvalManager,
+    workspaceContextManager: fakeWorkspaceContextManager(),
+  });
+  try {
+    const prepared = manager.prepareEscalatedCommand({
+      workspace_context: '00000000-0000-4000-8000-000000000001',
+      cmd: 'Write-Output FROZEN_ACTION',
+      workdir: '.',
+      yield_time_ms: 250,
+      justification: 'Run the frozen test action?',
+    }, { hostSession: 'chat-a' });
+    assert.equal(prepared.value.state, 'pending');
+    assert.equal(workerHub.calls.length, 0);
+
+    const result = await manager.resolvePendingExecution({
+      approval_id: prepared.value.approval_id,
+      approval_nonce: prepared.approvalNonce,
+      decision: 'approve',
+    }, { hostSession: 'chat-a' });
+    assert.equal(result.state, 'consumed');
+    assert.equal(result.output, 'ESCALATED_OK');
+    assert.equal(result.operation_id, prepared.value.operation_id);
+    assert.equal(workerHub.calls.length, 1);
+    assert.equal(workerHub.calls[0].method, 'exec_command');
+    assert.equal(workerHub.calls[0].params.cmd, 'Write-Output FROZEN_ACTION');
+    assert.equal(workerHub.calls[0].params.workspace_id, 'approval-workspace');
+    assert.equal(
+      workerHub.calls[0].params.sandbox_permissions,
+      'approved_escalated',
+    );
+    assert.equal(Object.hasOwn(workerHub.calls[0].params, 'approval_id'), false);
+    assert.equal(Object.hasOwn(workerHub.calls[0].params, 'justification'), false);
+  } finally {
+    await manager.close();
+  }
+});
+
+test('RemoteProcessManager marks app approval unknown after an in-flight Worker failure', async () => {
+  const environmentRegistry = restrictedRegistry();
+  class RejectingWorkerHub extends EventEmitter {
+    call() {
+      return Promise.reject(new Error('worker disconnected after dispatch'));
+    }
+  }
+  const approvalManager = new ApprovalManager();
+  const manager = new RemoteProcessManager({
+    environmentRegistry,
+    workerHub: new RejectingWorkerHub(),
+    approvalManager,
+    workspaceContextManager: fakeWorkspaceContextManager(),
+  });
+  try {
+    const prepared = manager.prepareEscalatedCommand({
+      workspace_context: '00000000-0000-4000-8000-000000000001',
+      cmd: 'Write-Output MAYBE_STARTED',
+      justification: 'Run once?',
+    });
+    const result = await manager.resolvePendingExecution({
+      approval_id: prepared.value.approval_id,
+      approval_nonce: prepared.approvalNonce,
+      decision: 'approve',
+    });
+    assert.equal(result.state, 'execution_unknown');
+    assert.match(result.output, /will not retry automatically/i);
+    await assert.rejects(
+      manager.resolvePendingExecution({
+        approval_id: prepared.value.approval_id,
+        approval_nonce: prepared.approvalNonce,
+        decision: 'approve',
+      }),
+      /cannot dispatch from state=execution_unknown/i,
+    );
+  } finally {
+    await manager.close();
+  }
+});
+
+test('Legacy approval is not consumed when Worker dispatch fails before send', async () => {
+  const environmentRegistry = restrictedRegistry();
+  class PreDispatchWorkerHub extends EventEmitter {
+    constructor() {
+      super();
+      this.failBeforeSend = true;
+      this.calls = [];
+    }
+
+    call(environmentId, method, params) {
+      if (this.failBeforeSend) {
+        throw new Error('no connected worker before send');
+      }
+      this.calls.push({ environmentId, method, params });
+      return Promise.resolve({
+        chunk_id: 'legacy-retry',
+        wall_time_seconds: 0,
+        output: 'LEGACY_RETRY_OK',
+        exit_code: 0,
+      });
+    }
+  }
+  const workerHub = new PreDispatchWorkerHub();
+  const approvalManager = new ApprovalManager();
+  const manager = new RemoteProcessManager({
+    environmentRegistry,
+    workerHub,
+    approvalManager,
+    workspaceContextManager: fakeWorkspaceContextManager(),
+  });
+  const args = {
+    workspace_context: '00000000-0000-4000-8000-000000000001',
+    cmd: 'Write-Output LEGACY_RETRY_OK',
+    sandbox_permissions: 'require_escalated',
+    justification: 'Legacy compatibility test?',
+  };
+  try {
+    const pending = await manager.execCommand(args);
+    approvalManager.respond(pending.approval_id, 'approve');
+    await assert.rejects(
+      manager.execCommand({ ...args, approval_id: pending.approval_id }),
+      /before send/i,
+    );
+    workerHub.failBeforeSend = false;
+    const retried = await manager.execCommand({
+      ...args,
+      approval_id: pending.approval_id,
+    });
+    assert.equal(retried.output, 'LEGACY_RETRY_OK');
+    assert.equal(workerHub.calls.length, 1);
   } finally {
     await manager.close();
   }

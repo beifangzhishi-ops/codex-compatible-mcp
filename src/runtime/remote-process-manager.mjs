@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { isTrustedRemoteGitCommand } from './sandbox/git-policy.mjs';
 
 const DEFAULT_EXEC_YIELD_TIME_MS = 2_000;
@@ -15,6 +16,7 @@ export class RemoteProcessManager {
     workerHub,
     approvalManager = null,
     workspaceContextManager = null,
+    audit = null,
   }) {
     if (!environmentRegistry || !workerHub) {
       throw new Error('RemoteProcessManager requires environmentRegistry and workerHub.');
@@ -23,6 +25,7 @@ export class RemoteProcessManager {
     this.workerHub = workerHub;
     this.approvalManager = approvalManager;
     this.workspaceContextManager = workspaceContextManager;
+    this.audit = typeof audit === 'function' ? audit : null;
     this.sessions = new Map();
     this.nextSessionId = 1000;
     this.onEnvironmentDisconnected = (environmentId) => {
@@ -46,6 +49,79 @@ export class RemoteProcessManager {
     return this.nextSessionId;
   }
 
+  #emit(event, fields = {}) {
+    if (!this.audit) return;
+    this.audit({ component: 'process', event, ...fields });
+  }
+
+  #recordExecResult(result, environment, workspaceContext, operationId = null) {
+    if (result?.session_id !== undefined) {
+      const publicSessionId = this.#allocateSessionId();
+      this.sessions.set(publicSessionId, {
+        environmentId: environment.id,
+        remoteSessionId: result.session_id,
+        workspaceContext: workspaceContext.workspace_context,
+        workspace: { ...workspaceContext },
+        operationId,
+      });
+      this.#emit('session_created', {
+        operation_id: operationId || undefined,
+        public_session_id: publicSessionId,
+        remote_session_id: result.session_id,
+        environment_id: environment.id,
+        workspace_context: workspaceContext.workspace_context,
+        workspace_id: workspaceContext.workspace_id,
+      });
+      return {
+        ...result,
+        session_id: publicSessionId,
+        ...(operationId ? { operation_id: operationId } : {}),
+        ...workspaceContext,
+      };
+    }
+    this.#emit('exec_completed', {
+      operation_id: operationId || undefined,
+      environment_id: environment.id,
+      workspace_context: workspaceContext.workspace_context,
+      workspace_id: workspaceContext.workspace_id,
+      exit_code: result?.exit_code,
+    });
+    return {
+      ...result,
+      ...(operationId ? { operation_id: operationId } : {}),
+      ...workspaceContext,
+    };
+  }
+
+  #approvalStatusResult(approval, workspaceContext, output) {
+    return {
+      chunk_id: 'approval',
+      wall_time_seconds: 0,
+      output,
+      approval_required: approval.state === 'pending',
+      ...approval,
+      ...(workspaceContext || {}),
+    };
+  }
+
+  isSessionLive(sessionId, workspaceContext = null) {
+    const session = this.sessions.get(sessionId);
+    if (!session) return false;
+    return !workspaceContext || session.workspaceContext === workspaceContext;
+  }
+
+  sessionMetadata(sessionId) {
+    const session = this.sessions.get(sessionId);
+    if (!session) return null;
+    return {
+      session_id: sessionId,
+      operation_id: session.operationId || null,
+      environment_id: session.environmentId,
+      workspace_context: session.workspaceContext,
+      ...(session.workspace || {}),
+    };
+  }
+
   async execCommand(args) {
     if (!args.workspace_context) {
       throw new Error(
@@ -66,6 +142,7 @@ export class RemoteProcessManager {
     const environment = this.environmentRegistry.resolve(
       workspaceContext.environment_id,
     );
+    let operationId = randomUUID();
     let forwardedArgs = {
       ...args,
       environment_id: environment.id,
@@ -82,6 +159,8 @@ export class RemoteProcessManager {
     const trustedGit = environment.permissionProfile === 'workspace-write' &&
       isTrustedRemoteGitCommand(args.cmd);
     const wantsEscalation = requestedEscalation && !trustedGit;
+    let legacyApprovalId = null;
+    let legacyApprovalArgs = null;
 
     if (requestedEscalation && trustedGit) {
       forwardedArgs = {
@@ -121,14 +200,17 @@ export class RemoteProcessManager {
         };
       }
 
-      this.approvalManager.consumeExecution(
+      legacyApprovalArgs = {
+        ...args,
+        workspace_context: workspaceContext.workspace_context,
+      };
+      const validatedApproval = this.approvalManager.claimLegacyExecution(
         args.approval_id,
-        {
-          ...args,
-          workspace_context: workspaceContext.workspace_context,
-        },
+        legacyApprovalArgs,
         environment.id,
       );
+      operationId = validatedApproval.operation_id;
+      legacyApprovalId = args.approval_id;
       forwardedArgs = {
         ...forwardedArgs,
         sandbox_permissions: 'approved_escalated',
@@ -146,32 +228,303 @@ export class RemoteProcessManager {
       15_000,
       requestedYieldMs + 10_000,
     );
-    const result = await this.workerHub.call(
-      environment.id,
-      'exec_command',
-      forwardedArgs,
-      { timeoutMs },
-    );
-    if (result?.session_id !== undefined) {
-      const publicSessionId = this.#allocateSessionId();
-      this.sessions.set(publicSessionId, {
-        environmentId: environment.id,
-        remoteSessionId: result.session_id,
-        workspaceContext: workspaceContext.workspace_context,
+    let dispatch;
+    try {
+      this.#emit('exec_dispatch', {
+        operation_id: operationId,
+        environment_id: environment.id,
+        workspace_context: workspaceContext.workspace_context,
+        workspace_id: workspaceContext.workspace_id,
       });
-      return {
-        ...result,
-        session_id: publicSessionId,
-        ...workspaceContext,
-      };
+      dispatch = this.workerHub.call(
+        environment.id,
+        'exec_command',
+        forwardedArgs,
+        { timeoutMs },
+      );
+    } catch (error) {
+      // No request left the Controller, so a validated legacy approval remains
+      // reusable for the exact same frozen intent.
+      if (legacyApprovalId) {
+        this.approvalManager.restoreLegacyExecution(legacyApprovalId);
+      }
+      this.#emit('exec_dispatch_failed_prestart', {
+        operation_id: operationId,
+        environment_id: environment.id,
+        workspace_context: workspaceContext.workspace_context,
+        workspace_id: workspaceContext.workspace_id,
+        error_name: error?.name || 'Error',
+      });
+      throw error;
     }
-    return { ...result, ...workspaceContext };
+    let result;
+    try {
+      result = await dispatch;
+    } catch (error) {
+      if (legacyApprovalId) {
+        this.approvalManager.markLegacyExecutionUnknown(legacyApprovalId);
+      }
+      this.#emit('exec_dispatch_unknown', {
+        operation_id: operationId,
+        environment_id: environment.id,
+        workspace_context: workspaceContext.workspace_context,
+        workspace_id: workspaceContext.workspace_id,
+        error_name: error?.name || 'Error',
+      });
+      throw error;
+    }
+    if (legacyApprovalId) {
+      this.approvalManager.consumeExecution(
+        legacyApprovalId,
+        legacyApprovalArgs,
+        environment.id,
+      );
+    }
+    return this.#recordExecResult(
+      result,
+      environment,
+      workspaceContext,
+      operationId,
+    );
+  }
+
+  prepareEscalatedCommand(args, { hostSession = null } = {}) {
+    if (!args.workspace_context) {
+      throw new Error(
+        'request_escalated_exec requires workspace_context.',
+      );
+    }
+    if (!this.workspaceContextManager || !this.approvalManager) {
+      throw new Error('Escalated execution services are not available.');
+    }
+    const workspaceContext = this.workspaceContextManager.resolve(
+      args.workspace_context,
+    );
+    const environment = this.environmentRegistry.resolve(
+      workspaceContext.environment_id,
+    );
+    if (environment.permissionProfile === 'full-access') {
+      throw new Error(
+        'This environment already runs with full-access; use exec_command directly.',
+      );
+    }
+    if (environment.permissionProfile === 'workspace-write' &&
+        isTrustedRemoteGitCommand(args.cmd)) {
+      throw new Error(
+        'Trusted remote Git does not require escalation; use exec_command directly.',
+      );
+    }
+
+    const prepared = this.approvalManager.requestExecutionForApp(
+      {
+        ...args,
+        workspace_context: workspaceContext.workspace_context,
+      },
+      environment.id,
+      { workspace: workspaceContext, hostSession },
+    );
+    this.#emit('approval_prepared', {
+      approval_id: prepared.request.approval_id,
+      operation_id: prepared.request.operation_id,
+      environment_id: environment.id,
+      workspace_context: workspaceContext.workspace_context,
+      workspace_id: workspaceContext.workspace_id,
+    });
+    return {
+      value: this.#approvalStatusResult(
+        prepared.request,
+        workspaceContext,
+        'Waiting for the user to approve or deny this frozen full-access command.',
+      ),
+      approvalNonce: prepared.approvalNonce,
+    };
+  }
+
+  async resolvePendingExecution(
+    { approval_id: approvalId, approval_nonce: approvalNonce, decision },
+    { hostSession = null } = {},
+  ) {
+    if (!this.approvalManager || !this.workspaceContextManager) {
+      throw new Error('Escalated execution services are not available.');
+    }
+    if (decision === 'deny') {
+      const denied = this.approvalManager.denyAppExecution(
+        approvalId,
+        approvalNonce,
+        hostSession,
+      );
+      const workspaceContext = this.workspaceContextManager.resolve(
+        denied.workspace_context,
+      );
+      return this.#approvalStatusResult(
+        denied,
+        workspaceContext,
+        'The user denied this escalated command. It was not dispatched.',
+      );
+    }
+    if (decision !== 'approve') {
+      throw new Error('Approval decision must be approve or deny.');
+    }
+
+    const claimed = this.approvalManager.claimAppExecution(
+      approvalId,
+      approvalNonce,
+      hostSession,
+    );
+    const action = claimed.action;
+    let workspaceContext;
+    let environment;
+    try {
+      workspaceContext = this.workspaceContextManager.resolve(
+        action.workspace_context,
+      );
+      environment = this.environmentRegistry.resolve(
+        action.environment_id,
+      );
+      if (workspaceContext.environment_id !== action.environment_id ||
+          workspaceContext.workspace_id !== action.workspace_id ||
+          workspaceContext.workspace_root !== action.workspace_root) {
+        throw new Error(
+          'Frozen workspace identity no longer matches the current workspace context.',
+        );
+      }
+    } catch (error) {
+      const retryable = this.approvalManager.markAppExecutionRetryable(
+        approvalId,
+      );
+      this.#emit('approval_dispatch_failed_prestart', {
+        approval_id: approvalId,
+        operation_id: claimed.request.operation_id,
+        environment_id: action.environment_id,
+        workspace_context: action.workspace_context,
+        workspace_id: action.workspace_id,
+        error_name: error?.name || 'Error',
+      });
+      return this.#approvalStatusResult(
+        retryable,
+        workspaceContext || {
+          workspace_context: action.workspace_context,
+          environment_id: action.environment_id,
+          workspace_id: action.workspace_id,
+          workspace_kind: action.workspace_kind,
+          workspace_root: action.workspace_root,
+        },
+        'Escalated execution was not dispatched: ' +
+          String(error?.message || error),
+      );
+    }
+
+    const requestedYieldMs = clampInitialExecYield(action.yield_time_ms);
+    const forwardedArgs = {
+      cmd: action.cmd,
+      environment_id: environment.id,
+      workspace_id: action.workspace_id,
+      expected_workspace_root: action.workspace_root,
+      sandbox_permissions: 'approved_escalated',
+      yield_time_ms: requestedYieldMs,
+      ...(action.workdir ? { workdir: action.workdir } : {}),
+      ...(action.tty ? { tty: true } : {}),
+      ...(action.shell ? { shell: action.shell } : {}),
+      ...(action.max_output_tokens != null
+        ? { max_output_tokens: action.max_output_tokens }
+        : {}),
+    };
+    const timeoutMs = Math.max(15_000, requestedYieldMs + 10_000);
+
+    let dispatch;
+    try {
+      this.#emit('approval_dispatch', {
+        approval_id: approvalId,
+        operation_id: claimed.request.operation_id,
+        environment_id: environment.id,
+        workspace_context: workspaceContext.workspace_context,
+        workspace_id: workspaceContext.workspace_id,
+      });
+      dispatch = this.workerHub.call(
+        environment.id,
+        'exec_command',
+        forwardedArgs,
+        { timeoutMs },
+      );
+    } catch (error) {
+      const retryable = this.approvalManager.markAppExecutionRetryable(
+        approvalId,
+      );
+      this.#emit('approval_dispatch_failed_prestart', {
+        approval_id: approvalId,
+        operation_id: claimed.request.operation_id,
+        environment_id: environment.id,
+        workspace_context: workspaceContext.workspace_context,
+        workspace_id: workspaceContext.workspace_id,
+        error_name: error?.name || 'Error',
+      });
+      return this.#approvalStatusResult(
+        retryable,
+        workspaceContext,
+        'Escalated execution was not dispatched: ' +
+          String(error?.message || error),
+      );
+    }
+
+    let result;
+    try {
+      result = await dispatch;
+    } catch (error) {
+      const unknown = this.approvalManager.markAppExecutionUnknown(approvalId);
+      this.#emit('approval_dispatch_unknown', {
+        approval_id: approvalId,
+        operation_id: claimed.request.operation_id,
+        environment_id: environment.id,
+        workspace_context: workspaceContext.workspace_context,
+        workspace_id: workspaceContext.workspace_id,
+        error_name: error?.name || 'Error',
+      });
+      return this.#approvalStatusResult(
+        unknown,
+        workspaceContext,
+        'Escalated execution outcome is unknown; CCM will not retry automatically: ' +
+          String(error?.message || error),
+      );
+    }
+
+    const recorded = this.#recordExecResult(
+      result,
+      environment,
+      workspaceContext,
+      claimed.request.operation_id,
+    );
+    const consumed = this.approvalManager.markAppExecutionConsumed(approvalId);
+    this.#emit('approval_consumed', {
+      approval_id: approvalId,
+      operation_id: consumed.operation_id,
+      environment_id: environment.id,
+      workspace_context: workspaceContext.workspace_context,
+      workspace_id: workspaceContext.workspace_id,
+      public_session_id: recorded.session_id,
+      exit_code: recorded.exit_code,
+    });
+    return {
+      ...recorded,
+      approval_id: consumed.approval_id,
+      state: consumed.state,
+      intent_sha256: consumed.intent_sha256,
+    };
   }
 
   async writeStdin(args) {
+    if (!args.workspace_context) {
+      throw new Error(
+        'write_stdin requires workspace_context from the exec_command result.',
+      );
+    }
     const session = this.sessions.get(args.session_id);
     if (!session) {
       throw new Error('Unknown or expired session_id: ' + args.session_id);
+    }
+    if (session.workspaceContext !== args.workspace_context) {
+      throw new Error(
+        'workspace_context does not own session_id ' + args.session_id + '.',
+      );
     }
 
     const empty = !(args.chars || '').length;
@@ -179,18 +532,50 @@ export class RemoteProcessManager {
       args.yield_time_ms ?? (empty ? 1_000 : 250),
     );
     const timeoutMs = Math.max(15_000, requestedYield + 10_000);
+    const forwardedArgs = { ...args, session_id: session.remoteSessionId };
+    delete forwardedArgs.workspace_context;
     const result = await this.workerHub.call(
       session.environmentId,
       'write_stdin',
-      { ...args, session_id: session.remoteSessionId },
+      forwardedArgs,
       { timeoutMs },
     );
+    if (this.sessions.get(args.session_id) !== session) {
+      throw new Error(
+        'Session identity changed while write_stdin was in flight: ' +
+        args.session_id + '.',
+      );
+    }
     if (result?.session_id !== undefined) {
-      return { ...result, session_id: args.session_id };
+      this.#emit('session_continued', {
+        operation_id: session.operationId || undefined,
+        public_session_id: args.session_id,
+        remote_session_id: session.remoteSessionId,
+        environment_id: session.environmentId,
+        workspace_context: session.workspaceContext,
+      });
+      return {
+        ...result,
+        session_id: args.session_id,
+        ...(session.operationId ? { operation_id: session.operationId } : {}),
+        ...(session.workspace || {}),
+      };
     }
 
     this.sessions.delete(args.session_id);
-    return result;
+    this.#emit('session_completed', {
+      operation_id: session.operationId || undefined,
+      public_session_id: args.session_id,
+      remote_session_id: session.remoteSessionId,
+      environment_id: session.environmentId,
+      workspace_context: session.workspaceContext,
+      exit_code: result?.exit_code,
+    });
+    return {
+      ...result,
+      ...(session.operationId ? { operation_id: session.operationId } : {}),
+      ...(session.workspace || {}),
+    };
   }
 
   async terminateSession(sessionId) {

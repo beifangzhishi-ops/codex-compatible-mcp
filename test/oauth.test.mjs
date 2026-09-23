@@ -291,6 +291,389 @@ test('OAuth sidecar safely persists initialize data and recovers a stale upstrea
   }
 });
 
+test('OAuth sidecar isolates repeated JSON-RPC ids across sessionless requests', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-oauth-isolation-'));
+  let upstreamSession = 0;
+  const toolSessions = [];
+  const upstream = http.createServer((request, response) => {
+    const chunks = [];
+    request.on('data', (chunk) => chunks.push(chunk));
+    request.on('end', () => {
+      const payload = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+      if (payload.method === 'initialize') {
+        upstreamSession += 1;
+        const sessionId = 'isolated-' + upstreamSession;
+        response.statusCode = 200;
+        response.setHeader('content-type', 'application/json');
+        response.setHeader('mcp-session-id', sessionId);
+        response.end(JSON.stringify({
+          jsonrpc: '2.0',
+          id: payload.id,
+          result: {
+            protocolVersion: '2025-11-25',
+            capabilities: {},
+            serverInfo: { name: 'fake-upstream', version: '1' },
+          },
+        }));
+        return;
+      }
+      if (request.method === 'DELETE') {
+        response.statusCode = 200;
+        response.end();
+        return;
+      }
+      const sessionId = request.headers['mcp-session-id'];
+      toolSessions.push(sessionId);
+      const label = payload.params?.arguments?.label || 'unknown';
+      const delay = label === 'slow' ? 60 : 5;
+      setTimeout(() => {
+        response.statusCode = 200;
+        response.setHeader('content-type', 'application/json');
+        response.end(JSON.stringify({
+          jsonrpc: '2.0',
+          id: payload.id,
+          result: { label, sessionId },
+        }));
+      }, delay);
+    });
+  });
+  await new Promise((resolve) => upstream.listen(0, '127.0.0.1', resolve));
+  const upstreamPort = upstream.address().port;
+
+  const config = createConfig({
+    rootDir: root,
+    readEnvFile: false,
+    envValues: {
+      CCM_ISSUER: 'https://example.test/ccm',
+      CCM_RESOURCE: 'https://example.test/ccm/mcp',
+    },
+    port: 0,
+    allowEphemeral: true,
+    approvalSecret: 'A'.repeat(32),
+  });
+  const store = new OAuthStore(config.stateFile);
+  const client = store.registerClient(metadata());
+  const verifier = 'D'.repeat(64);
+  const code = store.createAuthorizationCode({
+    clientId: client.clientId,
+    redirectUri: metadata().redirect_uris[0],
+    codeChallenge: createPkceChallenge(verifier),
+    codeChallengeMethod: 'S256',
+    resource: config.resource,
+    scope: 'mcp',
+  });
+  const token = store.exchangeAuthorizationCode({
+    code,
+    clientId: client.clientId,
+    redirectUri: metadata().redirect_uris[0],
+    codeVerifier: verifier,
+    resource: config.resource,
+    tokenTtlSeconds: 3600,
+  }).accessToken;
+  const runtime = createCcmOAuthServer({
+    config,
+    oauthStore: store,
+    upstreamUrl: 'http://127.0.0.1:' + upstreamPort,
+  });
+  try {
+    await listenCcmOAuthServer(runtime, 0);
+    const base = 'http://127.0.0.1:' + runtime.server.address().port;
+    const headers = {
+      authorization: 'Bearer ' + token,
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+    };
+    const initialized = await fetch(base + '/ccm/mcp', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 0,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2025-11-25',
+          capabilities: {},
+          clientInfo: { name: 'sidecar-isolation-test', version: '1' },
+        },
+      }),
+    });
+    assert.equal(initialized.status, 200);
+
+    const call = (label) => fetch(base + '/ccm/mcp', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 0,
+        method: 'tools/call',
+        params: { name: 'noop', arguments: { label } },
+      }),
+    }).then(async (result) => ({
+      status: result.status,
+      session: result.headers.get('mcp-session-id'),
+      body: await result.json(),
+    }));
+
+    const [slow, fast] = await Promise.all([call('slow'), call('fast')]);
+    assert.equal(slow.status, 200);
+    assert.equal(fast.status, 200);
+    assert.equal(slow.body.result.label, 'slow');
+    assert.equal(fast.body.result.label, 'fast');
+    assert.equal(slow.session, null);
+    assert.equal(fast.session, null);
+    assert.equal(toolSessions.length, 2);
+    assert.equal(new Set(toolSessions).size, 2);
+    assert.equal(upstreamSession, 3);
+  } finally {
+    await closeCcmOAuthServer(runtime);
+    await new Promise((resolve) => upstream.close(resolve));
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('OAuth sidecar gives each downstream initialize its own upstream session', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-oauth-init-scope-'));
+  let upstreamSession = 0;
+  const upstream = http.createServer((request, response) => {
+    const chunks = [];
+    request.on('data', (chunk) => chunks.push(chunk));
+    request.on('end', () => {
+      const payload = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+      if (payload.method === 'initialize') {
+        upstreamSession += 1;
+        const sessionId = 'client-' + upstreamSession;
+        response.statusCode = 200;
+        response.setHeader('content-type', 'application/json');
+        response.setHeader('mcp-session-id', sessionId);
+        response.end(JSON.stringify({
+          jsonrpc: '2.0',
+          id: payload.id,
+          result: {
+            protocolVersion: '2025-11-25',
+            capabilities: {},
+            serverInfo: { name: 'fake-upstream', version: '1' },
+          },
+        }));
+        return;
+      }
+      response.statusCode = 200;
+      response.end('{}');
+    });
+  });
+  await new Promise((resolve) => upstream.listen(0, '127.0.0.1', resolve));
+  const upstreamPort = upstream.address().port;
+  const config = createConfig({
+    rootDir: root,
+    readEnvFile: false,
+    envValues: {
+      CCM_ISSUER: 'https://example.test/ccm',
+      CCM_RESOURCE: 'https://example.test/ccm/mcp',
+    },
+    port: 0,
+    allowEphemeral: true,
+    approvalSecret: 'A'.repeat(32),
+  });
+  const store = new OAuthStore(config.stateFile);
+  const client = store.registerClient(metadata());
+  const verifier = 'E'.repeat(64);
+  const code = store.createAuthorizationCode({
+    clientId: client.clientId,
+    redirectUri: metadata().redirect_uris[0],
+    codeChallenge: createPkceChallenge(verifier),
+    codeChallengeMethod: 'S256',
+    resource: config.resource,
+    scope: 'mcp',
+  });
+  const token = store.exchangeAuthorizationCode({
+    code,
+    clientId: client.clientId,
+    redirectUri: metadata().redirect_uris[0],
+    codeVerifier: verifier,
+    resource: config.resource,
+    tokenTtlSeconds: 3600,
+  }).accessToken;
+  const runtime = createCcmOAuthServer({
+    config,
+    oauthStore: store,
+    upstreamUrl: 'http://127.0.0.1:' + upstreamPort,
+  });
+  try {
+    await listenCcmOAuthServer(runtime, 0);
+    const base = 'http://127.0.0.1:' + runtime.server.address().port;
+    const headers = {
+      authorization: 'Bearer ' + token,
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+    };
+    const initialize = (id, name) => fetch(base + '/ccm/mcp', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2025-11-25',
+          capabilities: {},
+          clientInfo: { name, version: '1' },
+        },
+      }),
+    });
+    const first = await initialize(1, 'client-a');
+    const second = await initialize(1, 'client-b');
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 200);
+    assert.notEqual(
+      first.headers.get('mcp-session-id'),
+      second.headers.get('mcp-session-id'),
+    );
+    assert.equal(upstreamSession, 2);
+  } finally {
+    await closeCcmOAuthServer(runtime);
+    await new Promise((resolve) => upstream.close(resolve));
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('OAuth sidecar refreshes an invalid downstream session with that client initialize template', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-oauth-refresh-scope-'));
+  let upstreamSession = 0;
+  const sessionClient = new Map();
+  const invalidSessions = new Set();
+  const initializeClients = [];
+  const upstream = http.createServer((request, response) => {
+    const chunks = [];
+    request.on('data', (chunk) => chunks.push(chunk));
+    request.on('end', () => {
+      const payload = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+      if (payload.method === 'initialize') {
+        upstreamSession += 1;
+        const clientName = payload.params?.clientInfo?.name || 'unknown';
+        const sessionId = 'refresh-' + upstreamSession;
+        initializeClients.push(clientName);
+        sessionClient.set(sessionId, clientName);
+        response.statusCode = 200;
+        response.setHeader('content-type', 'application/json');
+        response.setHeader('mcp-session-id', sessionId);
+        response.end(JSON.stringify({
+          jsonrpc: '2.0',
+          id: payload.id,
+          result: {
+            protocolVersion: '2025-11-25',
+            capabilities: {},
+            serverInfo: { name: 'fake-upstream', version: '1' },
+          },
+        }));
+        return;
+      }
+      if (request.method === 'DELETE') {
+        response.statusCode = 200;
+        response.end();
+        return;
+      }
+      const sessionId = request.headers['mcp-session-id'];
+      if (invalidSessions.has(sessionId)) {
+        response.statusCode = 400;
+        response.end('invalid session');
+        return;
+      }
+      response.statusCode = 200;
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({
+        jsonrpc: '2.0',
+        id: payload.id,
+        result: { client: sessionClient.get(sessionId) },
+      }));
+    });
+  });
+  await new Promise((resolve) => upstream.listen(0, '127.0.0.1', resolve));
+  const upstreamPort = upstream.address().port;
+  const config = createConfig({
+    rootDir: root,
+    readEnvFile: false,
+    envValues: {
+      CCM_ISSUER: 'https://example.test/ccm',
+      CCM_RESOURCE: 'https://example.test/ccm/mcp',
+    },
+    port: 0,
+    allowEphemeral: true,
+    approvalSecret: 'A'.repeat(32),
+  });
+  const store = new OAuthStore(config.stateFile);
+  const client = store.registerClient(metadata());
+  const verifier = 'F'.repeat(64);
+  const code = store.createAuthorizationCode({
+    clientId: client.clientId,
+    redirectUri: metadata().redirect_uris[0],
+    codeChallenge: createPkceChallenge(verifier),
+    codeChallengeMethod: 'S256',
+    resource: config.resource,
+    scope: 'mcp',
+  });
+  const token = store.exchangeAuthorizationCode({
+    code,
+    clientId: client.clientId,
+    redirectUri: metadata().redirect_uris[0],
+    codeVerifier: verifier,
+    resource: config.resource,
+    tokenTtlSeconds: 3600,
+  }).accessToken;
+  const runtime = createCcmOAuthServer({
+    config,
+    oauthStore: store,
+    upstreamUrl: 'http://127.0.0.1:' + upstreamPort,
+  });
+  try {
+    await listenCcmOAuthServer(runtime, 0);
+    const base = 'http://127.0.0.1:' + runtime.server.address().port;
+    const headers = {
+      authorization: 'Bearer ' + token,
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+    };
+    const initialize = async (name) => fetch(base + '/ccm/mcp', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2025-11-25',
+          capabilities: {},
+          clientInfo: { name, version: '1' },
+        },
+      }),
+    });
+
+    const clientA = await initialize('client-a');
+    const clientB = await initialize('client-b');
+    const sessionA = clientA.headers.get('mcp-session-id');
+    const sessionB = clientB.headers.get('mcp-session-id');
+    assert.notEqual(sessionA, sessionB);
+    invalidSessions.add(sessionA);
+
+    const tool = await fetch(base + '/ccm/mcp', {
+      method: 'POST',
+      headers: { ...headers, 'mcp-session-id': sessionA },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 0,
+        method: 'tools/call',
+        params: { name: 'noop', arguments: {} },
+      }),
+    });
+    assert.equal(tool.status, 200);
+    const body = await tool.json();
+    assert.equal(body.result.client, 'client-a');
+    assert.deepEqual(initializeClients, ['client-a', 'client-b', 'client-a']);
+  } finally {
+    await closeCcmOAuthServer(runtime);
+    await new Promise((resolve) => upstream.close(resolve));
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('OAuth sidecar declines legacy GET SSE instead of sharing one upstream stream', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-oauth-get-'));
   const config = createConfig({

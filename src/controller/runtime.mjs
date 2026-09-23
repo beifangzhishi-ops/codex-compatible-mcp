@@ -8,6 +8,7 @@ import { ApprovalManager } from './approval-manager.mjs';
 import { WorkspaceContextManager } from './workspace-context-manager.mjs';
 import { FileTransferStore } from './file-transfer-store.mjs';
 import { PlanManager } from './plan-manager.mjs';
+import { createAuditLogger } from './audit-log.mjs';
 
 const installRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -16,6 +17,9 @@ const installRoot = path.resolve(
 );
 
 export function createControllerRuntime(options = {}) {
+  const audit = options.auditLogger || createAuditLogger({
+    file: options.auditLogFile,
+  });
   const environmentRegistry = options.environmentRegistry ||
     new EnvironmentRegistry({
       defaultEnvironmentId: options.defaultEnvironmentId || null,
@@ -27,7 +31,7 @@ export function createControllerRuntime(options = {}) {
     port: options.workerPort,
     takeoverToken: options.workerTakeoverToken,
   });
-  const approvalManager = options.approvalManager || new ApprovalManager();
+  const approvalManager = options.approvalManager || new ApprovalManager({ audit });
   const workspaceContextManager = options.workspaceContextManager ||
     new WorkspaceContextManager({
       environmentRegistry,
@@ -39,6 +43,7 @@ export function createControllerRuntime(options = {}) {
     workerHub,
     approvalManager,
     workspaceContextManager,
+    audit,
   });
   const fileService = options.fileService || new RemoteFileService({
     environmentRegistry,
@@ -57,6 +62,7 @@ export function createControllerRuntime(options = {}) {
     environmentRegistry,
     workerHub,
     approvalManager,
+    audit,
     workspaceContextManager,
     processManager,
     fileService,

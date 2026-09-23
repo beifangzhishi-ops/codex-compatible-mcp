@@ -218,10 +218,14 @@ test('Controller routes execution across Remote Workers', async () => {
 
     const second = await controller.processManager.writeStdin({
       session_id: first.session_id,
+      workspace_context: contextA.workspace_context,
       chars: '',
       yield_time_ms: 5000,
     });
     assert.equal(second.exit_code, 0);
+    assert.equal(second.operation_id, first.operation_id);
+    assert.equal(second.workspace_context, contextA.workspace_context);
+    assert.equal(second.environment_id, 'worker-a');
     assert.match(first.output + second.output, /before/);
     assert.match(first.output + second.output, /after/);
   } finally {
@@ -230,6 +234,102 @@ test('Controller routes execution across Remote Workers', async () => {
     workerA.close();
     workerB.close();
     await controller.close();
+  }
+});
+
+test('Controller rejects cross-workspace write_stdin before contacting Worker', async () => {
+  const registry = new EnvironmentRegistry({ resolvePaths: false });
+  registry.register({
+    id: 'worker-session-scope',
+    platform: 'windows',
+    cwd: 'C:\\workspace',
+    workspaceRoots: ['C:\\workspace'],
+    permissionProfile: 'full-access',
+    backend: 'remote-worker',
+  });
+
+  const contextA = {
+    workspace_context: '00000000-0000-4000-8000-00000000000a',
+    environment_id: 'worker-session-scope',
+    workspace_id: 'workspace-a',
+    workspace_kind: 'registered',
+    workspace_root: 'C:\\workspace',
+  };
+  const contextB = {
+    workspace_context: '00000000-0000-4000-8000-00000000000b',
+    environment_id: 'worker-session-scope',
+    workspace_id: 'workspace-b',
+    workspace_kind: 'registered',
+    workspace_root: 'C:\\workspace',
+  };
+
+  class FakeWorkerHub extends EventEmitter {
+    constructor() {
+      super();
+      this.writeCalls = 0;
+    }
+
+    async call(_environmentId, method) {
+      if (method === 'exec_command') {
+        return {
+          chunk_id: 'scope',
+          wall_time_seconds: 0,
+          output: '',
+          session_id: 91,
+        };
+      }
+      if (method === 'write_stdin') {
+        this.writeCalls += 1;
+        return {
+          chunk_id: 'scope-write',
+          wall_time_seconds: 0,
+          output: '',
+          session_id: 91,
+        };
+      }
+      if (method === 'terminate_session') return { terminated: true };
+      throw new Error('Unexpected method: ' + method);
+    }
+  }
+
+  const workerHub = new FakeWorkerHub();
+  const manager = new RemoteProcessManager({
+    environmentRegistry: registry,
+    workerHub,
+    workspaceContextManager: {
+      resolve(contextId) {
+        if (contextId === contextA.workspace_context) return contextA;
+        if (contextId === contextB.workspace_context) return contextB;
+        throw new Error('Unknown context: ' + contextId);
+      },
+    },
+  });
+  try {
+    const started = await manager.execCommand({
+      workspace_context: contextA.workspace_context,
+      cmd: 'long-running command',
+    });
+    assert.equal(typeof started.session_id, 'number');
+    await assert.rejects(
+      manager.writeStdin({
+        session_id: started.session_id,
+        workspace_context: contextB.workspace_context,
+        chars: '',
+      }),
+      /does not own session_id/i,
+    );
+    assert.equal(workerHub.writeCalls, 0);
+
+    const continued = await manager.writeStdin({
+      session_id: started.session_id,
+      workspace_context: contextA.workspace_context,
+      chars: '',
+    });
+    assert.equal(workerHub.writeCalls, 1);
+    assert.equal(continued.workspace_context, contextA.workspace_context);
+    assert.equal(continued.workspace_id, contextA.workspace_id);
+  } finally {
+    await manager.close();
   }
 });
 

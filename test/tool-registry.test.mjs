@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import * as z from 'zod/v4';
 import { registerArchitectureTools } from '../src/tools/architecture-tools.mjs';
+import { CodeModeManager } from '../src/tools/code-mode-manager.mjs';
 import {
   ToolRegistry,
   ToolSurface,
@@ -359,7 +360,14 @@ test('exec rejects unsafe parallelization and reports live nested sessions clear
     supportsParallel: true,
     handler: async () => ({
       content: [{ type: 'text', text: 'started' }],
-      structuredContent: { session_id: 77, output: 'started' },
+      structuredContent: {
+        session_id: 77,
+        output: 'started',
+        operation_id: 'operation-live',
+        workspace_context: '00000000-0000-4000-8000-000000000077',
+        environment_id: 'worker-live',
+        workspace_id: 'workspace-live',
+      },
     }),
   }));
 
@@ -380,10 +388,66 @@ test('exec rejects unsafe parallelization and reports live nested sessions clear
   assert.equal(live.isError, undefined);
   assert.equal(live.structuredContent.state, 'awaiting_io');
   assert.equal(live.structuredContent.live_sessions[0].session_id, 77);
+  assert.equal(
+    live.structuredContent.live_sessions[0].workspace_context,
+    '00000000-0000-4000-8000-000000000077',
+  );
+  assert.equal(
+    live.structuredContent.live_sessions[0].environment_id,
+    'worker-live',
+  );
+  assert.equal(
+    live.structuredContent.live_sessions[0].operation_id,
+    'operation-live',
+  );
   assert.equal(live.structuredContent.next_operation, 'write_stdin');
   assert.match(live.structuredContent.message, /still running/);
 
   assert.notEqual(live.structuredContent.state, 'completed');
+});
+
+test('exec does not report a process session that already ended before formatting', async () => {
+  const registry = new ToolRegistry();
+  registry.register(textTool({
+    name: 'already_finished_process',
+    namespace: 'demo',
+    surfaces: { codeMode: true },
+    supportsParallel: true,
+    handler: async () => ({
+      content: [{ type: 'text', text: 'finished' }],
+      structuredContent: {
+        session_id: 88,
+        operation_id: 'operation-finished',
+        workspace_context: '00000000-0000-4000-8000-000000000088',
+        environment_id: 'worker-finished',
+      },
+    }),
+  }));
+  const codeModeManager = new CodeModeManager({
+    registry,
+    sessionInspector: {
+      isSessionLive(sessionId, workspaceContext) {
+        assert.equal(sessionId, 88);
+        assert.equal(
+          workspaceContext,
+          '00000000-0000-4000-8000-000000000088',
+        );
+        return false;
+      },
+    },
+  });
+  registerArchitectureTools(registry, { codeModeManager });
+  try {
+    const result = await registry.get('exec').handler({
+      calls: [{ tool: 'demo.already_finished_process', arguments: {} }],
+      yield_time_ms: 1000,
+    });
+    assert.equal(result.structuredContent.state, 'completed');
+    assert.deepEqual(result.structuredContent.live_sessions, []);
+    assert.equal(result.structuredContent.next_operation, null);
+  } finally {
+    codeModeManager.close();
+  }
 });
 
 test('wait defaults to a short poll and rejects waits above 30 seconds', async () => {

@@ -1,4 +1,5 @@
 import * as z from 'zod/v4';
+import { APPROVAL_UI_URI } from '../ui/approval-app.mjs';
 
 const UNIFIED_EXEC_OUTPUT_SCHEMA = {
   chunk_id: z.string().optional(),
@@ -9,7 +10,16 @@ const UNIFIED_EXEC_OUTPUT_SCHEMA = {
   output: z.string(),
   approval_required: z.boolean().optional(),
   approval_id: z.string().optional(),
-  state: z.enum(['pending', 'approved', 'denied', 'consumed']).optional(),
+  operation_id: z.string().optional(),
+  state: z.enum([
+    'pending',
+    'approved',
+    'denied',
+    'dispatching',
+    'approved_retryable',
+    'execution_unknown',
+    'consumed',
+  ]).optional(),
   environment_id: z.string().optional(),
   command: z.string().optional(),
   workdir: z.string().nullable().optional(),
@@ -63,6 +73,29 @@ function execResult(value) {
   return {
     content: [{ type: 'text', text: lines.join('\n') }],
     structuredContent: value,
+  };
+}
+
+function approvalCardResult(prepared) {
+  const value = prepared.value;
+  const lines = [
+    'CCM prepared a frozen full-access command for user approval.',
+    'Approval ID: ' + value.approval_id,
+    'Operation ID: ' + value.operation_id,
+    'Environment: ' + value.environment_id,
+    'Workspace: ' + value.workspace_id,
+    'Command: ' + value.command,
+    'Expires: ' + value.expires_at,
+    'The attached CCM approval card is the only valid approval path for this request.',
+    'Do not call respond_to_escalation and do not recreate or retry this command yourself.',
+  ];
+  return {
+    content: [{ type: 'text', text: lines.join('\n') }],
+    structuredContent: value,
+    _meta: {
+      source: 'ccm.approval',
+      approval_nonce: prepared.approvalNonce,
+    },
   };
 }
 
@@ -350,6 +383,7 @@ export function registerCoreTools(registry, runtime) {
       'workspace_context is required and already determines the environment and workspace. Do not pass or infer a separate environment for this command.',
       'If no project has been selected, first discover ccm.create_projectless_context with tool_search and invoke it through exec; then pass the returned workspace_context here.',
       'In workspace-write environments, normal remote Git commands such as git clone/fetch/pull/push/ls-remote are handled automatically and do not require sandbox_permissions=require_escalated. Run remote Git as Git-only shell commands so CCM can recognize the trusted path.',
+      'For a non-Git command that genuinely requires full-access outside a workspace-write sandbox, use the direct request_escalated_exec tool. Do not start a new approval with sandbox_permissions=require_escalated; that legacy parameter is retained only for migration of an already-issued approval_id.',
       'A CCM-originated result is identifiable by its structured CCM fields. If a host reports a Script error or safety/policy/tool-call failure without this tool returning a structured result, do not attribute that failure to CCM or claim CCM blocked the command.',
       'On Windows, keep destructive filesystem operations in one shell and verify resolved targets before recursive deletes or moves.',
     ].join('\n\n'),
@@ -361,9 +395,9 @@ export function registerCoreTools(registry, runtime) {
       yield_time_ms: z.number().int().max(30_000).nonnegative().optional().describe('Wait before the initial command call yields output or a session. Defaults to 2000 ms. Values above 5000 ms are accepted for compatibility but are clamped to 5000 ms; long-running commands continue in a session and should be resumed with write_stdin.'),
       max_output_tokens: z.number().int().positive().optional().describe('Output token budget. Defaults to 10000 tokens.'),
       shell: z.string().optional().describe("Shell binary to launch. Defaults to the environment's default shell."),
-      sandbox_permissions: z.enum(['use_default', 'require_escalated']).optional().describe('Per-command sandbox override. Defaults to use_default.'),
-      justification: z.string().optional().describe('User-facing approval question for require_escalated; omit otherwise.'),
-      approval_id: z.string().uuid().optional().describe('One-shot approval id returned by an earlier require_escalated request. Retry the exact same execution with this id only after the user explicitly approves it.'),
+      sandbox_permissions: z.enum(['use_default', 'require_escalated']).optional().describe('Legacy compatibility override. New escalations must use request_escalated_exec; ordinary calls should omit this or use use_default.'),
+      justification: z.string().optional().describe('Legacy execution-approval compatibility field. New escalations put the justification on request_escalated_exec.'),
+      approval_id: z.string().uuid().optional().describe('Legacy one-shot execution approval id. New CCM approval-card requests never expose an approval_id for model-driven retry.'),
     },
     outputSchema: UNIFIED_EXEC_OUTPUT_SCHEMA,
     handler: async (args) => {
@@ -373,7 +407,104 @@ export function registerCoreTools(registry, runtime) {
             'exec_command requires workspace_context. Use ccm.create_projectless_context through tool_search + exec when no project is selected.',
           );
         }
+        if (args.sandbox_permissions === 'require_escalated' &&
+            !args.approval_id) {
+          throw new Error(
+            'Direct escalation moved to request_escalated_exec. ' +
+            'Call request_escalated_exec with the same frozen command and workspace_context so ChatGPT can render the CCM approval card.',
+          );
+        }
         return execResult(await runtime.processManager.execCommand(args));
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  });
+
+  registry.register({
+    name: 'request_escalated_exec',
+    provider: 'ccm-core',
+    surfaces: { direct: true },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: false,
+    },
+    mcpMeta: {
+      ui: {
+        resourceUri: APPROVAL_UI_URI,
+        visibility: ['model', 'app'],
+      },
+      'ui/resourceUri': APPROVAL_UI_URI,
+      'openai/outputTemplate': APPROVAL_UI_URI,
+      'openai/widgetAccessible': true,
+    },
+    tags: ['approval', 'sandbox', 'permission', 'shell', 'process'],
+    environmentRequirements: { capabilities: ['exec'] },
+    description: [
+      'Prepare one full-access command for explicit user approval in the CCM approval card. This tool freezes the exact action but does not execute it.',
+      'Use this direct tool instead of exec_command(sandbox_permissions=require_escalated) when a workspace-write environment genuinely requires execution outside the sandbox.',
+      'The user decision is handled inside the CCM approval card. After this tool returns, do not call respond_to_escalation, do not reconstruct the command, and do not issue a second execution request for the same action.',
+      'Trusted remote Git uses exec_command directly and should not use this tool.',
+    ].join('\n\n'),
+    inputSchema: {
+      cmd: z.string().min(1).describe('Exact shell command to freeze for one approved full-access execution.'),
+      workspace_context: z.string().uuid().describe('Existing workspace context that owns this command.'),
+      workdir: z.string().optional().describe('Relative subdirectory inside the selected workspace.'),
+      tty: z.boolean().optional().describe('True allocates a PTY; false or omitted uses plain pipes.'),
+      yield_time_ms: z.number().int().max(30_000).nonnegative().optional().describe('Initial wait before yielding output or a session. Values above 5000 ms are clamped to 5000 ms.'),
+      max_output_tokens: z.number().int().positive().optional().describe('Output token budget. Defaults to 10000 tokens.'),
+      shell: z.string().optional().describe("Shell binary to launch. Defaults to the environment's default shell."),
+      justification: z.string().min(1).optional().describe('User-facing explanation of why this exact command requires full-access.'),
+    },
+    outputSchema: UNIFIED_EXEC_OUTPUT_SCHEMA,
+    handler: async (args, context) => {
+      try {
+        const hostSession = context?.extra?._meta?.['openai/session'] || null;
+        return approvalCardResult(
+          runtime.processManager.prepareEscalatedCommand(
+            args,
+            { hostSession },
+          ),
+        );
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  });
+
+  registry.register({
+    name: 'resolve_pending_action',
+    provider: 'ccm-core',
+    surfaces: { direct: true },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      openWorldHint: true,
+    },
+    mcpMeta: {
+      ui: { visibility: ['app'] },
+      'openai/widgetAccessible': true,
+    },
+    tags: ['approval', 'sandbox', 'permission', 'app-only'],
+    environmentRequirements: { capabilities: ['exec'] },
+    description: [
+      'App-only resolver for a frozen CCM approval request. It is invoked by the CCM approval card, not by the model.',
+      'On approve, CCM resumes only the previously frozen action. This tool accepts no command, workspace, workdir, or shell override.',
+    ].join('\n\n'),
+    inputSchema: {
+      approval_id: z.string().uuid().describe('Frozen CCM approval identifier.'),
+      approval_nonce: z.string().min(20).describe('One-time card secret delivered only through tool-result _meta.'),
+      decision: z.enum(['approve', 'deny']).describe('User decision from the CCM approval card.'),
+    },
+    outputSchema: UNIFIED_EXEC_OUTPUT_SCHEMA,
+    handler: async (args, context) => {
+      try {
+        const hostSession = context?.extra?._meta?.['openai/session'] || null;
+        return execResult(await runtime.processManager.resolvePendingExecution(
+          args,
+          { hostSession },
+        ));
       } catch (error) {
         return toolError(error);
       }
@@ -386,9 +517,9 @@ export function registerCoreTools(registry, runtime) {
     surfaces: { direct: true },
     tags: ['approval', 'sandbox', 'permission'],
     description: [
-      'Records the user response to a pending one-shot CCM approval request, including workspace access and execution escalation.',
+      'Records the user response to a legacy CCM approval request, primarily workspace access for select_workspace/register_workspace.',
       'MUST NOT approve unless the user explicitly approved the displayed request in a user message.',
-      'Approval does not perform the pending action; retry the exact requesting tool with the same approval_id.',
+      'Do not use this tool for request_escalated_exec approvals; those are resolved only by the CCM approval card. Legacy workspace approval does not perform the pending action; retry the exact workspace tool with the same approval_id.',
     ].join('\n\n'),
     inputSchema: {
       approval_id: z.string().uuid().describe('Pending approval id returned by the requesting CCM tool.'),
@@ -413,9 +544,13 @@ export function registerCoreTools(registry, runtime) {
     provider: 'ccm-core',
     surfaces: { direct: true, codeMode: true },
     tags: ['process', 'terminal', 'session', 'stdin'],
-    description: 'Writes characters to an existing unified exec session and returns recent output.',
+    description: [
+      'Writes characters to an existing unified exec session and returns recent output.',
+      'workspace_context is required and must match the context that created session_id. Copy both values from the exec_command result; CCM rejects cross-workspace session continuation before contacting the Worker.',
+    ].join(' '),
     inputSchema: {
       session_id: z.number().int().describe('Identifier of the running unified exec session.'),
+      workspace_context: z.string().uuid().describe('Workspace context returned with the exec_command session_id. It must own that session.'),
       chars: z.string().optional().describe('Bytes to write to stdin. Defaults to empty, which polls without writing.'),
       yield_time_ms: z.number().int().max(30_000).nonnegative().optional().describe('Non-empty writes default to 250 ms; empty polls default to 1000 ms. All write_stdin waits cap at 30000 ms.'),
       max_output_tokens: z.number().int().positive().optional().describe('Output token budget. Defaults to 10000 tokens.'),

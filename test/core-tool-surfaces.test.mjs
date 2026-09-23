@@ -44,6 +44,36 @@ function runtimeStub() {
     processManager: {
       execCommand: async () => ({ wall_time_seconds: 0, output: '', exit_code: 0 }),
       writeStdin: async () => ({ wall_time_seconds: 0, output: '', exit_code: 0 }),
+      prepareEscalatedCommand: () => ({
+        value: {
+          chunk_id: 'approval',
+          wall_time_seconds: 0,
+          output: 'pending',
+          approval_required: true,
+          approval_id: '00000000-0000-4000-8000-000000000003',
+          operation_id: '00000000-0000-4000-8000-000000000004',
+          state: 'pending',
+          environment_id: 'primary',
+          workspace_context: '00000000-0000-4000-8000-000000000001',
+          workspace_id: 'projectless-test',
+          workspace_kind: 'projectless',
+          workspace_root: 'C:\\temp\\projectless-test',
+          command: 'Write-Output elevated',
+          workdir: null,
+          tty: false,
+          shell: null,
+          justification: 'test',
+          expires_at: new Date(Date.now() + 60_000).toISOString(),
+          intent_sha256: 'a'.repeat(64),
+        },
+        approvalNonce: 'n'.repeat(32),
+      }),
+      resolvePendingExecution: async () => ({
+        wall_time_seconds: 0,
+        output: '',
+        exit_code: 0,
+        state: 'consumed',
+      }),
     },
     fileService: {},
     approvalManager: {
@@ -69,10 +99,16 @@ test('core tool surface keeps workspace lifecycle deferred and common operations
     'apply_patch',
     'exec_command',
     'list_environments',
+    'request_escalated_exec',
+    'resolve_pending_action',
     'respond_to_escalation',
     'view_image',
     'write_stdin',
   ]);
+  assert.deepEqual(
+    registry.get('resolve_pending_action').mcpMeta.ui.visibility,
+    ['app'],
+  );
 
   for (const name of [
     'create_projectless_context',
@@ -97,6 +133,30 @@ test('core tool surface keeps workspace lifecycle deferred and common operations
   assert.equal(missingContext.isError, true);
   assert.match(missingContext.content[0].text, /requires workspace_context/);
 
+  const legacyEscalation = await registry.get('exec_command').handler({
+    workspace_context: '00000000-0000-4000-8000-000000000001',
+    cmd: 'Write-Output elevated',
+    sandbox_permissions: 'require_escalated',
+  });
+  assert.equal(legacyEscalation.isError, true);
+  assert.match(legacyEscalation.content[0].text, /request_escalated_exec/);
+
+  const approvalCard = await registry.get('request_escalated_exec').handler({
+    workspace_context: '00000000-0000-4000-8000-000000000001',
+    cmd: 'Write-Output elevated',
+    justification: 'test',
+  }, { extra: { _meta: { 'openai/session': 'chat-test' } } });
+  assert.equal(approvalCard.structuredContent.state, 'pending');
+  assert.equal(
+    Object.hasOwn(approvalCard.structuredContent, 'approval_nonce'),
+    false,
+  );
+  assert.equal(typeof approvalCard._meta.approval_nonce, 'string');
+  assert.deepEqual(
+    Object.keys(registry.get('resolve_pending_action').inputSchema).sort(),
+    ['approval_id', 'approval_nonce', 'decision'],
+  );
+
   const { codeModeManager } = registerArchitectureTools(registry);
   try {
     assert.deepEqual(
@@ -106,6 +166,8 @@ test('core tool surface keeps workspace lifecycle deferred and common operations
         'exec',
         'exec_command',
         'list_environments',
+        'request_escalated_exec',
+        'resolve_pending_action',
         'respond_to_escalation',
         'tool_search',
         'view_image',

@@ -627,9 +627,16 @@ function requestUpstreamBuffer(runtime, method, url, headers, body = null) {
   });
 }
 
-function sendUpstreamResponse(response, upstreamResponse) {
+function sendUpstreamResponse(
+  response,
+  upstreamResponse,
+  { stripSessionId = false } = {},
+) {
   response.statusCode = upstreamResponse.statusCode || 502;
   for (const [name, value] of Object.entries(upstreamResponse.headers || {})) {
+    if (stripSessionId && name === MCP_SESSION_HEADER) {
+      continue;
+    }
     if (!RESPONSE_HOP_HEADERS.has(name) && value !== undefined) {
       response.setHeader(name, value);
     }
@@ -786,59 +793,46 @@ class UpstreamSessionManager {
       runtime.config.upstreamSessionFile,
       runtime.upstreamUrl,
     );
-    this.sessionId = persisted?.sessionId || null;
-    this.initializeMessage = persisted?.initializeMessage || null;
     this.initializeRequest = persisted?.initializeRequest || null;
-    this.initializing = null;
+    // A downstream MCP transport session must never be shared by another
+    // downstream caller. The sidecar therefore persists only the initialize
+    // template needed to create isolated upstream sessions; it deliberately
+    // does not restore the previously active upstream session as a global
+    // request namespace.
+    this.sessionRecords = new Map();
   }
 
   async initializeFromRequest(requestHeaders, payload) {
-    this.initializeRequest = {
+    const initializeRequest = {
       headers: persistedInitializeHeaders(requestHeaders),
       payload,
     };
-    const session = await this.ensureSession();
+    this.initializeRequest = initializeRequest;
+    const session = await this.createSession(initializeRequest);
+    this.sessionRecords.set(session.sessionId, {
+      upstreamSessionId: session.sessionId,
+      initializeRequest,
+    });
     saveUpstreamSession(
       this.runtime.config.upstreamSessionFile,
       this.runtime.upstreamUrl,
       session.sessionId,
       session.initializeMessage,
-      this.initializeRequest,
+      initializeRequest,
     );
     return session;
   }
 
-  async ensureSession() {
-    if (this.sessionId && this.initializeMessage) {
-      return {
-        sessionId: this.sessionId,
-        initializeMessage: this.initializeMessage,
-      };
-    }
-    if (this.initializing) {
-      return this.initializing;
-    }
-    if (!this.initializeRequest) {
+  async createSession(initializeRequest = this.initializeRequest) {
+    if (!initializeRequest?.payload) {
       throw new Error('MCP initialize is required before other requests.');
     }
-    const initialization = this.createSession();
-    this.initializing = initialization;
-    try {
-      return await initialization;
-    } finally {
-      if (this.initializing === initialization) {
-        this.initializing = null;
-      }
-    }
-  }
-
-  async createSession() {
-    const body = JSON.stringify(this.initializeRequest.payload);
+    const body = JSON.stringify(initializeRequest.payload);
     const response = await requestUpstreamBuffer(
       this.runtime,
       'POST',
       new URL(MCP_PATH, 'http://127.0.0.1'),
-      buildUpstreamHeaders(this.initializeRequest.headers, body),
+      buildUpstreamHeaders(initializeRequest.headers, body),
       body,
     );
     if (response.statusCode !== 200) {
@@ -849,29 +843,24 @@ class UpstreamSessionManager {
     if (!message || !message.result || typeof sessionId !== 'string' || !sessionId) {
       throw new Error('Upstream initialize response was incomplete.');
     }
-    this.sessionId = sessionId;
-    this.initializeMessage = message;
-    saveUpstreamSession(
-      this.runtime.config.upstreamSessionFile,
-      this.runtime.upstreamUrl,
-      sessionId,
-      message,
-      this.initializeRequest,
-    );
     return { sessionId, initializeMessage: message };
   }
 
-  invalidate(sessionId) {
-    if (sessionId && this.sessionId !== sessionId) {
-      return;
-    }
-    this.sessionId = null;
-    this.initializeMessage = null;
-    removeUpstreamSession(this.runtime.config.upstreamSessionFile);
+  resolveSessionId(downstreamSessionId) {
+    return this.sessionRecords.get(downstreamSessionId)?.upstreamSessionId ||
+      downstreamSessionId;
   }
 
-  async request(requestHeaders, url, body) {
-    const session = await this.ensureSession();
+  async request(requestHeaders, url, body, downstreamSessionId = null) {
+    const transient = !downstreamSessionId;
+    const existingRecord = downstreamSessionId
+      ? this.sessionRecords.get(downstreamSessionId)
+      : null;
+    const initializeRequest = existingRecord?.initializeRequest ||
+      this.initializeRequest;
+    const session = transient
+      ? await this.createSession(initializeRequest)
+      : { sessionId: this.resolveSessionId(downstreamSessionId) };
     let response = await requestUpstreamBuffer(
       this.runtime,
       'POST',
@@ -879,9 +868,12 @@ class UpstreamSessionManager {
       buildUpstreamHeaders(requestHeaders, body, session.sessionId),
       body,
     );
-    if (isInvalidUpstreamSession(response)) {
-      this.invalidate(session.sessionId);
-      const refreshedSession = await this.ensureSession();
+    if (!transient && isInvalidUpstreamSession(response)) {
+      const refreshedSession = await this.createSession(initializeRequest);
+      this.sessionRecords.set(downstreamSessionId, {
+        upstreamSessionId: refreshedSession.sessionId,
+        initializeRequest,
+      });
       response = await requestUpstreamBuffer(
         this.runtime,
         'POST',
@@ -890,15 +882,58 @@ class UpstreamSessionManager {
         body,
       );
     }
-    return response;
+    return {
+      response,
+      transient_session_id: transient ? session.sessionId : null,
+    };
   }
 
+  async closeTransient(sessionId) {
+    if (!sessionId || !this.initializeRequest) return;
+    try {
+      await requestUpstreamBuffer(
+        this.runtime,
+        'DELETE',
+        new URL(MCP_PATH, 'http://127.0.0.1'),
+        buildUpstreamHeaders(
+          this.initializeRequest.headers,
+          null,
+          sessionId,
+        ),
+        null,
+      );
+    } catch {}
+  }
+
+  async closeDownstreamSession(downstreamSessionId) {
+    if (!downstreamSessionId) return;
+    const record = this.sessionRecords.get(downstreamSessionId);
+    const upstreamSessionId = record?.upstreamSessionId || downstreamSessionId;
+    const initializeRequest = record?.initializeRequest || this.initializeRequest;
+    this.sessionRecords.delete(downstreamSessionId);
+    if (!initializeRequest) return;
+    try {
+      await requestUpstreamBuffer(
+        this.runtime,
+        'DELETE',
+        new URL(MCP_PATH, 'http://127.0.0.1'),
+        buildUpstreamHeaders(
+          initializeRequest.headers,
+          null,
+          upstreamSessionId,
+        ),
+        null,
+      );
+    } catch {}
+  }
 
   async close() {
-    if (this.initializing) {
-      try {
-        await this.initializing;
-      } catch {}
+    this.sessionRecords.clear();
+  }
+
+  invalidate(downstreamSessionId) {
+    if (downstreamSessionId) {
+      this.sessionRecords.delete(downstreamSessionId);
     }
   }
 }
@@ -969,6 +1004,12 @@ async function handleProtectedMcp(request, response, runtime, url) {
   let mcpTraceId = null;
   try {
     if (request.method === 'DELETE') {
+      const downstreamSessionId = request.headers[MCP_SESSION_HEADER];
+      if (downstreamSessionId) {
+        await runtime.upstreamSession.closeDownstreamSession(
+          downstreamSessionId,
+        );
+      }
       response.statusCode = 204;
       setNoStore(response);
       response.end();
@@ -976,7 +1017,17 @@ async function handleProtectedMcp(request, response, runtime, url) {
     }
     if (request.method === 'GET') {
       if (String(request.headers['mcp-protocol-version'] || '') === '2026-07-28') {
-        const direct = await requestUpstreamBuffer(runtime, 'GET', url, buildUpstreamHeaders(request.headers, null), null);
+        const direct = await requestUpstreamBuffer(
+          runtime,
+          'GET',
+          url,
+          buildUpstreamHeaders(
+            request.headers,
+            null,
+            request.headers[MCP_SESSION_HEADER] || null,
+          ),
+          null,
+        );
         sendUpstreamResponse(response, direct);
         return;
       }
@@ -1000,7 +1051,17 @@ async function handleProtectedMcp(request, response, runtime, url) {
     mcpTraceId = beginMcpTrace(response, runtime, payload, request);
     const modernRequest = String(request.headers['mcp-protocol-version'] || '') === '2026-07-28' || payload?.method === 'server/discover';
     if (modernRequest) {
-      const direct = await requestUpstreamBuffer(runtime, 'POST', url, buildUpstreamHeaders(request.headers, body), body);
+      const direct = await requestUpstreamBuffer(
+        runtime,
+        'POST',
+        url,
+        buildUpstreamHeaders(
+          request.headers,
+          body,
+          request.headers[MCP_SESSION_HEADER] || null,
+        ),
+        body,
+      );
       sendUpstreamResponse(response, direct);
       return;
     }
@@ -1012,12 +1073,26 @@ async function handleProtectedMcp(request, response, runtime, url) {
       sendCachedInitialize(response, payload, initialized);
       return;
     }
-    const upstreamResponse = await runtime.upstreamSession.request(
+    const downstreamSessionId = request.headers[MCP_SESSION_HEADER] || null;
+    const upstream = await runtime.upstreamSession.request(
       request.headers,
       url,
       body,
+      downstreamSessionId,
     );
-    sendUpstreamResponse(response, upstreamResponse);
+    try {
+      sendUpstreamResponse(
+        response,
+        upstream.response,
+        { stripSessionId: Boolean(upstream.transient_session_id) },
+      );
+    } finally {
+      if (upstream.transient_session_id) {
+        await runtime.upstreamSession.closeTransient(
+          upstream.transient_session_id,
+        );
+      }
+    }
   } catch (error) {
     if (error instanceof UpstreamHttpError) {
       sendUpstreamResponse(response, error.response);

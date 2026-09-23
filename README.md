@@ -54,7 +54,7 @@ CCM deliberately keeps transport identity, execution identity, process identity,
 
 - **Host conversation / ChatGPT conversation**: conversation state owned by the MCP client. CCM does not own it and must not assume a one-to-one mapping between a host conversation and an MCP session.
 - **MCP session**: the current CCM HTTP implementation's stateful Streamable HTTP protocol/transport session. It is created during MCP initialization, identified by the `Mcp-Session-Id` header, and used by the Controller to find the corresponding transport and protocol server. It may span multiple user turns, and a single host conversation may create more than one MCP session because of reconnects, fresh initialization, Controller restart, or other client lifecycle events. **An MCP session is not a durable task, plan, workspace, or conversation identifier.**
-- **Process session (`session_id`)**: a live command/process continuation handle returned by `exec_command` and consumed by `write_stdin`. It identifies one running process session and is unrelated to `Mcp-Session-Id`.
+- **Process session (`session_id`)**: a live command/process continuation handle returned by `exec_command` and consumed by `write_stdin`. It identifies one running process session and is unrelated to `Mcp-Session-Id`. Continuation is scoped by the pair `(workspace_context, session_id)`; callers must pass the same `workspace_context` that created the process.
 - **Workspace context (`workspace_context`)**: an opaque logical execution-context identifier that binds a Worker and workspace/projectless root. Workspace contexts are persisted independently of MCP transport sessions and may remain valid across Controller or Worker restarts.
 - **Approval (`approval_id`)**: a one-shot authorization record for one exact escalated operation or workspace entry attempt. It is neither an MCP session nor a workspace context.
 - **Plan**: a logical planning cycle, if/when Plan Mode is used. One MCP session may contain zero, one, or multiple plans. A persisted plan may outlive the MCP session that created it. A session-scoped "active plan" pointer is only a convenience for multi-turn continuity and must never redefine the MCP session itself as the plan identity.
@@ -77,8 +77,10 @@ When adding stateful features, choose an identity according to the feature's rea
 | --- | --- |
 | `list_environments` | Show connected execution environments, capabilities, and coarse effective filesystem read/write scope. |
 | `exec_command` | Run a native shell command inside an existing `workspace_context`. |
-| `respond_to_escalation` | Record an explicit user decision for a pending one-shot CCM approval. |
-| `write_stdin` | Write to or poll a live process session returned by `exec_command`. |
+| `request_escalated_exec` | Freeze one full-access command and render the CCM approval app; this tool does not execute the command. |
+| `resolve_pending_action` | App-only resolver used by the CCM approval app to approve/deny and resume a frozen command. It is hidden from normal model use through MCP Apps visibility metadata. |
+| `respond_to_escalation` | Legacy explicit-decision endpoint retained for workspace entry/registration approvals. Execution approvals created by `request_escalated_exec` cannot be resolved here. |
+| `write_stdin` | Write to or poll a live process session returned by `exec_command`; requires both `session_id` and the owning `workspace_context`. |
 | `apply_patch` | Apply a Codex-style patch inside an existing `workspace_context`. |
 | `view_image` | Read and validate a bounded image inside an existing `workspace_context`. |
 | `send_file` | Transfer a file from the Worker selected by `workspace_context` to the client. |
@@ -327,30 +329,34 @@ Windows is the current fully supported restricted-execution platform.
 
 Restricted command execution on Linux/macOS is not implemented yet and **fails closed** rather than silently running unsandboxed. A Linux/macOS Worker therefore currently needs `CCM_PERMISSION_PROFILE=full-access` for shell execution.
 
-`apply_patch` enforces its own workspace-write boundary on the Worker, including real-path checks that reject symlink/junction escapes. `exec_command` can cross the command sandbox only through the one-shot approval flow below.
+`apply_patch` enforces its own workspace-write boundary on the Worker, including real-path checks that reject symlink/junction escapes. Ordinary `exec_command` remains inside the selected environment's normal sandbox. A command can cross that sandbox only through the explicit one-shot approval flow below.
 
 ### One-shot sandbox escalation
 
-Restricted Workers support an explicit one-shot escalation flow for `exec_command`.
+Restricted Workers support an explicit one-shot escalation flow through the direct `request_escalated_exec` tool. The model supplies the exact command, `workspace_context`, optional working directory/shell/TTY settings, output/yield settings, and user-facing justification once. CCM freezes those fields into a `PendingAction`, assigns an `approval_id` and `operation_id`, and returns an MCP App approval card. **The command is not executed by `request_escalated_exec`.**
 
-When `sandbox_permissions=require_escalated` is requested on a `read-only` or `workspace-write` environment, CCM does not execute the command immediately. It returns an `approval_required` result containing the selected environment, exact command, execution context, justification, a short-lived approval id, and a SHA-256 hash of the frozen execution intent.
+The approval card receives a high-entropy approval capability only through tool-result `_meta`; that secret is not placed in `content` or `structuredContent`. The card displays the frozen workspace/environment/command/justification and invokes the app-only `resolve_pending_action` tool when the user presses Approve or Deny. The resolver accepts only `approval_id`, the card capability, and the user's decision. It does not accept a replacement command, workspace, workdir, shell, or TTY value.
 
-The host should show that request to the user and wait. After the user explicitly approves it, the host calls `respond_to_escalation` with `decision=approve`, then retries the exact same `exec_command` with the returned `approval_id`. The grant:
+On Approve, CCM resumes the already-frozen action directly. There is no second model decision and no model-generated retry of the command. The grant:
 
 - is valid for five minutes,
-- can be consumed only once,
-- is bound to the environment, command, working directory, shell, and TTY mode,
+- is atomically dispatchable only while the frozen approval is in an allowed state,
+- is bound to the environment, workspace context/root, command, working directory, shell, TTY mode, and execution output/yield settings,
 - runs that one command with `full-access`,
 - cannot be reused after execution,
 - does not create a persistent allow rule.
 
-Changing the command or execution context requires a new approval. Denied and expired requests cannot execute.
+If CCM can prove a failure occurred before Worker dispatch, the same frozen action may be presented for retry. If a timeout/disconnect makes it uncertain whether the Worker started the command, the approval enters `execution_unknown` and CCM will not retry automatically. Denied, consumed, unknown-outcome, and expired requests cannot start another execution.
 
-This approval mechanism controls CCM's sandbox boundary; it does **not** grant Windows Administrator/UAC privileges. Also, MCP currently provides no cryptographic proof that an approval tool call originated from a human message. CCM enforces the frozen one-shot grant, while the ChatGPT/host interaction layer is responsible for calling `respond_to_escalation` only after an explicit user decision. A separately authenticated consent UI would be required for CCM itself to independently verify human presence.
+The old `exec_command(sandbox_permissions=require_escalated) -> respond_to_escalation -> retry exec_command(approval_id)` path is retained only as migration compatibility for already-issued legacy approvals. New escalation requests are rejected from that route and should use `request_escalated_exec`. Workspace selection/registration still uses `respond_to_escalation` for now.
+
+This approval mechanism controls CCM's sandbox boundary; it does **not** grant Windows Administrator/UAC privileges. The approval app is the interaction mechanism, while the server-side frozen action, approval capability, state machine, and workspace revalidation remain the security boundary. If ChatGPT supplies its anonymous `openai/session` metadata on both calls, CCM also binds the request and app resolver to that host session as defense in depth.
 
 ## Output and transport protection
 
 CCM treats oversized output as a reliability and context-safety problem.
+
+The OAuth/public sidecar also isolates MCP request identity. Legacy downstream clients that initialize separate MCP sessions receive separate upstream sessions, and downstream POST calls that omit `Mcp-Session-Id` use request-scoped transient upstream sessions instead of sharing one persistent request-id namespace. This prevents concurrent clients that reuse the same JSON-RPC id (for example `id=0`) from overwriting each other's upstream response routing.
 
 Command capture is bounded, model-facing command output has a token budget, live process reads are incremental, Worker protocol messages have a hard serialized-size ceiling, final MCP tool results have an absolute byte limit, and `view_image` checks file size before reading/encoding it.
 

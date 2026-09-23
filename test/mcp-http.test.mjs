@@ -12,6 +12,10 @@ import { RemoteWorkerClient } from '../src/worker/remote-worker-client.mjs';
 import { ToolRegistry } from '../src/tools/tool-registry.mjs';
 import { createToolRegistry } from '../src/tools/index.mjs';
 import { createHttpController } from '../src/controller/mcp-http-server.mjs';
+import {
+  APPROVAL_UI_HTML,
+  APPROVAL_UI_URI,
+} from '../src/ui/approval-app.mjs';
 
 test('MCP lists and calls tools through a Remote Worker', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-mcp-'));
@@ -52,6 +56,8 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       'exec',
       'exec_command',
       'list_environments',
+      'request_escalated_exec',
+      'resolve_pending_action',
       'respond_to_escalation',
       'send_file',
       'tool_search',
@@ -59,6 +65,18 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       'wait',
       'write_stdin',
     ]);
+    assert.deepEqual(
+      listed.tools.find((tool) => tool.name === 'resolve_pending_action')
+        ?._meta?.ui?.visibility,
+      ['app'],
+    );
+    const approvalTool = listed.tools.find(
+      (tool) => tool.name === 'request_escalated_exec',
+    );
+    assert.equal(approvalTool?._meta?.ui?.resourceUri, APPROVAL_UI_URI);
+    const approvalResource = await client.readResource({ uri: APPROVAL_UI_URI });
+    assert.equal(approvalResource.contents[0].text, APPROVAL_UI_HTML);
+    assert.equal(approvalResource.contents[0]._meta.ui.prefersBorder, true);
 
     const projectless = await client.callTool({
       name: 'exec',
@@ -91,41 +109,40 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(result.structuredContent.workspace_kind, 'projectless');
 
     const escalation = await client.callTool({
-      name: 'exec_command',
+      name: 'request_escalated_exec',
       arguments: {
         workspace_context: workspaceContext,
         cmd: 'Write-Output MCP_ESCALATED_OK',
-        sandbox_permissions: 'require_escalated',
         justification: 'Allow this MCP test command once?',
       },
     });
     assert.equal(escalation.isError, undefined);
     assert.equal(escalation.structuredContent.approval_required, true);
-    assert.match(escalation.content[0].text, /Approval required/);
+    assert.match(escalation.content[0].text, /approval card/i);
+    assert.equal(typeof escalation._meta?.approval_nonce, 'string');
 
     const approvalId = escalation.structuredContent.approval_id;
-    const approved = await client.callTool({
+    const legacyBypass = await client.callTool({
       name: 'respond_to_escalation',
       arguments: {
         approval_id: approvalId,
         decision: 'approve',
       },
     });
-    assert.equal(approved.isError, undefined);
-    assert.equal(approved.structuredContent.state, 'approved');
+    assert.equal(legacyBypass.isError, true);
+    assert.match(legacyBypass.content[0].text, /approval card/i);
 
     const escalatedResult = await client.callTool({
-      name: 'exec_command',
+      name: 'resolve_pending_action',
       arguments: {
-        workspace_context: workspaceContext,
-        cmd: 'Write-Output MCP_ESCALATED_OK',
-        sandbox_permissions: 'require_escalated',
-        justification: 'Allow this MCP test command once?',
         approval_id: approvalId,
+        approval_nonce: escalation._meta.approval_nonce,
+        decision: 'approve',
       },
     });
     assert.equal(escalatedResult.isError, undefined);
     assert.match(escalatedResult.content[0].text, /MCP_ESCALATED_OK/);
+    assert.equal(escalatedResult.structuredContent.state, 'consumed');
 
     const nestedCore = await client.callTool({
       name: 'exec',
