@@ -248,6 +248,69 @@ test('ApprovalManager binds workspace creation permission into the exact intent'
   assert.equal(consumed.state, 'consumed');
 });
 
+test('ApprovalManager app workspace approvals require the card nonce and freeze the target', () => {
+  const approvals = new ApprovalManager();
+  const intent = {
+    environment_id: 'approval-worker',
+    workspace_id: 'project',
+    workspace_root: 'C:\\projects\\project',
+    create_if_missing: false,
+  };
+  const prepared = approvals.requestWorkspaceAction(
+    'select_workspace',
+    intent,
+    'Enter this workspace?',
+    { channel: 'app', hostSession: 'chat-a' },
+  );
+
+  assert.equal(prepared.request.kind, 'workspace');
+  assert.equal(prepared.request.operation, 'select_workspace');
+  assert.equal(typeof prepared.approvalNonce, 'string');
+  assert.throws(
+    () => approvals.respond(prepared.request.approval_id, 'approve'),
+    /approval card/i,
+  );
+  assert.throws(
+    () => approvals.claimAppWorkspace(
+      prepared.request.approval_id,
+      'wrong-nonce',
+      'chat-a',
+    ),
+    /nonce/i,
+  );
+  assert.throws(
+    () => approvals.claimAppWorkspace(
+      prepared.request.approval_id,
+      prepared.approvalNonce,
+      'chat-b',
+    ),
+    /different host session/i,
+  );
+
+  const claimed = approvals.claimAppWorkspace(
+    prepared.request.approval_id,
+    prepared.approvalNonce,
+    'chat-a',
+  );
+  assert.deepEqual(claimed.action, {
+    type: 'workspace',
+    operation: 'select_workspace',
+    ...intent,
+  });
+  const consumed = approvals.markAppWorkspaceConsumed(
+    prepared.request.approval_id,
+  );
+  assert.equal(consumed.state, 'consumed');
+  assert.throws(
+    () => approvals.claimAppWorkspace(
+      prepared.request.approval_id,
+      prepared.approvalNonce,
+      'chat-a',
+    ),
+    /state=consumed/,
+  );
+});
+
 test('RemoteProcessManager executes only after one matching approval', async () => {
   const environmentRegistry = restrictedRegistry();
   const workerHub = new FakeWorkerHub();

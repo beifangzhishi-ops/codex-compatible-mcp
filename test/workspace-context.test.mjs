@@ -304,20 +304,19 @@ test('Controller uses projectless contexts and requires approval for registered 
     const pending = await select.handler({
       environment_id: 'workspace-worker',
       workspace_id: seeded.workspace_id,
-    });
+    }, { extra: { _meta: { 'openai/session': 'workspace-test' } } });
     assert.equal(pending.structuredContent.approval_required, true);
     assert.equal(pending.structuredContent.operation, 'select_workspace');
+    assert.equal(pending.structuredContent.kind, 'workspace');
     assert.doesNotMatch(pending.structuredContent.justification, /read access/i);
+    assert.equal(typeof pending._meta.approval_nonce, 'string');
 
-    controller.approvalManager.respond(
-      pending.structuredContent.approval_id,
-      'approve',
-    );
-    const selected = await select.handler({
-      environment_id: 'workspace-worker',
-      workspace_id: seeded.workspace_id,
+    const resolver = tools.registry.get('resolve_pending_action');
+    const selected = await resolver.handler({
       approval_id: pending.structuredContent.approval_id,
-    });
+      approval_nonce: pending._meta.approval_nonce,
+      decision: 'approve',
+    }, { extra: { _meta: { 'openai/session': 'workspace-test' } } });
     assert.equal(selected.structuredContent.workspace_kind, 'registered');
     assert.equal(selected.structuredContent.workspace_root, await fs.realpath(legacyRoot));
 
@@ -327,33 +326,17 @@ test('Controller uses projectless contexts and requires approval for registered 
       workspace_id: 'new-project',
       path: newRoot,
       create_if_missing: true,
-    });
+    }, { extra: { _meta: { 'openai/session': 'workspace-test' } } });
     assert.equal(registerPending.structuredContent.approval_required, true);
+    assert.equal(registerPending.structuredContent.kind, 'workspace');
     assert.equal(registerPending.structuredContent.create_if_missing, true);
     assert.match(registerPending.structuredContent.justification, /create, register, and enter/i);
     await assert.rejects(fs.stat(newRoot), /ENOENT/);
-    controller.approvalManager.respond(
-      registerPending.structuredContent.approval_id,
-      'approve',
-    );
-    const mismatchedRegistration = await register.handler({
-      environment_id: 'workspace-worker',
-      workspace_id: 'new-project',
-      path: newRoot,
-      create_if_missing: false,
+    const registered = await resolver.handler({
       approval_id: registerPending.structuredContent.approval_id,
-    });
-    assert.equal(mismatchedRegistration.isError, true);
-    assert.match(mismatchedRegistration.content[0].text, /does not exist|does not match/i);
-    await assert.rejects(fs.stat(newRoot), /ENOENT/);
-
-    const registered = await register.handler({
-      environment_id: 'workspace-worker',
-      workspace_id: 'new-project',
-      path: newRoot,
-      create_if_missing: true,
-      approval_id: registerPending.structuredContent.approval_id,
-    });
+      approval_nonce: registerPending._meta.approval_nonce,
+      decision: 'approve',
+    }, { extra: { _meta: { 'openai/session': 'workspace-test' } } });
     assert.equal(registered.structuredContent.workspace_id, 'new-project');
     assert.equal(registered.structuredContent.workspace_kind, 'registered');
     assert.equal(
@@ -362,6 +345,23 @@ test('Controller uses projectless contexts and requires approval for registered 
     );
     assert.equal((await fs.stat(newRoot)).isDirectory(), true);
     assert.equal(worker.workspaceRegistry.list().length, 2);
+
+    const legacyPending = await select.handler({
+      environment_id: 'workspace-worker',
+      workspace_id: seeded.workspace_id,
+    }, { source: 'code_mode', nested: true });
+    assert.equal(legacyPending.structuredContent.approval_required, true);
+    assert.equal(legacyPending._meta, undefined);
+    controller.approvalManager.respond(
+      legacyPending.structuredContent.approval_id,
+      'approve',
+    );
+    const legacySelected = await select.handler({
+      environment_id: 'workspace-worker',
+      workspace_id: seeded.workspace_id,
+      approval_id: legacyPending.structuredContent.approval_id,
+    }, { source: 'code_mode', nested: true });
+    assert.equal(legacySelected.structuredContent.workspace_kind, 'registered');
 
     const oldContext = selected.structuredContent.workspace_context;
     const oldProjectlessContext = first.workspace_context;

@@ -56,9 +56,11 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       'exec',
       'exec_command',
       'list_environments',
+      'register_workspace',
       'request_escalated_exec',
       'resolve_pending_action',
       'respond_to_escalation',
+      'select_workspace',
       'send_file',
       'tool_search',
       'view_image',
@@ -74,6 +76,16 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       (tool) => tool.name === 'request_escalated_exec',
     );
     assert.equal(approvalTool?._meta?.ui?.resourceUri, APPROVAL_UI_URI);
+    assert.equal(
+      listed.tools.find((tool) => tool.name === 'select_workspace')
+        ?._meta?.ui?.resourceUri,
+      APPROVAL_UI_URI,
+    );
+    assert.equal(
+      listed.tools.find((tool) => tool.name === 'register_workspace')
+        ?._meta?.ui?.resourceUri,
+      APPROVAL_UI_URI,
+    );
     const approvalResource = await client.readResource({ uri: APPROVAL_UI_URI });
     assert.equal(approvalResource.contents[0].text, APPROVAL_UI_HTML);
     assert.equal(approvalResource.contents[0]._meta.ui.prefersBorder, true);
@@ -95,6 +107,62 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const workspaceContext = projectlessResult.workspace_context;
     const workspaceRoot = projectlessResult.workspace_root;
     assert.equal(projectlessResult.workspace_kind, 'projectless');
+
+    const seededWorkspace = workerRuntime.workspaceRegistry.list()[0];
+    const workspaceApproval = await client.callTool({
+      name: 'select_workspace',
+      arguments: {
+        environment_id: 'mcp-worker',
+        workspace_id: seededWorkspace.workspace_id,
+      },
+    });
+    assert.equal(workspaceApproval.isError, undefined);
+    assert.equal(workspaceApproval.structuredContent.kind, 'workspace');
+    assert.equal(
+      workspaceApproval.structuredContent.operation,
+      'select_workspace',
+    );
+    assert.equal(typeof workspaceApproval._meta?.approval_nonce, 'string');
+    const workspaceLegacyBypass = await client.callTool({
+      name: 'respond_to_escalation',
+      arguments: {
+        approval_id: workspaceApproval.structuredContent.approval_id,
+        decision: 'approve',
+      },
+    });
+    assert.equal(workspaceLegacyBypass.isError, true);
+    assert.match(workspaceLegacyBypass.content[0].text, /approval card/i);
+    const workspacePersistentBypass = await client.callTool({
+      name: 'resolve_pending_action',
+      arguments: {
+        approval_id: workspaceApproval.structuredContent.approval_id,
+        approval_nonce: workspaceApproval._meta.approval_nonce,
+        decision: 'approve_workspace',
+      },
+    });
+    assert.equal(workspacePersistentBypass.isError, true);
+    assert.match(
+      workspacePersistentBypass.content[0].text,
+      /only available for execution approvals/i,
+    );
+    const selectedWorkspace = await client.callTool({
+      name: 'resolve_pending_action',
+      arguments: {
+        approval_id: workspaceApproval.structuredContent.approval_id,
+        approval_nonce: workspaceApproval._meta.approval_nonce,
+        decision: 'approve',
+      },
+    });
+    assert.equal(selectedWorkspace.isError, undefined);
+    assert.equal(selectedWorkspace.structuredContent.state, 'consumed');
+    assert.equal(
+      selectedWorkspace.structuredContent.workspace_kind,
+      'registered',
+    );
+    assert.equal(
+      selectedWorkspace.structuredContent.workspace_id,
+      seededWorkspace.workspace_id,
+    );
 
     const result = await client.callTool({
       name: 'exec_command',

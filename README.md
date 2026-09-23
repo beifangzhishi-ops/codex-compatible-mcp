@@ -42,7 +42,7 @@ CCM Controller
 
 Every execution environment uses the same Remote Worker protocol. The machine hosting the Controller is not a special execution backend: by default, `npm start` launches a normal Remote Worker locally and connects it through loopback.
 
-Registered workspaces are owned by each Worker, not by the Controller. Entering or hot-registering a real project requires one-shot user approval and returns an opaque `workspace_context`. `ccm.register_workspace` already combines registration and entry; with `create_if_missing=true`, the same one-shot approval may also create the exact missing project directory before registration, so a new project does not need a separate shell mkdir approval followed by workspace approval. Normal development tools carry only the resulting context. Workspace contexts are persisted by the Controller and remain valid across Controller or Worker restarts. Worker-local projectless mappings are persisted as well, so a surviving projectless directory can be resumed after a Worker restart.
+Registered workspaces are owned by each Worker, not by the Controller. Entering or hot-registering a real project requires one-shot user approval and returns an opaque `workspace_context`. Direct `select_workspace` / `register_workspace` calls freeze the exact workspace action and render the CCM approval app; when the user approves, CCM performs the frozen action itself and returns the resulting context without a model-generated retry. `register_workspace` combines registration and entry; with `create_if_missing=true`, the same approval may also create the exact missing project directory before registration, so a new project does not need a separate shell mkdir approval followed by workspace approval. Normal development tools carry only the resulting context. Workspace contexts are persisted by the Controller and remain valid across Controller or Worker restarts. Worker-local projectless mappings are persisted as well, so a surviving projectless directory can be resumed after a Worker restart.
 
 An environment does not expose a default workspace or default working directory to the MCP client. Worker bootstrap cwd is an internal/legacy runtime seed only; it is not a project-location hint, a default project, or the parent directory for newly created projects. CCM deliberately has no "Projects Root" policy: project placement comes from the user or the upper-layer orchestrator.
 
@@ -78,8 +78,10 @@ When adding stateful features, choose an identity according to the feature's rea
 | `list_environments` | Show connected execution environments, capabilities, and coarse effective filesystem read/write scope. |
 | `exec_command` | Run a native shell command inside an existing `workspace_context`. |
 | `request_escalated_exec` | Freeze one full-access command and render the CCM approval app; this tool does not execute the command. |
-| `resolve_pending_action` | App-only resolver used by the CCM approval app to approve/deny and resume a frozen command. It is hidden from normal model use through MCP Apps visibility metadata. |
-| `respond_to_escalation` | Legacy explicit-decision endpoint retained for workspace entry/registration approvals. Execution approvals created by `request_escalated_exec` cannot be resolved here. |
+| `select_workspace` | Freeze entry into one registered workspace and render the CCM approval app; approval completes the entry and returns `workspace_context`. |
+| `register_workspace` | Freeze registration/entry of one exact project path and render the CCM approval app; `create_if_missing=true` can create that exact path after approval. |
+| `resolve_pending_action` | App-only resolver used by the CCM approval app to approve/deny and resume a frozen execution or workspace action. It is hidden from normal model use through MCP Apps visibility metadata. |
+| `respond_to_escalation` | Legacy explicit-decision endpoint retained only for already-issued legacy approvals and Code Mode compatibility. New direct approval-card requests cannot be resolved here. |
 | `write_stdin` | Write to or poll a live process session returned by `exec_command`; requires both `session_id` and the owning `workspace_context`. |
 | `apply_patch` | Apply a Codex-style patch inside an existing `workspace_context`. |
 | `view_image` | Read and validate a bounded image inside an existing `workspace_context`. |
@@ -98,8 +100,8 @@ These are core CCM operations but intentionally stay off the top-level MCP schem
 | --- | --- |
 | `ccm.create_projectless_context` | Create a temporary projectless context on a chosen Worker, or on the primary Worker when no environment is specified. |
 | `ccm.list_workspaces` | Discover registered projects on one Worker without entering them. |
-| `ccm.select_workspace` | Enter an explicitly selected registered project after user approval. |
-| `ccm.register_workspace` | Register and enter an explicitly selected project directory after user approval; optionally create that exact missing directory with `create_if_missing=true` under the same approval. |
+| `ccm.select_workspace` | Code Mode compatibility surface for workspace entry. Direct model use should call `select_workspace` so the approval app can render. |
+| `ccm.register_workspace` | Code Mode compatibility surface for registration/entry. Direct model use should call `register_workspace` so the approval app can render. |
 | `ccm.plan_patch` | Create or update one durable Plan using Codex-style patch syntax and an explicit opaque `plan_id`. |
 | `ccm.plan_read` | Read, range-read, or search only the Plan identified by `plan_id`; reading does not change planning/implementation workflow. |
 
@@ -121,11 +123,11 @@ CCM stores capability exposure as three independent surfaces:
 
 Convenience states such as Direct, Deferred, CodeModeOnly, DirectModelOnly, DeferredModelOnly, and Hidden are derived from those surfaces rather than stored as one rigid enum.
 
-The direct MCP surface is intentionally kept small and stable. New ordinary capabilities should default to the **Deferred + Code Mode** surfaces and be invoked through `tool_search` + `exec`. Add a new top-level Direct tool only when the capability is a common operational primitive or is fundamental to environment discovery, explicit approval, process continuation, or nested-tool discovery/dispatch. Workspace/context lifecycle tools intentionally remain Deferred.
+The direct MCP surface is intentionally kept small and stable. New ordinary capabilities should default to the **Deferred + Code Mode** surfaces and be invoked through `tool_search` + `exec`. Add a new top-level Direct tool only when the capability is a common operational primitive or is fundamental to environment discovery, explicit approval, process continuation, or nested-tool discovery/dispatch. `create_projectless_context` and `list_workspaces` remain Deferred; `select_workspace` and `register_workspace` are Direct because their user approval must render an MCP App.
 
 Keeping ordinary additions off the Direct surface prevents routine feature work from changing the client's top-level MCP schema. In particular, adding a deferred capability should **not require deleting and recreating the CCM integration in ChatGPT or another MCP client**. Updating CCM server code may still require restarting the Controller and/or Worker processes so the new implementation is loaded; that is separate from recreating the client integration.
 
-Do not promote a capability to Direct merely for convenience. Keep workspace/context lifecycle operations deferred, and prefer deferred `ccm-extra.*` or other namespaced capabilities for specialized workflows. The common operational file tools `apply_patch`, `view_image`, and `send_file` are intentionally Direct.
+Do not promote a capability to Direct merely for convenience. Keep non-interactive workspace discovery/context helpers deferred, and prefer deferred `ccm-extra.*` or other namespaced capabilities for specialized workflows. Approval-gated `select_workspace` / `register_workspace` and the common operational file tools `apply_patch`, `view_image`, and `send_file` are intentionally Direct.
 
 CCM deliberately does not embed a second JavaScript interpreter for Code Mode. The host application remains responsible for loops, branching, and data processing. CCM's `exec/wait` pair is a bounded structured dispatcher over ToolRegistry capabilities. `state=completed` is terminal. If nested dispatch has finished but an `exec_command` leaves a live process session, CCM returns `state=awaiting_io` with `next_operation=write_stdin` until those process sessions are continued separately.
 
@@ -335,7 +337,7 @@ Restricted command execution on Linux/macOS is not implemented yet and **fails c
 
 Restricted Workers support an explicit one-shot escalation flow through the direct `request_escalated_exec` tool. The model supplies the exact command, `workspace_context`, optional working directory/shell/TTY settings, output/yield settings, and user-facing justification once. CCM freezes those fields into a `PendingAction`, assigns an `approval_id` and `operation_id`, and returns an MCP App approval card. **The command is not executed by `request_escalated_exec`.**
 
-The approval card receives a high-entropy approval capability only through tool-result `_meta`; that secret is not placed in `content` or `structuredContent`. The card displays the frozen workspace/environment/command/justification and invokes the app-only `resolve_pending_action` tool when the user presses **Approve once**, **Always allow in workspace**, or **Deny**. The resolver accepts only `approval_id`, the card capability, and the user's decision. It does not accept a replacement command, workspace, workdir, shell, or TTY value.
+The approval card receives a high-entropy approval capability only through tool-result `_meta`; that secret is not placed in `content` or `structuredContent`. For execution approvals the card displays the frozen workspace/environment/command/justification and offers **Approve once**, **Always allow in workspace**, or **Deny**. For workspace entry/registration it displays the frozen environment/workspace/root/action and offers only **Approve** or **Deny**. The app-only `resolve_pending_action` resolver accepts only `approval_id`, the card capability, and the user's decision; it does not accept a replacement command, workspace target, workdir, shell, or TTY value.
 
 On Approve, CCM resumes the already-frozen action directly. There is no second model decision and no model-generated retry of the command. The grant:
 
@@ -353,7 +355,9 @@ The persistent policy affects approval only. It does not weaken `workspace-write
 
 If CCM can prove a failure occurred before Worker dispatch, the same frozen action may be presented for retry. If a timeout/disconnect makes it uncertain whether the Worker started the command, the approval enters `execution_unknown` and CCM will not retry automatically. Denied, consumed, unknown-outcome, and expired requests cannot start another execution.
 
-The old `exec_command(sandbox_permissions=require_escalated) -> respond_to_escalation -> retry exec_command(approval_id)` path is retained only as migration compatibility for already-issued legacy approvals. New escalation requests are rejected from that route and should use `request_escalated_exec`. Workspace selection/registration still uses `respond_to_escalation` for now.
+Workspace entry/registration uses the same card capability and one-shot state model, but it never grants `full-access` and never creates an execution allow rule. On approval CCM re-reads the registered workspace or re-inspects the registration path, verifies that the frozen environment/workspace/root still match, then creates the registered `workspace_context`. If the target has drifted, the frozen action fails closed and is consumed so a new approval is required. Approval of a workspace action is only permission to select/register/create-and-enter that workspace; it is not authorization to begin implementation.
+
+The old `exec_command(sandbox_permissions=require_escalated) -> respond_to_escalation -> retry exec_command(approval_id)` path is retained only as migration compatibility for already-issued legacy execution approvals. Likewise, Code Mode `select_workspace` / `register_workspace` calls retain the legacy `approval_id -> respond_to_escalation -> retry` sequence because a nested tool result cannot render an MCP App. New direct execution and workspace requests use the approval app and must not be retried by the model after the card is shown.
 
 This approval mechanism controls CCM's sandbox boundary; it does **not** grant Windows Administrator/UAC privileges. The approval app is the interaction mechanism, while the server-side frozen action, approval capability, state machine, and workspace revalidation remain the security boundary. If ChatGPT supplies its anonymous `openai/session` metadata on both calls, CCM also binds the request and app resolver to that host session as defense in depth.
 

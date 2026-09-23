@@ -71,6 +71,9 @@ test('approval app keeps its capability in result _meta and resolves only the fr
     workspaceContextManager: {},
     workerHub: {},
     approvalManager: {
+      getRequest() {
+        return { kind: 'execution' };
+      },
       respond() {
         throw new Error('not used');
       },
@@ -108,6 +111,14 @@ test('approval app keeps its capability in result _meta and resolves only the fr
     assert.match(resource.contents[0].text, /sendFollowUpMessage/);
     assert.match(resource.contents[0].text, /Always allow in workspace/);
     assert.match(resource.contents[0].text, /approve_workspace/);
+    assert.match(
+      resource.contents[0].text,
+      /approveAlways\.hidden = workspaceAction/,
+    );
+    assert.match(
+      resource.contents[0].text,
+      /workspace approval result already placed in model context/,
+    );
 
     const prepared = await client.callTool({
       name: 'request_escalated_exec',

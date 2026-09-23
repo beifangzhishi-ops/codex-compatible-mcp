@@ -19,6 +19,13 @@ function runtimeStub() {
         workspace_kind: 'projectless',
         workspace_root: 'C:\\temp\\projectless-test',
       }),
+      createRegistered: (environmentId, workspace) => ({
+        workspace_context: '00000000-0000-4000-8000-000000000009',
+        environment_id: environmentId,
+        workspace_id: workspace.workspace_id,
+        workspace_kind: 'registered',
+        workspace_root: workspace.root,
+      }),
     },
     workerHub: {
       call: async (_environmentId, method, params = {}) => {
@@ -36,6 +43,13 @@ function runtimeStub() {
             root: params.path,
             exists: !params.create_if_missing,
             create_required: Boolean(params.create_if_missing),
+          };
+        }
+        if (method === 'register_workspace') {
+          return {
+            workspace_id: params.workspace_id,
+            kind: 'registered',
+            root: params.path,
           };
         }
         throw new Error('unexpected worker method: ' + method);
@@ -77,21 +91,32 @@ function runtimeStub() {
     },
     fileService: {},
     approvalManager: {
-      requestWorkspaceAction: (operation, intent, justification) => ({
-        approval_id: '00000000-0000-4000-8000-000000000002',
-        state: 'pending',
+      requestWorkspaceAction: (
         operation,
-        environment_id: intent.environment_id,
-        workspace_id: intent.workspace_id,
-        workspace_root: intent.workspace_root,
-        create_if_missing: Boolean(intent.create_if_missing),
+        intent,
         justification,
-      }),
+        { channel = 'legacy' } = {},
+      ) => {
+        const request = {
+          approval_id: '00000000-0000-4000-8000-000000000002',
+          state: 'pending',
+          kind: 'workspace',
+          operation,
+          environment_id: intent.environment_id,
+          workspace_id: intent.workspace_id,
+          workspace_root: intent.workspace_root,
+          create_if_missing: Boolean(intent.create_if_missing),
+          justification,
+        };
+        return channel === 'app'
+          ? { request, approvalNonce: 'w'.repeat(32) }
+          : request;
+      },
     },
   };
 }
 
-test('core tool surface keeps workspace lifecycle deferred and common operations direct', async () => {
+test('core tool surface exposes approval-card workspace actions directly and keeps Code Mode compatibility', async () => {
   const registry = registerCoreTools(new ToolRegistry(), runtimeStub());
 
   const direct = registry.listDirect().map((tool) => tool.name).sort();
@@ -99,9 +124,11 @@ test('core tool surface keeps workspace lifecycle deferred and common operations
     'apply_patch',
     'exec_command',
     'list_environments',
+    'register_workspace',
     'request_escalated_exec',
     'resolve_pending_action',
     'respond_to_escalation',
+    'select_workspace',
     'view_image',
     'write_stdin',
   ]);
@@ -113,13 +140,18 @@ test('core tool surface keeps workspace lifecycle deferred and common operations
   for (const name of [
     'create_projectless_context',
     'list_workspaces',
-    'select_workspace',
-    'register_workspace',
   ]) {
     const tool = registry.get(name);
     assert.equal(tool.surfaces.direct, false, name + ' should not be direct');
     assert.equal(tool.surfaces.deferred, true, name + ' should be deferred');
     assert.equal(tool.surfaces.codeMode, true, name + ' should support exec');
+  }
+  for (const name of ['select_workspace', 'register_workspace']) {
+    const tool = registry.get(name);
+    assert.equal(tool.surfaces.direct, true, name + ' should be direct');
+    assert.equal(tool.surfaces.deferred, false, name + ' should not be deferred');
+    assert.equal(tool.surfaces.codeMode, true, name + ' should support exec');
+    assert.equal(tool.mcpMeta.ui.resourceUri, 'ui://ccm/approval-v1.html');
   }
 
   const created = await registry.get('create_projectless_context').handler({
@@ -157,6 +189,15 @@ test('core tool surface keeps workspace lifecycle deferred and common operations
     ['approval_id', 'approval_nonce', 'decision'],
   );
 
+  const workspaceCard = await registry.get('select_workspace').handler({
+    environment_id: 'noha',
+    workspace_id: 'project',
+  }, { extra: { _meta: { 'openai/session': 'chat-test' } } });
+  assert.equal(workspaceCard.structuredContent.kind, 'workspace');
+  assert.equal(workspaceCard.structuredContent.operation, 'select_workspace');
+  assert.equal(typeof workspaceCard._meta.approval_nonce, 'string');
+  assert.match(workspaceCard.content[0].text, /approval card/i);
+
   const { codeModeManager } = registerArchitectureTools(registry);
   try {
     assert.deepEqual(
@@ -166,9 +207,11 @@ test('core tool surface keeps workspace lifecycle deferred and common operations
         'exec',
         'exec_command',
         'list_environments',
+        'register_workspace',
         'request_escalated_exec',
         'resolve_pending_action',
         'respond_to_escalation',
+        'select_workspace',
         'tool_search',
         'view_image',
         'wait',

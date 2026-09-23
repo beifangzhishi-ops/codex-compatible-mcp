@@ -11,6 +11,8 @@ const UNIFIED_EXEC_OUTPUT_SCHEMA = {
   approval_required: z.boolean().optional(),
   approval_id: z.string().optional(),
   operation_id: z.string().optional(),
+  kind: z.enum(['execution', 'workspace']).optional(),
+  operation: z.enum(['select_workspace', 'register_workspace']).optional(),
   state: z.enum([
     'pending',
     'approved',
@@ -32,10 +34,12 @@ const UNIFIED_EXEC_OUTPUT_SCHEMA = {
   workspace_id: z.string().optional(),
   workspace_kind: z.enum(['registered', 'projectless']).optional(),
   workspace_root: z.string().optional(),
+  create_if_missing: z.boolean().optional(),
   created_at: z.string().optional(),
   policy_auto_approved: z.boolean().optional(),
   policy_saved: z.boolean().optional(),
   policy_rule_id: z.string().optional(),
+  action_failed: z.boolean().optional(),
 };
 
 function jsonResult(value) {
@@ -98,16 +102,26 @@ function approvalCardResult(prepared) {
       _meta: { source: 'ccm.exec-policy' },
     };
   }
+  const workspaceAction = value.kind === 'workspace';
   const lines = [
-    'CCM prepared a frozen full-access command for user approval.',
+    workspaceAction
+      ? 'CCM prepared a frozen workspace action for user approval.'
+      : 'CCM prepared a frozen full-access command for user approval.',
     'Approval ID: ' + value.approval_id,
     'Operation ID: ' + value.operation_id,
     'Environment: ' + value.environment_id,
     'Workspace: ' + value.workspace_id,
-    'Command: ' + value.command,
+    ...(workspaceAction
+      ? [
+          'Workspace root: ' + value.workspace_root,
+          'Action: ' + value.operation,
+        ]
+      : ['Command: ' + value.command]),
     'Expires: ' + value.expires_at,
     'The attached CCM approval card is the only valid approval path for this request.',
-    'Do not call respond_to_escalation and do not recreate or retry this command yourself.',
+    workspaceAction
+      ? 'Do not call respond_to_escalation and do not recreate or retry this workspace action yourself.'
+      : 'Do not call respond_to_escalation and do not recreate or retry this command yourself.',
   ];
   return {
     content: [{ type: 'text', text: lines.join('\n') }],
@@ -117,6 +131,134 @@ function approvalCardResult(prepared) {
       approval_nonce: prepared.approvalNonce,
     },
   };
+}
+
+function workspaceActionStatus(request, {
+  output,
+  workspaceContext = null,
+  actionFailed = false,
+} = {}) {
+  return {
+    wall_time_seconds: 0,
+    output: String(output || ''),
+    ...request,
+    ...(workspaceContext || {}),
+    ...(actionFailed ? { action_failed: true } : {}),
+  };
+}
+
+async function resolvePendingWorkspaceAction(
+  runtime,
+  { approval_id: approvalId, approval_nonce: approvalNonce, decision },
+  { hostSession = null } = {},
+) {
+  if (decision === 'approve_workspace') {
+    throw new Error(
+      'Always allow in workspace is only available for execution approvals.',
+    );
+  }
+  if (decision === 'deny') {
+    const denied = runtime.approvalManager.denyAppWorkspace(
+      approvalId,
+      approvalNonce,
+      hostSession,
+    );
+    return workspaceActionStatus(denied, {
+      output: 'The user denied this workspace action. No workspace change was made.',
+    });
+  }
+  if (decision !== 'approve') {
+    throw new Error('Workspace approval decision must be approve or deny.');
+  }
+
+  const claimed = runtime.approvalManager.claimAppWorkspace(
+    approvalId,
+    approvalNonce,
+    hostSession,
+  );
+  const action = claimed.action;
+  try {
+    const environment = runtime.environmentRegistry.resolve(
+      action.environment_id,
+    );
+    let workspace;
+    if (action.operation === 'select_workspace') {
+      workspace = await runtime.workerHub.call(
+        environment.id,
+        'get_workspace',
+        { workspace_id: action.workspace_id },
+        { timeoutMs: 10_000 },
+      );
+      if (workspace.kind !== 'registered' ||
+          workspace.workspace_id !== action.workspace_id ||
+          workspace.root !== action.workspace_root) {
+        throw new Error(
+          'Frozen workspace identity no longer matches the registered workspace.',
+        );
+      }
+    } else if (action.operation === 'register_workspace') {
+      const inspected = await runtime.workerHub.call(
+        environment.id,
+        'inspect_workspace_path',
+        {
+          path: action.workspace_root,
+          workspace_id: action.workspace_id,
+          create_if_missing: Boolean(action.create_if_missing),
+        },
+        { timeoutMs: 10_000 },
+      );
+      if (inspected.workspace_id !== action.workspace_id ||
+          inspected.root !== action.workspace_root) {
+        throw new Error(
+          'Frozen workspace registration target no longer matches the inspected path.',
+        );
+      }
+      workspace = await runtime.workerHub.call(
+        environment.id,
+        'register_workspace',
+        {
+          path: action.workspace_root,
+          workspace_id: action.workspace_id,
+          create_if_missing: Boolean(action.create_if_missing),
+          approved_root: action.workspace_root,
+        },
+        { timeoutMs: 10_000 },
+      );
+      if (workspace.workspace_id !== action.workspace_id ||
+          workspace.root !== action.workspace_root) {
+        throw new Error(
+          'Registered workspace no longer matches the frozen approval target.',
+        );
+      }
+    } else {
+      throw new Error('Unknown frozen workspace operation: ' + action.operation);
+    }
+
+    const workspaceContext = runtime.workspaceContextManager.createRegistered(
+      environment.id,
+      workspace,
+    );
+    const consumed = runtime.approvalManager.markAppWorkspaceConsumed(
+      approvalId,
+    );
+    return workspaceActionStatus(consumed, {
+      workspaceContext,
+      output: action.operation === 'select_workspace'
+        ? 'Approved and entered the selected workspace.'
+        : 'Approved, registered, and entered the workspace.',
+    });
+  } catch (error) {
+    let consumed = claimed.request;
+    try {
+      consumed = runtime.approvalManager.markAppWorkspaceConsumed(approvalId);
+    } catch {}
+    return workspaceActionStatus(consumed, {
+      output:
+        'Workspace action was not performed: ' +
+        String(error?.message || error),
+      actionFailed: true,
+    });
+  }
 }
 
 function patchResult(value) {
@@ -242,20 +384,30 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'select_workspace',
     provider: 'ccm-core',
-    surfaces: { deferred: true, codeMode: true },
+    surfaces: { direct: true, codeMode: true },
+    mcpMeta: {
+      ui: {
+        resourceUri: APPROVAL_UI_URI,
+        visibility: ['model', 'app'],
+      },
+      'ui/resourceUri': APPROVAL_UI_URI,
+      'openai/outputTemplate': APPROVAL_UI_URI,
+      'openai/widgetAccessible': true,
+    },
     tags: ['workspace', 'project', 'approval'],
     description: [
       'Enter a registered workspace and return a workspace_context for subsequent CCM development calls.',
       'Workspace approval establishes the selected project execution context.',
       'Use this only when the user explicitly intends to work in a registered project. For temporary execution without a selected project, use create_projectless_context instead.',
-      'Entering a registered workspace always requires explicit user approval. Call once without approval_id, stop for user approval, call respond_to_escalation, then retry with the same target and approval_id.',
+      'Direct calls render the CCM approval card. The user approves or denies the frozen workspace action inside the card; CCM completes an approved entry and returns workspace_context without a model retry.',
+      'Code Mode calls retain the legacy approval_id/respond_to_escalation/retry flow for compatibility because nested tool results cannot render the approval app.',
     ].join('\n\n'),
     inputSchema: {
       environment_id: z.string().describe('Environment whose Worker owns the workspace.'),
       workspace_id: z.string().min(1).describe('Registered workspace id on that Worker.'),
       approval_id: z.string().uuid().optional().describe('One-shot approval id returned by the pending selection request.'),
     },
-    handler: async (args) => {
+    handler: async (args, context) => {
       try {
         const environment = runtime.environmentRegistry.resolve(args.environment_id);
         const workspace = await runtime.workerHub.call(
@@ -273,20 +425,38 @@ export function registerCoreTools(registry, runtime) {
           workspace_root: workspace.root,
         };
         if (!args.approval_id) {
-          const approval = runtime.approvalManager.requestWorkspaceAction(
+          const justification =
+            'Allow CCM to enter registered workspace ' +
+            environment.id + ' / ' + workspace.workspace_id +
+            ' at ' + workspace.root + '?';
+          if (context?.source === 'code_mode') {
+            const approval = runtime.approvalManager.requestWorkspaceAction(
+              'select_workspace',
+              intent,
+              justification,
+            );
+            return jsonResult({
+              approval_required: true,
+              ...approval,
+              instruction:
+                'Stop and ask the user for explicit approval. After approval, ' +
+                'call respond_to_escalation and retry select_workspace with ' +
+                'the same target plus this approval_id.',
+            });
+          }
+          const hostSession = context?.extra?._meta?.['openai/session'] || null;
+          const prepared = runtime.approvalManager.requestWorkspaceAction(
             'select_workspace',
             intent,
-            'Allow CCM to enter registered workspace ' +
-              environment.id + ' / ' + workspace.workspace_id +
-              ' at ' + workspace.root + '?',
+            justification,
+            { channel: 'app', hostSession },
           );
-          return jsonResult({
-            approval_required: true,
-            ...approval,
-            instruction:
-              'Stop and ask the user for explicit approval. After approval, ' +
-              'call respond_to_escalation and retry select_workspace with ' +
-              'the same target plus this approval_id.',
+          return approvalCardResult({
+            value: {
+              approval_required: true,
+              ...prepared.request,
+            },
+            approvalNonce: prepared.approvalNonce,
           });
         }
         runtime.approvalManager.consumeWorkspaceAction(
@@ -309,12 +479,22 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'register_workspace',
     provider: 'ccm-core',
-    surfaces: { deferred: true, codeMode: true },
+    surfaces: { direct: true, codeMode: true },
+    mcpMeta: {
+      ui: {
+        resourceUri: APPROVAL_UI_URI,
+        visibility: ['model', 'app'],
+      },
+      'ui/resourceUri': APPROVAL_UI_URI,
+      'openai/outputTemplate': APPROVAL_UI_URI,
+      'openai/widgetAccessible': true,
+    },
     tags: ['workspace', 'project', 'approval', 'register'],
     description: [
       'Register a project directory on a Worker and immediately return a workspace_context for it. With create_if_missing=true, one approved flow may create the missing directory, register it, and enter it.',
       'Use this only when the user explicitly intends to register that concrete directory as a project. Do not register a temporary directory merely to obtain an execution context; use create_projectless_context instead.',
-      'Registration expands CCM project access and always requires explicit user approval. If create_if_missing=true, the approval is also narrowly scoped to creating that exact directory if it is still missing. Call once without approval_id, stop for user approval, call respond_to_escalation, then retry with the exact same target, create_if_missing value, and approval_id.',
+      'Registration expands CCM project access and always requires explicit user approval. Direct calls render the CCM approval card; an approved frozen action is created/registered/entered by CCM without a model retry.',
+      'Code Mode calls retain the legacy approval_id/respond_to_escalation/retry flow for compatibility because nested tool results cannot render the approval app.',
       'This workspace approval authorizes only the create/register/enter action. It is not authorization to begin implementation when the user is still planning.',
     ].join('\n\n'),
     inputSchema: {
@@ -324,7 +504,7 @@ export function registerCoreTools(registry, runtime) {
       create_if_missing: z.boolean().optional().describe('Create the target directory after approval if it is missing. Defaults to false.'),
       approval_id: z.string().uuid().optional().describe('One-shot approval id returned by the pending registration request.'),
     },
-    handler: async (args) => {
+    handler: async (args, context) => {
       try {
         const environment = runtime.environmentRegistry.resolve(args.environment_id);
         const inspected = await runtime.workerHub.call(
@@ -347,20 +527,38 @@ export function registerCoreTools(registry, runtime) {
           const action = inspected.create_required
             ? 'create, register, and enter workspace '
             : 'register and enter workspace ';
-          const approval = runtime.approvalManager.requestWorkspaceAction(
+          const justification =
+            'Allow CCM to ' + action +
+            environment.id + ' / ' + inspected.workspace_id +
+            ' at ' + inspected.root + '?';
+          if (context?.source === 'code_mode') {
+            const approval = runtime.approvalManager.requestWorkspaceAction(
+              'register_workspace',
+              intent,
+              justification,
+            );
+            return jsonResult({
+              approval_required: true,
+              ...approval,
+              instruction:
+                'Stop and ask the user for explicit approval. After approval, ' +
+                'call respond_to_escalation and retry register_workspace with ' +
+                'the same target plus this approval_id.',
+            });
+          }
+          const hostSession = context?.extra?._meta?.['openai/session'] || null;
+          const prepared = runtime.approvalManager.requestWorkspaceAction(
             'register_workspace',
             intent,
-            'Allow CCM to ' + action +
-              environment.id + ' / ' + inspected.workspace_id +
-              ' at ' + inspected.root + '?',
+            justification,
+            { channel: 'app', hostSession },
           );
-          return jsonResult({
-            approval_required: true,
-            ...approval,
-            instruction:
-              'Stop and ask the user for explicit approval. After approval, ' +
-              'call respond_to_escalation and retry register_workspace with ' +
-              'the same target plus this approval_id.',
+          return approvalCardResult({
+            value: {
+              approval_required: true,
+              ...prepared.request,
+            },
+            approvalNonce: prepared.approvalNonce,
           });
         }
         runtime.approvalManager.consumeWorkspaceAction(
@@ -510,7 +708,7 @@ export function registerCoreTools(registry, runtime) {
     environmentRequirements: { capabilities: ['exec'] },
     description: [
       'App-only resolver for a frozen CCM approval request. It is invoked by the CCM approval card, not by the model.',
-      'On approve, CCM resumes only the previously frozen action. approve_workspace also stores a constrained workspace policy for future matching executions. This tool accepts no command, workspace, workdir, or shell override.',
+      'On approve, CCM resumes only the previously frozen execution or workspace action. approve_workspace stores a constrained policy only for execution approvals. This tool accepts no command, workspace target, workdir, or shell override.',
     ].join('\n\n'),
     inputSchema: {
       approval_id: z.string().uuid().describe('Frozen CCM approval identifier.'),
@@ -521,10 +719,20 @@ export function registerCoreTools(registry, runtime) {
     handler: async (args, context) => {
       try {
         const hostSession = context?.extra?._meta?.['openai/session'] || null;
-        return execResult(await runtime.processManager.resolvePendingExecution(
-          args,
-          { hostSession },
-        ));
+        const pending = runtime.approvalManager.getRequest(args.approval_id);
+        if (pending.kind === 'workspace') {
+          return execResult(await resolvePendingWorkspaceAction(
+            runtime,
+            args,
+            { hostSession },
+          ));
+        }
+        return execResult(
+          await runtime.processManager.resolvePendingExecution(
+            args,
+            { hostSession },
+          ),
+        );
       } catch (error) {
         return toolError(error);
       }
@@ -537,9 +745,9 @@ export function registerCoreTools(registry, runtime) {
     surfaces: { direct: true },
     tags: ['approval', 'sandbox', 'permission'],
     description: [
-      'Records the user response to a legacy CCM approval request, primarily workspace access for select_workspace/register_workspace.',
+      'Records the user response to an already-issued legacy CCM approval request.',
       'MUST NOT approve unless the user explicitly approved the displayed request in a user message.',
-      'Do not use this tool for request_escalated_exec approvals; those are resolved only by the CCM approval card. Legacy workspace approval does not perform the pending action; retry the exact workspace tool with the same approval_id.',
+      'Do not use this tool for new direct execution or workspace approval-card requests; those are resolved only by the CCM approval card. A legacy workspace approval does not perform the pending action; retry the exact workspace tool with the same approval_id.',
     ].join('\n\n'),
     inputSchema: {
       approval_id: z.string().uuid().describe('Pending approval id returned by the requesting CCM tool.'),

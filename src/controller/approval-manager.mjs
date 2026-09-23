@@ -196,19 +196,37 @@ export class ApprovalManager {
     };
   }
 
-  requestWorkspaceAction(operation, args, justification) {
+  requestWorkspaceAction(
+    operation,
+    args,
+    justification,
+    { channel = 'legacy', hostSession = null } = {},
+  ) {
     this.#prune();
+    if (!['legacy', 'app'].includes(channel)) {
+      throw new Error('Workspace approval channel must be legacy or app.');
+    }
     const intent = workspaceIntentFor(operation, args);
     const approvalId = crypto.randomUUID();
+    const approvalNonce = channel === 'app'
+      ? crypto.randomBytes(32).toString('base64url')
+      : null;
     const createdAt = this.now();
     const request = {
       approvalId,
       operationId: crypto.randomUUID(),
       state: 'pending',
       kind: 'workspace',
-      channel: 'legacy',
+      channel,
       intent,
       intentHash: hashIntent(intent),
+      ...(channel === 'app'
+        ? {
+            action: Object.freeze({ ...intent }),
+            approvalNonceHash: hashSecret(approvalNonce),
+            hostSession: hostSession ? String(hostSession) : null,
+          }
+        : {}),
       justification: String(
         justification ||
         'Allow CCM to access this registered workspace?',
@@ -218,6 +236,19 @@ export class ApprovalManager {
     };
     this.requests.set(approvalId, request);
     this.#emit('requested', request);
+    if (channel === 'app') {
+      return {
+        request: this.#publicRequest(request),
+        approvalNonce,
+      };
+    }
+    return this.#publicRequest(request);
+  }
+
+  getRequest(approvalId) {
+    this.#prune();
+    const request = this.requests.get(String(approvalId));
+    if (!request) throw new Error('Unknown or expired approval_id.');
     return this.#publicRequest(request);
   }
 
@@ -392,6 +423,81 @@ export class ApprovalManager {
     return this.#publicRequest(request);
   }
 
+  claimAppWorkspace(approvalId, approvalNonce, hostSession = null) {
+    this.#prune();
+    const request = this.requests.get(String(approvalId));
+    if (!request) throw new Error('Unknown or expired approval_id.');
+    if (request.kind !== 'workspace' || request.channel !== 'app') {
+      throw new Error('Approval request is not an app workspace approval.');
+    }
+    if (request.state !== 'pending') {
+      throw new Error(
+        'Workspace approval request cannot dispatch from state=' +
+        request.state + '.',
+      );
+    }
+    if (!secretMatches(approvalNonce, request.approvalNonceHash)) {
+      throw new Error('Approval nonce is invalid.');
+    }
+    if (request.hostSession && hostSession &&
+        request.hostSession !== String(hostSession)) {
+      throw new Error('Approval request belongs to a different host session.');
+    }
+    request.state = 'dispatching';
+    request.approvedAt ??= this.now();
+    request.dispatchStartedAt = this.now();
+    this.#emit('dispatching', request);
+    return {
+      request: this.#publicRequest(request),
+      action: { ...request.action },
+    };
+  }
+
+  denyAppWorkspace(approvalId, approvalNonce, hostSession = null) {
+    this.#prune();
+    const request = this.requests.get(String(approvalId));
+    if (!request) throw new Error('Unknown or expired approval_id.');
+    if (request.kind !== 'workspace' || request.channel !== 'app') {
+      throw new Error('Approval request is not an app workspace approval.');
+    }
+    if (request.state !== 'pending') {
+      throw new Error(
+        'Workspace approval request cannot be denied from state=' +
+        request.state + '.',
+      );
+    }
+    if (!secretMatches(approvalNonce, request.approvalNonceHash)) {
+      throw new Error('Approval nonce is invalid.');
+    }
+    if (request.hostSession && hostSession &&
+        request.hostSession !== String(hostSession)) {
+      throw new Error('Approval request belongs to a different host session.');
+    }
+    request.state = 'denied';
+    request.respondedAt = this.now();
+    this.#emit('responded', request, { decision: 'deny' });
+    return this.#publicRequest(request);
+  }
+
+  markAppWorkspaceConsumed(approvalId) {
+    this.#prune();
+    const request = this.requests.get(String(approvalId));
+    if (!request) throw new Error('Unknown or expired approval_id.');
+    if (request.kind !== 'workspace' || request.channel !== 'app') {
+      throw new Error('Approval request is not an app workspace approval.');
+    }
+    if (request.state !== 'dispatching') {
+      throw new Error(
+        'Workspace approval request is not dispatching; state=' +
+        request.state + '.',
+      );
+    }
+    request.state = 'consumed';
+    request.consumedAt = this.now();
+    this.#emit('consumed', request);
+    return this.#publicRequest(request);
+  }
+
   markAppExecutionConsumed(approvalId) {
     return this.#transitionDispatchState(approvalId, 'consumed');
   }
@@ -454,6 +560,7 @@ export class ApprovalManager {
       approval_id: request.approvalId,
       operation_id: request.operationId,
       state: request.state,
+      kind: request.kind,
       environment_id: request.intent.environment_id,
       justification: request.justification,
       expires_at: new Date(request.expiresAt).toISOString(),
