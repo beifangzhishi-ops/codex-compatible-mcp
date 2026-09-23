@@ -88,13 +88,20 @@ function fakeWorkspaceContextManager() {
   };
 }
 
-test('ApprovalManager binds a grant to one exact execution and expires it', () => {
+test('ApprovalManager freezes one exact execution before binding an approval card', () => {
   let now = Date.UTC(2026, 8, 20, 12, 0, 0);
   const approvals = new ApprovalManager({
     ttlMs: 1000,
     now: () => now,
   });
+  const workspace = {
+    workspace_context: '00000000-0000-4000-8000-000000000001',
+    workspace_id: 'approval-workspace',
+    workspace_kind: 'registered',
+    workspace_root: 'C:\\workspace',
+  };
   const args = {
+    workspace_context: workspace.workspace_context,
     cmd: 'Write-Output APPROVED',
     workdir: 'C:\\workspace',
     tty: false,
@@ -102,41 +109,42 @@ test('ApprovalManager binds a grant to one exact execution and expires it', () =
     justification: 'Allow this test once?',
   };
 
-  const pending = approvals.requestExecution(args, 'approval-worker');
-  assert.equal(pending.state, 'pending');
-  assert.equal(pending.command, args.cmd);
-
-  const approved = approvals.respond(pending.approval_id, 'approve');
-  assert.equal(approved.state, 'approved');
-
-  assert.throws(
-    () => approvals.consumeExecution(
-      pending.approval_id,
-      { ...args, cmd: 'Write-Output CHANGED' },
-      'approval-worker',
-    ),
-    /does not match/,
-  );
-
-  const consumed = approvals.consumeExecution(
-    pending.approval_id,
+  const pending = approvals.requestExecution(
     args,
     'approval-worker',
+    { workspace },
   );
-  assert.equal(consumed.state, 'consumed');
+  assert.equal(pending.state, 'pending');
+  assert.equal(pending.command, args.cmd);
+  const prepared = approvals.prepareAppApproval(
+    pending.approval_id,
+    { hostSession: 'chat-a' },
+  );
+  assert.equal(typeof prepared.approvalNonce, 'string');
   assert.throws(
-    () => approvals.consumeExecution(
+    () => approvals.prepareAppApproval(
       pending.approval_id,
-      args,
-      'approval-worker',
+      { hostSession: 'chat-a' },
     ),
-    /not approved/,
+    /already bound/i,
   );
+  const claimed = approvals.claimAppExecution(
+    pending.approval_id,
+    prepared.approvalNonce,
+    'chat-a',
+  );
+  assert.equal(claimed.action.cmd, 'Write-Output APPROVED');
+  assert.equal(claimed.action.workspace_context, workspace.workspace_context);
+  assert.equal(claimed.action.workspace_root, workspace.workspace_root);
 
-  const expiring = approvals.requestExecution(args, 'approval-worker');
+  const expiring = approvals.requestExecution(
+    args,
+    'approval-worker',
+    { workspace },
+  );
   now += 1001;
   assert.throws(
-    () => approvals.respond(expiring.approval_id, 'approve'),
+    () => approvals.prepareAppApproval(expiring.approval_id),
     /Unknown or expired/,
   );
 });
@@ -180,7 +188,7 @@ test('ApprovalManager app approvals require the card nonce and resume one frozen
     workspace_kind: 'registered',
     workspace_root: 'C:\\workspace',
   };
-  const prepared = approvals.requestExecutionForApp(
+  const pending = approvals.requestExecution(
     {
       workspace_context: workspace.workspace_context,
       cmd: 'Write-Output APP_APPROVED',
@@ -189,17 +197,17 @@ test('ApprovalManager app approvals require the card nonce and resume one frozen
       justification: 'Allow the frozen app action?',
     },
     'approval-worker',
-    { workspace, hostSession: 'chat-session-a' },
+    { workspace },
+  );
+  const prepared = approvals.prepareAppApproval(
+    pending.approval_id,
+    { hostSession: 'chat-session-a' },
   );
 
   assert.equal(prepared.request.state, 'pending');
   assert.equal(typeof prepared.request.operation_id, 'string');
   assert.equal(Object.hasOwn(prepared.request, 'approval_nonce'), false);
   assert.equal(typeof prepared.approvalNonce, 'string');
-  assert.throws(
-    () => approvals.respond(prepared.request.approval_id, 'approve'),
-    /approval card/i,
-  );
   assert.throws(
     () => approvals.claimAppExecution(
       prepared.request.approval_id,
@@ -213,6 +221,13 @@ test('ApprovalManager app approvals require the card nonce and resume one frozen
       prepared.request.approval_id,
       prepared.approvalNonce,
       'chat-session-b',
+    ),
+    /different host session/i,
+  );
+  assert.throws(
+    () => approvals.claimAppExecution(
+      prepared.request.approval_id,
+      prepared.approvalNonce,
     ),
     /different host session/i,
   );
@@ -265,13 +280,16 @@ test('ApprovalManager does not expire an action while it is dispatching', () => 
     workspace_kind: 'registered',
     workspace_root: 'C:\\workspace',
   };
-  const prepared = approvals.requestExecutionForApp(
+  const pending = approvals.requestExecution(
     {
       workspace_context: workspace.workspace_context,
       cmd: 'Write-Output LONG_RUNNING',
     },
     'approval-worker',
     { workspace },
+  );
+  const prepared = approvals.prepareAppApproval(
+    pending.approval_id,
   );
   approvals.claimAppExecution(
     prepared.request.approval_id,
@@ -292,10 +310,15 @@ test('ApprovalManager terminal retention is independent of active approval TTL',
     now: () => now,
   });
   const args = {
+    workspace_context: '00000000-0000-4000-8000-000000000001',
     cmd: 'Write-Output TERMINAL_RETENTION',
   };
   const pending = approvals.requestExecution(args, 'approval-worker');
-  approvals.respond(pending.approval_id, 'deny');
+  const prepared = approvals.prepareAppApproval(pending.approval_id);
+  approvals.denyAppExecution(
+    pending.approval_id,
+    prepared.approvalNonce,
+  );
 
   now += 999;
   assert.equal(
@@ -310,7 +333,7 @@ test('ApprovalManager terminal retention is independent of active approval TTL',
   );
 });
 
-test('ApprovalManager binds workspace creation permission into the exact intent', () => {
+test('ApprovalManager freezes workspace creation permission into the pending action', () => {
   const approvals = new ApprovalManager();
   const intent = {
     environment_id: 'approval-worker',
@@ -324,21 +347,18 @@ test('ApprovalManager binds workspace creation permission into the exact intent'
     'Create and register this workspace?',
   );
   assert.equal(pending.create_if_missing, true);
-  approvals.respond(pending.approval_id, 'approve');
-  assert.throws(
-    () => approvals.consumeWorkspaceAction(
-      pending.approval_id,
-      'register_workspace',
-      { ...intent, create_if_missing: false },
-    ),
-    /does not match/,
-  );
-  const consumed = approvals.consumeWorkspaceAction(
+  const prepared = approvals.prepareAppApproval(
     pending.approval_id,
-    'register_workspace',
-    intent,
+    { hostSession: 'chat-a' },
   );
-  assert.equal(consumed.state, 'consumed');
+  const claimed = approvals.claimAppWorkspace(
+    pending.approval_id,
+    prepared.approvalNonce,
+    'chat-a',
+  );
+  assert.equal(claimed.action.operation, 'register_workspace');
+  assert.equal(claimed.action.create_if_missing, true);
+  assert.equal(claimed.action.workspace_root, intent.workspace_root);
 });
 
 test('ApprovalManager app workspace approvals require the card nonce and freeze the target', () => {
@@ -349,20 +369,19 @@ test('ApprovalManager app workspace approvals require the card nonce and freeze 
     workspace_root: 'C:\\projects\\project',
     create_if_missing: false,
   };
-  const prepared = approvals.requestWorkspaceAction(
+  const pending = approvals.requestWorkspaceAction(
     'select_workspace',
     intent,
     'Enter this workspace?',
-    { channel: 'app', hostSession: 'chat-a' },
+  );
+  const prepared = approvals.prepareAppApproval(
+    pending.approval_id,
+    { hostSession: 'chat-a' },
   );
 
   assert.equal(prepared.request.kind, 'workspace');
   assert.equal(prepared.request.operation, 'select_workspace');
   assert.equal(typeof prepared.approvalNonce, 'string');
-  assert.throws(
-    () => approvals.respond(prepared.request.approval_id, 'approve'),
-    /approval card/i,
-  );
   assert.throws(
     () => approvals.claimAppWorkspace(
       prepared.request.approval_id,
@@ -404,7 +423,7 @@ test('ApprovalManager app workspace approvals require the card nonce and freeze 
   );
 });
 
-test('RemoteProcessManager executes only after one matching approval', async () => {
+test('RemoteProcessManager executes only the frozen action after approval', async () => {
   const environmentRegistry = restrictedRegistry();
   const workerHub = new FakeWorkerHub();
   const approvalManager = new ApprovalManager();
@@ -425,40 +444,36 @@ test('RemoteProcessManager executes only after one matching approval', async () 
     const pending = await manager.execCommand(args);
     assert.equal(pending.approval_required, true);
     assert.equal(workerHub.calls.length, 0);
-
-    approvalManager.respond(pending.approval_id, 'approve');
-
-    await assert.rejects(
-      manager.execCommand({
-        ...args,
-        approval_id: pending.approval_id,
-        cmd: 'Write-Output CHANGED',
-      }),
-      /does not match/,
+    const prepared = approvalManager.prepareAppApproval(
+      pending.approval_id,
+      { hostSession: 'chat-a' },
     );
-    assert.equal(workerHub.calls.length, 0);
-
-    const result = await manager.execCommand({
-      ...args,
+    const result = await manager.resolvePendingExecution({
       approval_id: pending.approval_id,
-    });
-    assert.equal(result.exit_code, 0);
+      approval_nonce: prepared.approvalNonce,
+      decision: 'approve',
+    }, { hostSession: 'chat-a' });
+    assert.equal(result.state, 'consumed');
     assert.equal(workerHub.calls.length, 1);
+    assert.equal(workerHub.calls[0].params.cmd, args.cmd);
     assert.equal(
       workerHub.calls[0].params.sandbox_permissions,
       'approved_escalated',
     );
-    assert.equal(
-      Object.hasOwn(workerHub.calls[0].params, 'approval_id'),
-      false,
-    );
-
+    const changed = await manager.execCommand({
+      ...args,
+      cmd: 'Write-Output CHANGED',
+    });
+    assert.equal(changed.approval_required, true);
+    assert.notEqual(changed.approval_id, pending.approval_id);
+    assert.equal(workerHub.calls.length, 1);
     await assert.rejects(
-      manager.execCommand({
-        ...args,
+      manager.resolvePendingExecution({
         approval_id: pending.approval_id,
-      }),
-      /not approved/,
+        approval_nonce: prepared.approvalNonce,
+        decision: 'approve',
+      }, { hostSession: 'chat-a' }),
+      /cannot dispatch from state=consumed/i,
     );
   } finally {
     await manager.close();
@@ -476,24 +491,29 @@ test('RemoteProcessManager app approval executes only the frozen action', async 
     workspaceContextManager: fakeWorkspaceContextManager(),
   });
   try {
-    const prepared = await manager.prepareEscalatedCommand({
+    const pending = await manager.execCommand({
       workspace_context: '00000000-0000-4000-8000-000000000001',
       cmd: 'Write-Output FROZEN_ACTION',
       workdir: '.',
       yield_time_ms: 250,
+      sandbox_permissions: 'require_escalated',
       justification: 'Run the frozen test action?',
-    }, { hostSession: 'chat-a' });
-    assert.equal(prepared.value.state, 'pending');
+    });
+    const prepared = approvalManager.prepareAppApproval(
+      pending.approval_id,
+      { hostSession: 'chat-a' },
+    );
+    assert.equal(prepared.request.state, 'pending');
     assert.equal(workerHub.calls.length, 0);
 
     const result = await manager.resolvePendingExecution({
-      approval_id: prepared.value.approval_id,
+      approval_id: prepared.request.approval_id,
       approval_nonce: prepared.approvalNonce,
       decision: 'approve',
     }, { hostSession: 'chat-a' });
     assert.equal(result.state, 'consumed');
     assert.equal(result.output, 'ESCALATED_OK');
-    assert.equal(result.operation_id, prepared.value.operation_id);
+    assert.equal(result.operation_id, prepared.request.operation_id);
     assert.equal(workerHub.calls.length, 1);
     assert.equal(workerHub.calls[0].method, 'exec_command');
     assert.equal(workerHub.calls[0].params.cmd, 'Write-Output FROZEN_ACTION');
@@ -524,13 +544,15 @@ test('RemoteProcessManager marks app approval unknown after an in-flight Worker 
     workspaceContextManager: fakeWorkspaceContextManager(),
   });
   try {
-    const prepared = await manager.prepareEscalatedCommand({
+    const pending = await manager.execCommand({
       workspace_context: '00000000-0000-4000-8000-000000000001',
       cmd: 'Write-Output MAYBE_STARTED',
+      sandbox_permissions: 'require_escalated',
       justification: 'Run once?',
     });
+    const prepared = approvalManager.prepareAppApproval(pending.approval_id);
     const result = await manager.resolvePendingExecution({
-      approval_id: prepared.value.approval_id,
+      approval_id: prepared.request.approval_id,
       approval_nonce: prepared.approvalNonce,
       decision: 'approve',
     });
@@ -538,7 +560,7 @@ test('RemoteProcessManager marks app approval unknown after an in-flight Worker 
     assert.match(result.output, /will not retry automatically/i);
     await assert.rejects(
       manager.resolvePendingExecution({
-        approval_id: prepared.value.approval_id,
+        approval_id: prepared.request.approval_id,
         approval_nonce: prepared.approvalNonce,
         decision: 'approve',
       }),
@@ -549,7 +571,7 @@ test('RemoteProcessManager marks app approval unknown after an in-flight Worker 
   }
 });
 
-test('Legacy approval is not consumed when Worker dispatch fails before send', async () => {
+test('App approval remains retryable when Worker dispatch fails before send', async () => {
   const environmentRegistry = restrictedRegistry();
   class PreDispatchWorkerHub extends EventEmitter {
     constructor() {
@@ -564,9 +586,9 @@ test('Legacy approval is not consumed when Worker dispatch fails before send', a
       }
       this.calls.push({ environmentId, method, params });
       return Promise.resolve({
-        chunk_id: 'legacy-retry',
+        chunk_id: 'app-retry',
         wall_time_seconds: 0,
-        output: 'LEGACY_RETRY_OK',
+        output: 'APP_RETRY_OK',
         exit_code: 0,
       });
     }
@@ -581,23 +603,28 @@ test('Legacy approval is not consumed when Worker dispatch fails before send', a
   });
   const args = {
     workspace_context: '00000000-0000-4000-8000-000000000001',
-    cmd: 'Write-Output LEGACY_RETRY_OK',
+    cmd: 'Write-Output APP_RETRY_OK',
     sandbox_permissions: 'require_escalated',
-    justification: 'Legacy compatibility test?',
+    justification: 'Retryable dispatch test?',
   };
   try {
     const pending = await manager.execCommand(args);
-    approvalManager.respond(pending.approval_id, 'approve');
-    await assert.rejects(
-      manager.execCommand({ ...args, approval_id: pending.approval_id }),
-      /before send/i,
-    );
-    workerHub.failBeforeSend = false;
-    const retried = await manager.execCommand({
-      ...args,
+    const prepared = approvalManager.prepareAppApproval(pending.approval_id);
+    const failed = await manager.resolvePendingExecution({
       approval_id: pending.approval_id,
+      approval_nonce: prepared.approvalNonce,
+      decision: 'approve',
     });
-    assert.equal(retried.output, 'LEGACY_RETRY_OK');
+    assert.equal(failed.state, 'approved_retryable');
+    assert.match(failed.output, /before send/i);
+    workerHub.failBeforeSend = false;
+    const retried = await manager.resolvePendingExecution({
+      approval_id: pending.approval_id,
+      approval_nonce: prepared.approvalNonce,
+      decision: 'approve',
+    });
+    assert.equal(retried.output, 'APP_RETRY_OK');
+    assert.equal(retried.state, 'consumed');
     assert.equal(workerHub.calls.length, 1);
   } finally {
     await manager.close();
@@ -673,16 +700,17 @@ test('approval can persist a workspace execution policy and reuse it', async () 
   const args = {
     workspace_context: '00000000-0000-4000-8000-000000000001',
     cmd: 'Write-Output POLICY_OK',
+    sandbox_permissions: 'require_escalated',
     justification: 'Allow this debugging command?',
   };
 
   try {
-    const prepared = await manager.prepareEscalatedCommand(args);
-    assert.equal(prepared.autoApproved, undefined);
-    assert.equal(prepared.value.state, 'pending');
+    const pending = await manager.execCommand(args);
+    assert.equal(pending.state, 'pending');
+    const prepared = approvalManager.prepareAppApproval(pending.approval_id);
 
     const resolved = await manager.resolvePendingExecution({
-      approval_id: prepared.value.approval_id,
+      approval_id: pending.approval_id,
       approval_nonce: prepared.approvalNonce,
       decision: 'approve_workspace',
     });
@@ -695,11 +723,10 @@ test('approval can persist a workspace execution policy and reuse it', async () 
       'approved_escalated',
     );
 
-    const automatic = await manager.prepareEscalatedCommand(args);
-    assert.equal(automatic.autoApproved, true);
-    assert.equal(automatic.value.policy_auto_approved, true);
+    const automatic = await manager.execCommand(args);
+    assert.equal(automatic.policy_auto_approved, true);
     assert.equal(
-      automatic.value.policy_rule_id,
+      automatic.policy_rule_id,
       '11111111-1111-4111-8111-111111111111',
     );
     assert.equal(workerHub.calls.length, 2);
@@ -758,13 +785,15 @@ test('package-script workspace approval uses a restricted-compatible policy prob
   });
 
   try {
-    const prepared = await manager.prepareEscalatedCommand({
+    const pending = await manager.execCommand({
       workspace_context: '00000000-0000-4000-8000-000000000001',
       cmd: 'npm test',
+      sandbox_permissions: 'require_escalated',
       justification: 'Persist npm test?',
     });
+    const prepared = approvalManager.prepareAppApproval(pending.approval_id);
     const resolved = await manager.resolvePendingExecution({
-      approval_id: prepared.value.approval_id,
+      approval_id: pending.approval_id,
       approval_nonce: prepared.approvalNonce,
       decision: 'approve_workspace',
     });
@@ -814,13 +843,15 @@ test('package-script probe failure stays retryable without dispatching', async (
   });
 
   try {
-    const prepared = await manager.prepareEscalatedCommand({
+    const pending = await manager.execCommand({
       workspace_context: '00000000-0000-4000-8000-000000000001',
       cmd: 'npm test',
+      sandbox_permissions: 'require_escalated',
       justification: 'Persist npm test?',
     });
+    const prepared = approvalManager.prepareAppApproval(pending.approval_id);
     const resolved = await manager.resolvePendingExecution({
-      approval_id: prepared.value.approval_id,
+      approval_id: pending.approval_id,
       approval_nonce: prepared.approvalNonce,
       decision: 'approve_workspace',
     });

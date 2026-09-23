@@ -94,6 +94,7 @@ export const SEND_FILE_UI_HTML = String.raw`<!doctype html>
       let nextId = 1;
       let current = null;
       let materializingKey = "";
+      let completedResourceKey = "";
       let lastResult = null;
       let lastResource = null;
 
@@ -137,6 +138,26 @@ export const SEND_FILE_UI_HTML = String.raw`<!doctype html>
           typeof item.uri === "string" &&
           typeof item.name === "string"
         ) || null;
+      }
+
+      function structuredResource(result) {
+        const value = result && result.structuredContent;
+        if (!value ||
+            typeof value.resource_uri !== "string" ||
+            !value.resource_uri.startsWith("ccm-file:///") ||
+            typeof value.filename !== "string" || !value.filename) {
+          return null;
+        }
+        return {
+          uri: value.resource_uri,
+          name: value.filename,
+          mimeType: value.mime_type || "application/octet-stream",
+          size: value.byte_length
+        };
+      }
+
+      function findResource(result) {
+        return structuredResource(result) || findResourceLink(result);
       }
 
       function formatBytes(value) {
@@ -200,6 +221,11 @@ export const SEND_FILE_UI_HTML = String.raw`<!doctype html>
           typeof result.structuredContent.sha256 === "string"
           ? result.structuredContent.sha256
           : null;
+      }
+
+      function resourceKey(result, resource) {
+        if (!resource?.uri) return "";
+        return resource.uri + "|" + (sourceSha(result) || "");
       }
 
       function stateMatches(result, state, resource) {
@@ -298,7 +324,8 @@ export const SEND_FILE_UI_HTML = String.raw`<!doctype html>
       }
 
       async function processResult(result) {
-        const resource = findResourceLink(result);
+        const resource = findResource(result);
+        const key = resourceKey(result, resource);
         lastResult = result || null;
         lastResource = resource;
         const restored = restoredState();
@@ -316,16 +343,24 @@ export const SEND_FILE_UI_HTML = String.raw`<!doctype html>
         render(resource, restored);
         if (stateMatches(result, restored, resource)) {
           current = withRecoveryResource(restored, result, resource);
+          completedResourceKey = key;
           download.disabled = false;
           setStatus("Ready");
           return;
         }
-        if (materializingKey === resource.uri) return;
-        materializingKey = resource.uri;
+        if (completedResourceKey === key && current?.fileId) {
+          render(resource, current);
+          download.disabled = false;
+          setStatus("Ready");
+          return;
+        }
+        if (materializingKey === key) return;
+        materializingKey = key;
         download.disabled = true;
         setStatus("Saving this file to the current ChatGPT conversation…");
         try {
           current = await materialize(result, resource);
+          completedResourceKey = key;
           render(resource, current);
           download.disabled = false;
           setStatus("Ready");

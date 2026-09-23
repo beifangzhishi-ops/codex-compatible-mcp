@@ -19,7 +19,15 @@ import {
 
 test('MCP lists and calls tools through a Remote Worker', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-mcp-'));
-  const runtime = createControllerRuntime({ workerPort: 0 });
+  const runtime = createControllerRuntime({
+    workerPort: 0,
+    auditLogFile: path.join(tempRoot, 'audit.jsonl'),
+    execPolicyStateFile: path.join(tempRoot, 'exec-policy.json'),
+    trustedPackageScriptStateFile: path.join(tempRoot, 'trusted-package-scripts.json'),
+    workspaceContextStateFile: path.join(tempRoot, 'workspace-contexts.json'),
+    fileTransferStateDir: path.join(tempRoot, 'file-transfers'),
+    planStateDir: path.join(tempRoot, 'plans'),
+  });
   const workerRuntime = createWorkerRuntime({
     environment: {
       id: 'mcp-worker',
@@ -57,11 +65,8 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       'exec_command',
       'list_environments',
       'receive_file',
-      'register_workspace',
-      'request_escalated_exec',
+      'request_approval',
       'resolve_pending_action',
-      'respond_to_escalation',
-      'select_workspace',
       'send_file',
       'tool_search',
       'view_image',
@@ -89,19 +94,13 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       ['app'],
     );
     const approvalTool = listed.tools.find(
-      (tool) => tool.name === 'request_escalated_exec',
+      (tool) => tool.name === 'request_approval',
     );
     assert.equal(approvalTool?._meta?.ui?.resourceUri, APPROVAL_UI_URI);
-    assert.equal(
-      listed.tools.find((tool) => tool.name === 'select_workspace')
-        ?._meta?.ui?.resourceUri,
-      APPROVAL_UI_URI,
-    );
-    assert.equal(
-      listed.tools.find((tool) => tool.name === 'register_workspace')
-        ?._meta?.ui?.resourceUri,
-      APPROVAL_UI_URI,
-    );
+    assert.equal(listed.tools.some((tool) => tool.name === 'select_workspace'), false);
+    assert.equal(listed.tools.some((tool) => tool.name === 'register_workspace'), false);
+    assert.equal(listed.tools.some((tool) => tool.name === 'request_escalated_exec'), false);
+    assert.equal(listed.tools.some((tool) => tool.name === 'respond_to_escalation'), false);
     const approvalResource = await client.readResource({ uri: APPROVAL_UI_URI });
     assert.equal(approvalResource.contents[0].text, APPROVAL_UI_HTML);
     assert.equal(approvalResource.contents[0]._meta.ui.prefersBorder, true);
@@ -125,33 +124,39 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(projectlessResult.workspace_kind, 'projectless');
 
     const seededWorkspace = workerRuntime.workspaceRegistry.list()[0];
-    const workspaceApproval = await client.callTool({
-      name: 'select_workspace',
+    const workspacePrepare = await client.callTool({
+      name: 'exec',
       arguments: {
-        environment_id: 'mcp-worker',
-        workspace_id: seededWorkspace.workspace_id,
+        calls: [{
+          tool: 'ccm.select_workspace',
+          arguments: {
+            environment_id: 'mcp-worker',
+            workspace_id: seededWorkspace.workspace_id,
+          },
+        }],
+        yield_time_ms: 1000,
+      },
+    });
+    assert.equal(workspacePrepare.isError, undefined);
+    const workspacePending =
+      workspacePrepare.structuredContent.calls[0].result.structured_content;
+    assert.equal(workspacePending.kind, 'workspace');
+    assert.equal(
+      workspacePending.operation,
+      'select_workspace',
+    );
+    const workspaceApproval = await client.callTool({
+      name: 'request_approval',
+      arguments: {
+        approval_id: workspacePending.approval_id,
       },
     });
     assert.equal(workspaceApproval.isError, undefined);
-    assert.equal(workspaceApproval.structuredContent.kind, 'workspace');
-    assert.equal(
-      workspaceApproval.structuredContent.operation,
-      'select_workspace',
-    );
     assert.equal(typeof workspaceApproval._meta?.approval_nonce, 'string');
-    const workspaceLegacyBypass = await client.callTool({
-      name: 'respond_to_escalation',
-      arguments: {
-        approval_id: workspaceApproval.structuredContent.approval_id,
-        decision: 'approve',
-      },
-    });
-    assert.equal(workspaceLegacyBypass.isError, true);
-    assert.match(workspaceLegacyBypass.content[0].text, /approval card/i);
     const workspacePersistentBypass = await client.callTool({
       name: 'resolve_pending_action',
       arguments: {
-        approval_id: workspaceApproval.structuredContent.approval_id,
+        approval_id: workspacePending.approval_id,
         approval_nonce: workspaceApproval._meta.approval_nonce,
         decision: 'approve_workspace',
       },
@@ -164,7 +169,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const selectedWorkspace = await client.callTool({
       name: 'resolve_pending_action',
       arguments: {
-        approval_id: workspaceApproval.structuredContent.approval_id,
+        approval_id: workspacePending.approval_id,
         approval_nonce: workspaceApproval._meta.approval_nonce,
         decision: 'approve',
       },
@@ -187,17 +192,26 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
         cmd: 'Write-Output MCP_OK',
       },
     });
-    assert.equal(result.isError, undefined);
+    assert.equal(result.isError, undefined, JSON.stringify(result));
     assert.equal(Object.hasOwn(result, 'resultType'), false);
     assert.match(result.content[0].text, /MCP_OK/);
     assert.equal(result.structuredContent.workspace_kind, 'projectless');
 
-    const escalation = await client.callTool({
-      name: 'request_escalated_exec',
+    const escalationPending = await client.callTool({
+      name: 'exec_command',
       arguments: {
         workspace_context: workspaceContext,
         cmd: 'Write-Output MCP_ESCALATED_OK',
+        sandbox_permissions: 'require_escalated',
         justification: 'Allow this MCP test command once?',
+      },
+    });
+    assert.equal(escalationPending.isError, undefined);
+    assert.equal(escalationPending.structuredContent.approval_required, true);
+    const escalation = await client.callTool({
+      name: 'request_approval',
+      arguments: {
+        approval_id: escalationPending.structuredContent.approval_id,
       },
     });
     assert.equal(escalation.isError, undefined);
@@ -206,16 +220,6 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(typeof escalation._meta?.approval_nonce, 'string');
 
     const approvalId = escalation.structuredContent.approval_id;
-    const legacyBypass = await client.callTool({
-      name: 'respond_to_escalation',
-      arguments: {
-        approval_id: approvalId,
-        decision: 'approve',
-      },
-    });
-    assert.equal(legacyBypass.isError, true);
-    assert.match(legacyBypass.content[0].text, /approval card/i);
-
     const escalatedResult = await client.callTool({
       name: 'resolve_pending_action',
       arguments: {
@@ -302,35 +306,30 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const docBytes = Buffer.alloc(3 * 1024 * 1024, 0x61);
     await fs.writeFile(path.join(workspaceRoot, 'preview.docx'), docBytes);
     const sendFileResult = await client.callTool({
-      name: 'exec',
+      name: 'send_file',
       arguments: {
-        calls: [{
-          tool: 'ccm-extra.send_file',
-          arguments: {
-            workspace_context: workspaceContext,
-            path: 'preview.docx',
-          },
-        }],
-        yield_time_ms: 1000,
+        workspace_context: workspaceContext,
+        path: 'preview.docx',
       },
     });
     assert.equal(sendFileResult.isError, undefined);
-    const resourceLink = sendFileResult.content.find(
-      (item) => item.type === 'resource_link',
-    );
-    assert.ok(resourceLink);
     assert.equal(
-      resourceLink.mimeType,
+      sendFileResult.content.some((item) => item.type === 'resource_link'),
+      false,
+    );
+    assert.equal(
+      sendFileResult.structuredContent.mime_type,
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     );
-    assert.equal(resourceLink.size, docBytes.length);
-    assert.equal(
-      sendFileResult.structuredContent.calls[0].result.content[1].type,
-      'resource_link',
-    );
-    const readFileResult = await client.readResource({ uri: resourceLink.uri });
+    assert.equal(sendFileResult.structuredContent.byte_length, docBytes.length);
+    const resourceUri = sendFileResult.structuredContent.resource_uri;
+    assert.match(resourceUri, /^ccm-file:\/\/\//);
+    const readFileResult = await client.readResource({ uri: resourceUri });
     assert.equal(readFileResult.contents.length, 1);
-    assert.equal(readFileResult.contents[0].mimeType, resourceLink.mimeType);
+    assert.equal(
+      readFileResult.contents[0].mimeType,
+      sendFileResult.structuredContent.mime_type,
+    );
     assert.deepEqual(
       Buffer.from(readFileResult.contents[0].blob, 'base64'),
       docBytes,

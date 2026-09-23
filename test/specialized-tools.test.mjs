@@ -1,10 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import { execFile } from 'node:child_process';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { promisify } from 'node:util';
 import { registerSpecializedTools } from '../src/tools/specialized-tools.mjs';
 import { SEND_FILE_UI_URI } from '../src/ui/send-file-app.mjs';
 import { ToolRegistry } from '../src/tools/tool-registry.mjs';
@@ -96,7 +92,13 @@ function fakeRuntime() {
   };
 }
 
-test('send_file is direct and returns a readable resource link using workspace_context', async () => {
+test('removed one-time-link capability is not registered', () => {
+  const registry = new ToolRegistry();
+  registerSpecializedTools(registry, fakeRuntime());
+  assert.equal(registry.get('ccm-extra.one_time_link'), null);
+});
+
+test('send_file is Direct-only and returns a structured bridge resource using workspace_context', async () => {
   const runtime = fakeRuntime();
   runtime.environmentRegistry.resolve = (environmentId) => ({
     id: environmentId || 'windows-worker',
@@ -107,7 +109,7 @@ test('send_file is direct and returns a readable resource link using workspace_c
   registerSpecializedTools(registry, runtime);
   const sendFile = registry.get('ccm-extra.send_file');
   assert.equal(sendFile.surfaces.direct, true);
-  assert.equal(sendFile.surfaces.codeMode, true);
+  assert.equal(sendFile.surfaces.codeMode, false);
   assert.equal(sendFile.supportsParallel, false);
   assert.match(sendFile.description, /exactly one file per call/i);
   assert.match(sendFile.description, /sequentially/i);
@@ -128,14 +130,17 @@ test('send_file is direct and returns a readable resource link using workspace_c
     path: 'C:\\docs\\report.docx',
   });
   assert.equal(result.isError, undefined);
-  assert.equal(result.content[1].type, 'resource_link');
+  assert.equal(result.content.length, 1);
+  assert.equal(result.content[0].type, 'text');
   assert.equal(
-    result.content[1].mimeType,
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    result.content.some((item) => item.type === 'resource_link'),
+    false,
   );
-  assert.equal(result.content[1].size, 4);
-  assert.match(result.content[1].uri, /^ccm-file:\/\/\/[0-9a-f-]+$/i);
-  const token = result.content[1].uri.split('/').at(-1);
+  assert.match(
+    result.structuredContent.resource_uri,
+    /^ccm-file:\/\/\/[0-9a-f-]+$/i,
+  );
+  const token = result.structuredContent.resource_uri.split('/').at(-1);
   const stored = runtime.fileTransferStore.get(token);
   assert.ok(stored);
   assert.equal(
@@ -143,7 +148,6 @@ test('send_file is direct and returns a readable resource link using workspace_c
     'test',
   );
   assert.equal(result.structuredContent.filename, 'report.docx');
-  assert.equal(result.structuredContent.resource_uri, result.content[1].uri);
 
   registerArchitectureTools(registry);
   const rejected = await registry.get('exec').handler({
@@ -157,19 +161,7 @@ test('send_file is direct and returns a readable resource link using workspace_c
     parallel: true,
   });
   assert.equal(rejected.isError, true);
-  assert.match(rejected.content[0].text, /parallel-call support/);
-
-  const sequential = await registry.get('exec').handler({
-    calls: [{
-      tool: 'ccm-extra.send_file',
-      arguments: {
-        workspace_context: '00000000-0000-4000-8000-000000000001',
-        path: 'C:\\docs\\second.docx',
-      },
-    }],
-  });
-  assert.equal(sequential.isError, undefined);
-  assert.equal(sequential.structuredContent.state, 'completed');
+  assert.match(rejected.content[0].text, /not available on the Code Mode surface/i);
 });
 
 test('receive_file is Direct-only and advertises a native ChatGPT file parameter', async () => {
@@ -244,192 +236,6 @@ test('ChatGPT Share export can use the default Git-ignored cache output', async 
   });
   assert.equal(result.isError, undefined);
   assert.equal(runtime.calls[0].cmd.includes(' --output '), false);
-});
-
-test('one-time key link accepts separate descriptor paths without reconstructing target path', async () => {
-  const runtime = fakeRuntime();
-  const registry = new ToolRegistry();
-  registerSpecializedTools(registry, runtime);
-  runtime.calls.length = 0;
-  runtime.processManager.execCommand = async (args) => {
-    runtime.calls.push(args);
-    return {
-      output: [
-        'https://ccm.example.test/ccm-once/random-token',
-        'tailscale warning emitted after the URL',
-        '',
-      ].join('\r\n'),
-      exit_code: 0,
-    };
-  };
-  const result = await registry.get('ccm-extra.one_time_link').handler({
-    environment_id: 'worker-b',
-    directory_file_path: 'C:\\temp\\directory.txt',
-    filename_file_path: 'C:\\temp\\filename.txt',
-    ttl_seconds: 180,
-  });
-  assert.equal(result.isError, undefined);
-  assert.equal(result.structuredContent.one_time_url, 'https://ccm.example.test/ccm-once/random-token');
-  assert.equal(result.structuredContent.expires_in_seconds, 180);
-  assert.match(runtime.calls[0].cmd, /ccm-once\\server\.cjs/);
-  assert.match(runtime.calls[0].cmd, /\$directoryFile='C:\\temp\\directory\.txt'/);
-  assert.match(runtime.calls[0].cmd, /\$filenameFile='C:\\temp\\filename\.txt'/);
-  assert.match(runtime.calls[0].cmd, /Get-Content -LiteralPath \$directoryFile -Raw/);
-  assert.match(runtime.calls[0].cmd, /Join-Path -Path \$directory -ChildPath \$filename/);
-  assert.match(runtime.calls[0].cmd, /New-Guid/);
-  assert.match(runtime.calls[0].cmd, /'180'\) -WindowStyle Hidden/);
-  assert.equal(runtime.calls[0].cmd.includes('C:\\secrets\\api-key.txt'), false);
-  assert.equal(runtime.calls[0].cmd.includes('start.ps1'), false);
-  assert.equal(runtime.calls[0].cmd.includes('powershell.exe'), false);
-  assert.equal(runtime.calls[0].cmd.includes('resolve-target.ps1'), false);
-});
-
-test('one-time key link waits for a yielded helper session before parsing the URL', async () => {
-  const runtime = fakeRuntime();
-  const registry = new ToolRegistry();
-  registerSpecializedTools(registry, runtime);
-  runtime.calls.length = 0;
-  runtime.processManager.execCommand = async (args) => {
-    runtime.calls.push(args);
-    return {
-      chunk_id: 'first',
-      wall_time_seconds: 5,
-      output: 'helper still running\r\n',
-      session_id: 42,
-    };
-  };
-  runtime.processManager.writeStdin = async (args) => {
-    runtime.calls.push({ writeStdin: args });
-    return {
-      chunk_id: 'second',
-      wall_time_seconds: 9,
-      output: 'https://ccm.example.test/ccm-once/yielded-token\r\n',
-      exit_code: 0,
-    };
-  };
-
-  const result = await registry.get('ccm-extra.one_time_link').handler({
-    environment_id: 'worker-b',
-    directory_file_path: 'C:\\temp\\directory.txt',
-    filename_file_path: 'C:\\temp\\filename.txt',
-    yield_time_ms: 5000,
-  });
-
-  assert.equal(result.isError, undefined);
-  assert.equal(
-    result.structuredContent.one_time_url,
-    'https://ccm.example.test/ccm-once/yielded-token',
-  );
-  assert.deepEqual(runtime.calls[1].writeStdin, {
-    workspace_context: '00000000-0000-4000-8000-000000000001',
-    session_id: 42,
-    chars: '',
-    yield_time_ms: 5000,
-    max_output_tokens: undefined,
-  });
-});
-
-test('one-time key link fails clearly when the helper remains live too long', async () => {
-  const runtime = fakeRuntime();
-  const registry = new ToolRegistry();
-  registerSpecializedTools(registry, runtime);
-  runtime.calls.length = 0;
-  runtime.processManager.execCommand = async (args) => {
-    runtime.calls.push(args);
-    return {
-      output: '',
-      session_id: 7,
-    };
-  };
-  runtime.processManager.writeStdin = async (args) => {
-    runtime.calls.push({ writeStdin: args });
-    return {
-      output: '',
-      session_id: 7,
-    };
-  };
-
-  const result = await registry.get('ccm-extra.one_time_link').handler({
-    environment_id: 'worker-b',
-    directory_file_path: 'C:\\temp\\directory.txt',
-    filename_file_path: 'C:\\temp\\filename.txt',
-  });
-
-  assert.equal(result.isError, true);
-  assert.match(result.content[0].text, /did not complete within 30 seconds/);
-  assert.equal(runtime.calls.length, 7);
-});
-
-test('one-time key link schema requires descriptor paths and documents separate operations', () => {
-  const runtime = fakeRuntime();
-  const registry = new ToolRegistry();
-  registerSpecializedTools(registry, runtime);
-  const tool = registry.get('ccm-extra.one_time_link');
-  assert.equal(Object.hasOwn(tool.inputSchema, 'file_path'), false);
-  assert.equal(Object.hasOwn(tool.inputSchema, 'directory_file_path'), true);
-  assert.equal(Object.hasOwn(tool.inputSchema, 'filename_file_path'), true);
-  assert.match(tool.description, /standalone command\/tool call/);
-  assert.match(tool.description, /Do not combine/);
-});
-
-test('one-time target resolver validates descriptor files and leaf filenames locally', async (t) => {
-  if (process.platform !== 'win32') {
-    t.skip('Windows-only one-time-link resolver');
-    return;
-  }
-
-  const execFileAsync = promisify(execFile);
-  const root = await fs.mkdtemp(path.join(process.cwd(), '.tmp-ccm-once-'));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
-  const directoryDescriptor = path.join(root, 'directory.txt');
-  const filenameDescriptor = path.join(root, 'filename.txt');
-  const target = path.join(root, 'target.txt');
-  const resolverPath = fileURLToPath(new URL('../tools/ccm-once/resolve-target.ps1', import.meta.url));
-
-  await fs.writeFile(target, 'test-only');
-  await fs.writeFile(directoryDescriptor, root);
-  await fs.writeFile(filenameDescriptor, 'target.txt');
-
-  const invoke = async (
-    dirFile = directoryDescriptor,
-    nameFile = filenameDescriptor,
-  ) => execFileAsync('powershell.exe', [
-    '-NoProfile',
-    '-ExecutionPolicy',
-    'Bypass',
-    '-File',
-    resolverPath,
-    '-DirectoryFilePath',
-    dirFile,
-    '-FilenameFilePath',
-    nameFile,
-  ]);
-
-  let resolved;
-  try {
-    resolved = await invoke();
-  } catch (error) {
-    if (error?.code === 'EPERM') {
-      t.skip('CCM restricted sandbox blocks child-process spawning');
-      return;
-    }
-    throw error;
-  }
-  assert.equal(resolved.stdout.trim().toLowerCase(), target.toLowerCase());
-
-  await fs.writeFile(filenameDescriptor, '..\\target.txt');
-  await assert.rejects(invoke(), /leaf filename/);
-
-  await fs.writeFile(filenameDescriptor, '');
-  await assert.rejects(invoke(), /Filename descriptor is empty/);
-
-  await fs.writeFile(filenameDescriptor, 'target.txt\nother.txt');
-  await assert.rejects(invoke(), /exactly one value/);
-
-  await assert.rejects(
-    invoke(path.join(root, 'missing-directory.txt'), filenameDescriptor),
-    /Directory descriptor file is unavailable/,
-  );
 });
 
 test('ChatGPT schema refresh keeps CCM approval credentials local to the worker', async () => {

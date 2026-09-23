@@ -20,34 +20,6 @@ test('approval app keeps its capability in result _meta and resolves only the fr
     },
     fileTransferStore: { get: () => null },
     processManager: {
-      prepareEscalatedCommand(args) {
-        assert.equal(args.cmd, 'Write-Output APPROVAL_UI_OK');
-        assert.equal(args.workspace_context, workspaceContext);
-        return {
-          value: {
-            chunk_id: 'approval',
-            wall_time_seconds: 0,
-            output: 'Waiting for approval.',
-            approval_required: true,
-            approval_id: '00000000-0000-4000-8000-000000000002',
-            operation_id: '00000000-0000-4000-8000-000000000003',
-            state: 'pending',
-            environment_id: 'approval-worker',
-            command: args.cmd,
-            workdir: null,
-            tty: false,
-            shell: null,
-            justification: args.justification,
-            expires_at: '2026-09-23T08:00:00.000Z',
-            intent_sha256: 'a'.repeat(64),
-            workspace_context: workspaceContext,
-            workspace_id: 'approval-workspace',
-            workspace_kind: 'registered',
-            workspace_root: 'C:\\workspace',
-          },
-          approvalNonce: 'secret-card-capability-1234567890',
-        };
-      },
       async resolvePendingExecution(args) {
         resolvedArgs = args;
         return {
@@ -65,7 +37,28 @@ test('approval app keeps its capability in result _meta and resolves only the fr
           workspace_root: 'C:\\workspace',
         };
       },
-      execCommand: async () => ({ wall_time_seconds: 0, output: '', exit_code: 0 }),
+      execCommand: async (args) => ({
+        chunk_id: 'approval',
+        wall_time_seconds: 0,
+        output: 'Approval required before this command can run outside the sandbox.',
+        approval_required: true,
+        approval_id: '00000000-0000-4000-8000-000000000002',
+        operation_id: '00000000-0000-4000-8000-000000000003',
+        kind: 'execution',
+        state: 'pending',
+        environment_id: 'approval-worker',
+        command: args.cmd,
+        workdir: null,
+        tty: false,
+        shell: null,
+        justification: args.justification,
+        expires_at: '2026-09-23T08:00:00.000Z',
+        intent_sha256: 'a'.repeat(64),
+        workspace_context: workspaceContext,
+        workspace_id: 'approval-workspace',
+        workspace_kind: 'registered',
+        workspace_root: 'C:\\workspace',
+      }),
       writeStdin: async () => ({ wall_time_seconds: 0, output: '', exit_code: 0 }),
     },
     workspaceContextManager: {},
@@ -74,8 +67,30 @@ test('approval app keeps its capability in result _meta and resolves only the fr
       getRequest() {
         return { kind: 'execution' };
       },
-      respond() {
-        throw new Error('not used');
+      prepareAppApproval(approvalId, { hostSession } = {}) {
+        assert.equal(approvalId, '00000000-0000-4000-8000-000000000002');
+        assert.equal(hostSession ?? null, null);
+        return {
+          request: {
+            approval_id: approvalId,
+            operation_id: '00000000-0000-4000-8000-000000000003',
+            state: 'pending',
+            kind: 'execution',
+            environment_id: 'approval-worker',
+            command: 'Write-Output APPROVAL_UI_OK',
+            workdir: null,
+            tty: false,
+            shell: null,
+            justification: 'Approve this frozen test command?',
+            expires_at: '2026-09-23T08:00:00.000Z',
+            intent_sha256: 'a'.repeat(64),
+            workspace_context: workspaceContext,
+            workspace_id: 'approval-workspace',
+            workspace_kind: 'registered',
+            workspace_root: 'C:\\workspace',
+          },
+          approvalNonce: 'secret-card-capability-1234567890',
+        };
       },
     },
     fileService: {},
@@ -96,7 +111,7 @@ test('approval app keeps its capability in result _meta and resolves only the fr
     await client.connect(transport);
     const listed = await client.listTools();
     const requestTool = listed.tools.find(
-      (tool) => tool.name === 'request_escalated_exec',
+      (tool) => tool.name === 'request_approval',
     );
     const resolverTool = listed.tools.find(
       (tool) => tool.name === 'resolve_pending_action',
@@ -128,12 +143,21 @@ test('approval app keeps its capability in result _meta and resolves only the fr
       /workspace approval result already placed in model context/,
     );
 
-    const prepared = await client.callTool({
-      name: 'request_escalated_exec',
+    const pending = await client.callTool({
+      name: 'exec_command',
       arguments: {
         workspace_context: workspaceContext,
         cmd: 'Write-Output APPROVAL_UI_OK',
+        sandbox_permissions: 'require_escalated',
         justification: 'Approve this frozen test command?',
+      },
+    });
+    assert.equal(pending.structuredContent.approval_required, true);
+
+    const prepared = await client.callTool({
+      name: 'request_approval',
+      arguments: {
+        approval_id: pending.structuredContent.approval_id,
       },
     });
     assert.equal(prepared.isError, undefined);

@@ -56,17 +56,60 @@ function runtimeStub() {
       },
     },
     processManager: {
-      execCommand: async () => ({ wall_time_seconds: 0, output: '', exit_code: 0 }),
+      execCommand: async (args) => args.sandbox_permissions === 'require_escalated'
+        ? ({
+            chunk_id: 'approval',
+            wall_time_seconds: 0,
+            output: 'Approval required before this command can run outside the sandbox.',
+            approval_required: true,
+            approval_id: '00000000-0000-4000-8000-000000000003',
+            operation_id: '00000000-0000-4000-8000-000000000004',
+            kind: 'execution',
+            state: 'pending',
+            environment_id: 'primary',
+            workspace_context: args.workspace_context,
+            workspace_id: 'projectless-test',
+            workspace_kind: 'projectless',
+            workspace_root: 'C:\\temp\\projectless-test',
+            command: args.cmd,
+            workdir: null,
+            tty: false,
+            shell: null,
+            justification: args.justification || 'test',
+            expires_at: new Date(Date.now() + 60_000).toISOString(),
+            intent_sha256: 'a'.repeat(64),
+          })
+        : ({ wall_time_seconds: 0, output: '', exit_code: 0 }),
       writeStdin: async () => ({ wall_time_seconds: 0, output: '', exit_code: 0 }),
-      prepareEscalatedCommand: () => ({
-        value: {
-          chunk_id: 'approval',
-          wall_time_seconds: 0,
-          output: 'pending',
-          approval_required: true,
+      resolvePendingExecution: async () => ({
+        wall_time_seconds: 0,
+        output: '',
+        exit_code: 0,
+        state: 'consumed',
+      }),
+    },
+    fileService: {},
+    approvalManager: {
+      requestWorkspaceAction: (operation, intent, justification) => ({
+          approval_id: '00000000-0000-4000-8000-000000000002',
+          operation_id: '00000000-0000-4000-8000-000000000005',
+          state: 'pending',
+          kind: 'workspace',
+          operation,
+          environment_id: intent.environment_id,
+          workspace_id: intent.workspace_id,
+          workspace_root: intent.workspace_root,
+          create_if_missing: Boolean(intent.create_if_missing),
+          justification,
+          expires_at: new Date(Date.now() + 60_000).toISOString(),
+          intent_sha256: 'b'.repeat(64),
+      }),
+      prepareAppApproval: () => ({
+        request: {
           approval_id: '00000000-0000-4000-8000-000000000003',
           operation_id: '00000000-0000-4000-8000-000000000004',
           state: 'pending',
+          kind: 'execution',
           environment_id: 'primary',
           workspace_context: '00000000-0000-4000-8000-000000000001',
           workspace_id: 'projectless-test',
@@ -82,41 +125,11 @@ function runtimeStub() {
         },
         approvalNonce: 'n'.repeat(32),
       }),
-      resolvePendingExecution: async () => ({
-        wall_time_seconds: 0,
-        output: '',
-        exit_code: 0,
-        state: 'consumed',
-      }),
-    },
-    fileService: {},
-    approvalManager: {
-      requestWorkspaceAction: (
-        operation,
-        intent,
-        justification,
-        { channel = 'legacy' } = {},
-      ) => {
-        const request = {
-          approval_id: '00000000-0000-4000-8000-000000000002',
-          state: 'pending',
-          kind: 'workspace',
-          operation,
-          environment_id: intent.environment_id,
-          workspace_id: intent.workspace_id,
-          workspace_root: intent.workspace_root,
-          create_if_missing: Boolean(intent.create_if_missing),
-          justification,
-        };
-        return channel === 'app'
-          ? { request, approvalNonce: 'w'.repeat(32) }
-          : request;
-      },
     },
   };
 }
 
-test('core tool surface exposes approval-card workspace actions directly and keeps Code Mode compatibility', async () => {
+test('core tool surface keeps workspace lifecycle deferred and centralizes approval cards', async () => {
   const registry = registerCoreTools(new ToolRegistry(), runtimeStub());
 
   const direct = registry.listDirect().map((tool) => tool.name).sort();
@@ -124,11 +137,8 @@ test('core tool surface exposes approval-card workspace actions directly and kee
     'apply_patch',
     'exec_command',
     'list_environments',
-    'register_workspace',
-    'request_escalated_exec',
+    'request_approval',
     'resolve_pending_action',
-    'respond_to_escalation',
-    'select_workspace',
     'view_image',
     'write_stdin',
   ]);
@@ -160,19 +170,18 @@ test('core tool surface exposes approval-card workspace actions directly and kee
   for (const name of [
     'create_projectless_context',
     'list_workspaces',
+    'select_workspace',
+    'register_workspace',
   ]) {
     const tool = registry.get(name);
     assert.equal(tool.surfaces.direct, false, name + ' should not be direct');
     assert.equal(tool.surfaces.deferred, true, name + ' should be deferred');
     assert.equal(tool.surfaces.codeMode, true, name + ' should support exec');
   }
-  for (const name of ['select_workspace', 'register_workspace']) {
-    const tool = registry.get(name);
-    assert.equal(tool.surfaces.direct, true, name + ' should be direct');
-    assert.equal(tool.surfaces.deferred, false, name + ' should not be deferred');
-    assert.equal(tool.surfaces.codeMode, true, name + ' should support exec');
-    assert.equal(tool.mcpMeta.ui.resourceUri, 'ui://ccm/approval-v1.html');
-  }
+  assert.deepEqual(
+    Object.keys(registry.get('request_approval').inputSchema),
+    ['approval_id'],
+  );
 
   const created = await registry.get('create_projectless_context').handler({
     environment_id: 'noha',
@@ -185,18 +194,16 @@ test('core tool surface exposes approval-card workspace actions directly and kee
   assert.equal(missingContext.isError, true);
   assert.match(missingContext.content[0].text, /requires workspace_context/);
 
-  const legacyEscalation = await registry.get('exec_command').handler({
+  const escalation = await registry.get('exec_command').handler({
     workspace_context: '00000000-0000-4000-8000-000000000001',
     cmd: 'Write-Output elevated',
     sandbox_permissions: 'require_escalated',
   });
-  assert.equal(legacyEscalation.isError, true);
-  assert.match(legacyEscalation.content[0].text, /request_escalated_exec/);
+  assert.equal(escalation.structuredContent.approval_required, true);
+  assert.match(escalation.content[0].text, /request_approval/);
 
-  const approvalCard = await registry.get('request_escalated_exec').handler({
-    workspace_context: '00000000-0000-4000-8000-000000000001',
-    cmd: 'Write-Output elevated',
-    justification: 'test',
+  const approvalCard = await registry.get('request_approval').handler({
+    approval_id: '00000000-0000-4000-8000-000000000003',
   }, { extra: { _meta: { 'openai/session': 'chat-test' } } });
   assert.equal(approvalCard.structuredContent.state, 'pending');
   assert.equal(
@@ -209,14 +216,14 @@ test('core tool surface exposes approval-card workspace actions directly and kee
     ['approval_id', 'approval_nonce', 'decision'],
   );
 
-  const workspaceCard = await registry.get('select_workspace').handler({
+  const workspacePending = await registry.get('select_workspace').handler({
     environment_id: 'noha',
     workspace_id: 'project',
-  }, { extra: { _meta: { 'openai/session': 'chat-test' } } });
-  assert.equal(workspaceCard.structuredContent.kind, 'workspace');
-  assert.equal(workspaceCard.structuredContent.operation, 'select_workspace');
-  assert.equal(typeof workspaceCard._meta.approval_nonce, 'string');
-  assert.match(workspaceCard.content[0].text, /approval card/i);
+  });
+  assert.equal(workspacePending.structuredContent.kind, 'workspace');
+  assert.equal(workspacePending.structuredContent.operation, 'select_workspace');
+  assert.equal(workspacePending.structuredContent.approval_required, true);
+  assert.equal(workspacePending._meta, undefined);
 
   const { codeModeManager } = registerArchitectureTools(registry);
   try {
@@ -227,11 +234,8 @@ test('core tool surface exposes approval-card workspace actions directly and kee
         'exec',
         'exec_command',
         'list_environments',
-        'register_workspace',
-        'request_escalated_exec',
+        'request_approval',
         'resolve_pending_action',
-        'respond_to_escalation',
-        'select_workspace',
         'tool_search',
         'view_image',
         'wait',

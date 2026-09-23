@@ -257,7 +257,7 @@ export class RemoteProcessManager {
     };
   }
 
-  async execCommand(args, { policyRuleOverride = null } = {}) {
+  async execCommand(args) {
     if (!args.workspace_context) {
       throw new Error(
         'exec_command requires workspace_context. Obtain one explicitly before execution.',
@@ -277,7 +277,7 @@ export class RemoteProcessManager {
     const environment = this.environmentRegistry.resolve(
       workspaceContext.environment_id,
     );
-    let operationId = randomUUID();
+    const operationId = randomUUID();
     let forwardedArgs = {
       ...args,
       environment_id: environment.id,
@@ -301,16 +301,13 @@ export class RemoteProcessManager {
     const trustedPackageScript = Boolean(trustedPackageScriptRule);
     const wantsEscalation =
       requestedEscalation && !trustedGit && !trustedPackageScript;
-    let policyRule = policyRuleOverride;
-    let legacyApprovalId = null;
-    let legacyApprovalArgs = null;
+    let policyRule = null;
 
     if (requestedEscalation && trustedGit) {
       forwardedArgs = {
         ...forwardedArgs,
         sandbox_permissions: 'use_default',
       };
-      delete forwardedArgs.approval_id;
       delete forwardedArgs.justification;
     }
 
@@ -319,7 +316,6 @@ export class RemoteProcessManager {
         ...forwardedArgs,
         sandbox_permissions: 'approved_escalated',
       };
-      delete forwardedArgs.approval_id;
       delete forwardedArgs.justification;
       this.#emit('trusted_package_script_auto_allowed', {
         rule_id: trustedPackageScriptRule.rule_id,
@@ -330,29 +326,20 @@ export class RemoteProcessManager {
       });
     }
 
-    if (args.approval_id && !requestedEscalation) {
-      throw new Error(
-        'approval_id is only valid with sandbox_permissions=require_escalated.',
-      );
-    }
-
     if (wantsEscalation && environment.permissionProfile !== 'full-access') {
       if (!this.approvalManager) {
         throw new Error('Escalated execution requires an approval manager.');
       }
-      if (!args.approval_id && !policyRule) {
-        policyRule = await this.#matchExecPolicy(
-          args,
-          workspaceContext,
-          environment,
-        );
-      }
+      policyRule = await this.#matchExecPolicy(
+        args,
+        workspaceContext,
+        environment,
+      );
       if (policyRule?.decision === 'allow') {
         forwardedArgs = {
           ...forwardedArgs,
           sandbox_permissions: 'approved_escalated',
         };
-        delete forwardedArgs.approval_id;
         delete forwardedArgs.justification;
         this.#emit('exec_policy_auto_allowed', {
           rule_id: policyRule.rule_id,
@@ -361,13 +348,14 @@ export class RemoteProcessManager {
           workspace_context: workspaceContext.workspace_context,
           workspace_id: workspaceContext.workspace_id,
         });
-      } else if (!args.approval_id) {
+      } else {
         const approval = this.approvalManager.requestExecution(
           {
             ...args,
             workspace_context: workspaceContext.workspace_context,
           },
           environment.id,
+          { workspace: workspaceContext },
         );
         return {
           chunk_id: 'approval',
@@ -378,30 +366,12 @@ export class RemoteProcessManager {
           ...approval,
           ...(workspaceContext || {}),
         };
-      } else {
-        legacyApprovalArgs = {
-          ...args,
-          workspace_context: workspaceContext.workspace_context,
-        };
-        const validatedApproval = this.approvalManager.claimLegacyExecution(
-          args.approval_id,
-          legacyApprovalArgs,
-          environment.id,
-        );
-        operationId = validatedApproval.operation_id;
-        legacyApprovalId = args.approval_id;
-        forwardedArgs = {
-          ...forwardedArgs,
-          sandbox_permissions: 'approved_escalated',
-        };
-        delete forwardedArgs.approval_id;
       }
     } else if (wantsEscalation) {
       forwardedArgs = {
         ...forwardedArgs,
         sandbox_permissions: 'use_default',
       };
-      delete forwardedArgs.approval_id;
     }
 
     const timeoutMs = Math.max(
@@ -423,11 +393,6 @@ export class RemoteProcessManager {
         { timeoutMs },
       );
     } catch (error) {
-      // No request left the Controller, so a validated legacy approval remains
-      // reusable for the exact same frozen intent.
-      if (legacyApprovalId) {
-        this.approvalManager.restoreLegacyExecution(legacyApprovalId);
-      }
       this.#emit('exec_dispatch_failed_prestart', {
         operation_id: operationId,
         environment_id: environment.id,
@@ -441,9 +406,6 @@ export class RemoteProcessManager {
     try {
       result = await dispatch;
     } catch (error) {
-      if (legacyApprovalId) {
-        this.approvalManager.markLegacyExecutionUnknown(legacyApprovalId);
-      }
       this.#emit('exec_dispatch_unknown', {
         operation_id: operationId,
         environment_id: environment.id,
@@ -452,13 +414,6 @@ export class RemoteProcessManager {
         error_name: error?.name || 'Error',
       });
       throw error;
-    }
-    if (legacyApprovalId) {
-      this.approvalManager.consumeExecution(
-        legacyApprovalId,
-        legacyApprovalArgs,
-        environment.id,
-      );
     }
     const recorded = this.#recordExecResult(
       result,
@@ -480,98 +435,6 @@ export class RemoteProcessManager {
         policy_rule_id: policyRule.rule_id,
       }
       : recorded;
-  }
-
-  async prepareEscalatedCommand(args, { hostSession = null } = {}) {
-    if (!args.workspace_context) {
-      throw new Error(
-        'request_escalated_exec requires workspace_context.',
-      );
-    }
-    if (!this.workspaceContextManager || !this.approvalManager) {
-      throw new Error('Escalated execution services are not available.');
-    }
-    const workspaceContext = this.workspaceContextManager.resolve(
-      args.workspace_context,
-    );
-    const environment = this.environmentRegistry.resolve(
-      workspaceContext.environment_id,
-    );
-    if (environment.permissionProfile === 'full-access') {
-      throw new Error(
-        'This environment already runs with full-access; use exec_command directly.',
-      );
-    }
-    if (environment.permissionProfile === 'workspace-write' &&
-        isTrustedRemoteGitCommand(args.cmd)) {
-      throw new Error(
-        'Trusted remote Git does not require escalation; use exec_command directly.',
-      );
-    }
-    const trustedPackageScriptRule = await this.#matchTrustedPackageScript(
-      args,
-      workspaceContext,
-      environment,
-    );
-    if (trustedPackageScriptRule) {
-      const result = await this.execCommand(args);
-      return {
-        autoApproved: true,
-        value: {
-          ...result,
-          command: String(args.cmd),
-          trusted_package_script: true,
-          trusted_package_script_rule_id: trustedPackageScriptRule.rule_id,
-        },
-      };
-    }
-
-    const policyRule = await this.#matchExecPolicy(
-      args,
-      workspaceContext,
-      environment,
-    );
-    if (policyRule?.decision === 'allow') {
-      const result = await this.execCommand({
-        ...args,
-        sandbox_permissions: 'require_escalated',
-      }, {
-        policyRuleOverride: policyRule,
-      });
-      return {
-        autoApproved: true,
-        value: {
-          ...result,
-          command: String(args.cmd),
-          policy_auto_approved: true,
-          policy_rule_id: policyRule.rule_id,
-        },
-      };
-    }
-
-    const prepared = this.approvalManager.requestExecutionForApp(
-      {
-        ...args,
-        workspace_context: workspaceContext.workspace_context,
-      },
-      environment.id,
-      { workspace: workspaceContext, hostSession },
-    );
-    this.#emit('approval_prepared', {
-      approval_id: prepared.request.approval_id,
-      operation_id: prepared.request.operation_id,
-      environment_id: environment.id,
-      workspace_context: workspaceContext.workspace_context,
-      workspace_id: workspaceContext.workspace_id,
-    });
-    return {
-      value: this.#approvalStatusResult(
-        prepared.request,
-        workspaceContext,
-        'Waiting for the user to approve or deny this frozen full-access command.',
-      ),
-      approvalNonce: prepared.approvalNonce,
-    };
   }
 
   async resolvePendingExecution(

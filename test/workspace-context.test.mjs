@@ -217,7 +217,15 @@ test('Controller uses projectless contexts and requires approval for registered 
   const projectlessRoot = path.join(tempRoot, 'projectless');
   await fs.mkdir(legacyRoot, { recursive: true });
 
-  const controller = createControllerRuntime({ workerPort: 0 });
+  const controller = createControllerRuntime({
+    workerPort: 0,
+    auditLogFile: path.join(tempRoot, 'audit.jsonl'),
+    execPolicyStateFile: path.join(tempRoot, 'exec-policy.json'),
+    trustedPackageScriptStateFile: path.join(tempRoot, 'trusted-package-scripts.json'),
+    workspaceContextStateFile: path.join(tempRoot, 'workspace-contexts.json'),
+    fileTransferStateDir: path.join(tempRoot, 'file-transfers'),
+    planStateDir: path.join(tempRoot, 'plans'),
+  });
   const workspaceStateFile = path.join(tempRoot, 'state', 'workspaces.json');
   let worker = createWorkerRuntime({
     environment: {
@@ -309,12 +317,18 @@ test('Controller uses projectless contexts and requires approval for registered 
     assert.equal(pending.structuredContent.operation, 'select_workspace');
     assert.equal(pending.structuredContent.kind, 'workspace');
     assert.doesNotMatch(pending.structuredContent.justification, /read access/i);
-    assert.equal(typeof pending._meta.approval_nonce, 'string');
+    assert.equal(pending._meta, undefined);
+
+    const requestApproval = tools.registry.get('request_approval');
+    const selectCard = await requestApproval.handler({
+      approval_id: pending.structuredContent.approval_id,
+    }, { extra: { _meta: { 'openai/session': 'workspace-test' } } });
+    assert.equal(typeof selectCard._meta.approval_nonce, 'string');
 
     const resolver = tools.registry.get('resolve_pending_action');
     const selected = await resolver.handler({
       approval_id: pending.structuredContent.approval_id,
-      approval_nonce: pending._meta.approval_nonce,
+      approval_nonce: selectCard._meta.approval_nonce,
       decision: 'approve',
     }, { extra: { _meta: { 'openai/session': 'workspace-test' } } });
     assert.equal(selected.structuredContent.workspace_kind, 'registered');
@@ -331,10 +345,14 @@ test('Controller uses projectless contexts and requires approval for registered 
     assert.equal(registerPending.structuredContent.kind, 'workspace');
     assert.equal(registerPending.structuredContent.create_if_missing, true);
     assert.match(registerPending.structuredContent.justification, /create, register, and enter/i);
+    assert.equal(registerPending._meta, undefined);
     await assert.rejects(fs.stat(newRoot), /ENOENT/);
+    const registerCard = await requestApproval.handler({
+      approval_id: registerPending.structuredContent.approval_id,
+    }, { extra: { _meta: { 'openai/session': 'workspace-test' } } });
     const registered = await resolver.handler({
       approval_id: registerPending.structuredContent.approval_id,
-      approval_nonce: registerPending._meta.approval_nonce,
+      approval_nonce: registerCard._meta.approval_nonce,
       decision: 'approve',
     }, { extra: { _meta: { 'openai/session': 'workspace-test' } } });
     assert.equal(registered.structuredContent.workspace_id, 'new-project');
@@ -346,22 +364,21 @@ test('Controller uses projectless contexts and requires approval for registered 
     assert.equal((await fs.stat(newRoot)).isDirectory(), true);
     assert.equal(worker.workspaceRegistry.list().length, 2);
 
-    const legacyPending = await select.handler({
+    const nestedPending = await select.handler({
       environment_id: 'workspace-worker',
       workspace_id: seeded.workspace_id,
     }, { source: 'code_mode', nested: true });
-    assert.equal(legacyPending.structuredContent.approval_required, true);
-    assert.equal(legacyPending._meta, undefined);
-    controller.approvalManager.respond(
-      legacyPending.structuredContent.approval_id,
-      'approve',
-    );
-    const legacySelected = await select.handler({
-      environment_id: 'workspace-worker',
-      workspace_id: seeded.workspace_id,
-      approval_id: legacyPending.structuredContent.approval_id,
-    }, { source: 'code_mode', nested: true });
-    assert.equal(legacySelected.structuredContent.workspace_kind, 'registered');
+    assert.equal(nestedPending.structuredContent.approval_required, true);
+    assert.equal(nestedPending._meta, undefined);
+    const nestedCard = await requestApproval.handler({
+      approval_id: nestedPending.structuredContent.approval_id,
+    }, { extra: { _meta: { 'openai/session': 'workspace-test' } } });
+    const nestedSelected = await resolver.handler({
+      approval_id: nestedPending.structuredContent.approval_id,
+      approval_nonce: nestedCard._meta.approval_nonce,
+      decision: 'approve',
+    }, { extra: { _meta: { 'openai/session': 'workspace-test' } } });
+    assert.equal(nestedSelected.structuredContent.workspace_kind, 'registered');
 
     const oldContext = selected.structuredContent.workspace_context;
     const oldProjectlessContext = first.workspace_context;

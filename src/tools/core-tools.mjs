@@ -62,9 +62,8 @@ function execResult(value) {
     lines.push('Expires: ' + value.expires_at);
     lines.push('Justification: ' + value.justification);
     lines.push(
-      'Stop and ask the user for explicit approval. ' +
-      'After approval, call respond_to_escalation and retry exec_command ' +
-      'with the same command plus this approval_id.',
+      'Call the top-level request_approval tool with this approval_id to render the CCM approval card. ' +
+      'Do not recreate or retry the command yourself.',
     );
   }
   if (value.chunk_id) lines.push(`Chunk ID: ${value.chunk_id}`);
@@ -132,8 +131,8 @@ function approvalCardResult(prepared) {
     'Expires: ' + value.expires_at,
     'The attached CCM approval card is the only valid approval path for this request.',
     workspaceAction
-      ? 'Do not call respond_to_escalation and do not recreate or retry this workspace action yourself.'
-      : 'Do not call respond_to_escalation and do not recreate or retry this command yourself.',
+      ? 'Do not recreate or retry this workspace action yourself.'
+      : 'Do not recreate or retry this command yourself.',
   ];
   return {
     content: [{ type: 'text', text: lines.join('\n') }],
@@ -397,30 +396,18 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'select_workspace',
     provider: 'ccm-core',
-    surfaces: { direct: true, codeMode: true },
-    mcpMeta: {
-      ui: {
-        resourceUri: APPROVAL_UI_URI,
-        visibility: ['model', 'app'],
-      },
-      'ui/resourceUri': APPROVAL_UI_URI,
-      'openai/outputTemplate': APPROVAL_UI_URI,
-      'openai/widgetAccessible': true,
-    },
+    surfaces: { deferred: true, codeMode: true },
     tags: ['workspace', 'project', 'approval'],
     description: [
-      'Enter a registered workspace and return a workspace_context for subsequent CCM development calls.',
-      'Workspace approval establishes the selected project execution context.',
+      'Prepare entry into a registered workspace and return a frozen approval request.',
       'Use this only when the user explicitly intends to work in a registered project. Do not select a workspace merely to read or search a path that is already readable under sandbox_read_scope=host; use create_projectless_context for temporary execution without a selected project.',
-      'Direct calls render the CCM approval card. The user approves or denies the frozen workspace action inside the card; CCM completes an approved entry and returns workspace_context without a model retry.',
-      'Code Mode calls retain the legacy approval_id/respond_to_escalation/retry flow for compatibility because nested tool results cannot render the approval app.',
+      'Discover through tool_search and invoke through exec. If approval_required=true, call the top-level request_approval tool with the returned approval_id; do not retry select_workspace.',
     ].join('\n\n'),
     inputSchema: {
       environment_id: z.string().describe('Environment whose Worker owns the workspace.'),
       workspace_id: z.string().min(1).describe('Registered workspace id on that Worker.'),
-      approval_id: z.string().uuid().optional().describe('One-shot approval id returned by the pending selection request.'),
     },
-    handler: async (args, context) => {
+    handler: async (args) => {
       try {
         const environment = runtime.environmentRegistry.resolve(args.environment_id);
         const workspace = await runtime.workerHub.call(
@@ -437,52 +424,22 @@ export function registerCoreTools(registry, runtime) {
           workspace_id: workspace.workspace_id,
           workspace_root: workspace.root,
         };
-        if (!args.approval_id) {
-          const justification =
-            'Allow CCM to enter registered workspace ' +
-            environment.id + ' / ' + workspace.workspace_id +
-            ' at ' + workspace.root + '?';
-          if (context?.source === 'code_mode') {
-            const approval = runtime.approvalManager.requestWorkspaceAction(
-              'select_workspace',
-              intent,
-              justification,
-            );
-            return jsonResult({
-              approval_required: true,
-              ...approval,
-              instruction:
-                'Stop and ask the user for explicit approval. After approval, ' +
-                'call respond_to_escalation and retry select_workspace with ' +
-                'the same target plus this approval_id.',
-            });
-          }
-          const hostSession = context?.extra?._meta?.['openai/session'] || null;
-          const prepared = runtime.approvalManager.requestWorkspaceAction(
-            'select_workspace',
-            intent,
-            justification,
-            { channel: 'app', hostSession },
-          );
-          return approvalCardResult({
-            value: {
-              approval_required: true,
-              ...prepared.request,
-            },
-            approvalNonce: prepared.approvalNonce,
-          });
-        }
-        runtime.approvalManager.consumeWorkspaceAction(
-          args.approval_id,
+        const justification =
+          'Allow CCM to enter registered workspace ' +
+          environment.id + ' / ' + workspace.workspace_id +
+          ' at ' + workspace.root + '?';
+        const approval = runtime.approvalManager.requestWorkspaceAction(
           'select_workspace',
           intent,
+          justification,
         );
-        return jsonResult(
-          runtime.workspaceContextManager.createRegistered(
-            environment.id,
-            workspace,
-          ),
-        );
+        return jsonResult({
+          approval_required: true,
+          ...approval,
+          instruction:
+            'Call the top-level request_approval tool with this approval_id. ' +
+            'Do not retry select_workspace.',
+        });
       } catch (error) {
         return toolError(error);
       }
@@ -492,22 +449,12 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'register_workspace',
     provider: 'ccm-core',
-    surfaces: { direct: true, codeMode: true },
-    mcpMeta: {
-      ui: {
-        resourceUri: APPROVAL_UI_URI,
-        visibility: ['model', 'app'],
-      },
-      'ui/resourceUri': APPROVAL_UI_URI,
-      'openai/outputTemplate': APPROVAL_UI_URI,
-      'openai/widgetAccessible': true,
-    },
+    surfaces: { deferred: true, codeMode: true },
     tags: ['workspace', 'project', 'approval', 'register'],
     description: [
-      'Register a project directory on a Worker and immediately return a workspace_context for it. With create_if_missing=true, one approved flow may create the missing directory, register it, and enter it.',
+      'Prepare registration/entry of a project directory and return a frozen approval request. With create_if_missing=true, the approved action may create the missing directory before registration.',
       'Use this only when the user explicitly intends to register that concrete directory as a project. Do not register a directory merely to gain read access to a path that is already readable under sandbox_read_scope=host; use create_projectless_context instead when only temporary execution context is needed.',
-      'Registration expands CCM project access and always requires explicit user approval. Direct calls render the CCM approval card; an approved frozen action is created/registered/entered by CCM without a model retry.',
-      'Code Mode calls retain the legacy approval_id/respond_to_escalation/retry flow for compatibility because nested tool results cannot render the approval app.',
+      'Discover through tool_search and invoke through exec. If approval_required=true, call the top-level request_approval tool with the returned approval_id; do not retry register_workspace.',
       'This workspace approval authorizes only the create/register/enter action. It is not authorization to begin implementation when the user is still planning.',
     ].join('\n\n'),
     inputSchema: {
@@ -515,9 +462,8 @@ export function registerCoreTools(registry, runtime) {
       path: z.string().min(1).describe('Absolute project directory path on the selected Worker.'),
       workspace_id: z.string().min(1).optional().describe('Optional Worker-local workspace id. Defaults to a safe form of the directory name.'),
       create_if_missing: z.boolean().optional().describe('Create the target directory after approval if it is missing. Defaults to false.'),
-      approval_id: z.string().uuid().optional().describe('One-shot approval id returned by the pending registration request.'),
     },
-    handler: async (args, context) => {
+    handler: async (args) => {
       try {
         const environment = runtime.environmentRegistry.resolve(args.environment_id);
         const inspected = await runtime.workerHub.call(
@@ -536,66 +482,25 @@ export function registerCoreTools(registry, runtime) {
           workspace_root: inspected.root,
           create_if_missing: Boolean(args.create_if_missing),
         };
-        if (!args.approval_id) {
-          const action = inspected.create_required
-            ? 'create, register, and enter workspace '
-            : 'register and enter workspace ';
-          const justification =
-            'Allow CCM to ' + action +
-            environment.id + ' / ' + inspected.workspace_id +
-            ' at ' + inspected.root + '?';
-          if (context?.source === 'code_mode') {
-            const approval = runtime.approvalManager.requestWorkspaceAction(
-              'register_workspace',
-              intent,
-              justification,
-            );
-            return jsonResult({
-              approval_required: true,
-              ...approval,
-              instruction:
-                'Stop and ask the user for explicit approval. After approval, ' +
-                'call respond_to_escalation and retry register_workspace with ' +
-                'the same target plus this approval_id.',
-            });
-          }
-          const hostSession = context?.extra?._meta?.['openai/session'] || null;
-          const prepared = runtime.approvalManager.requestWorkspaceAction(
-            'register_workspace',
-            intent,
-            justification,
-            { channel: 'app', hostSession },
-          );
-          return approvalCardResult({
-            value: {
-              approval_required: true,
-              ...prepared.request,
-            },
-            approvalNonce: prepared.approvalNonce,
-          });
-        }
-        runtime.approvalManager.consumeWorkspaceAction(
-          args.approval_id,
+        const action = inspected.create_required
+          ? 'create, register, and enter workspace '
+          : 'register and enter workspace ';
+        const justification =
+          'Allow CCM to ' + action +
+          environment.id + ' / ' + inspected.workspace_id +
+          ' at ' + inspected.root + '?';
+        const approval = runtime.approvalManager.requestWorkspaceAction(
           'register_workspace',
           intent,
+          justification,
         );
-        const workspace = await runtime.workerHub.call(
-          environment.id,
-          'register_workspace',
-          {
-            path: inspected.root,
-            workspace_id: inspected.workspace_id,
-            create_if_missing: Boolean(args.create_if_missing),
-            approved_root: inspected.root,
-          },
-          { timeoutMs: 10_000 },
-        );
-        return jsonResult(
-          runtime.workspaceContextManager.createRegistered(
-            environment.id,
-            workspace,
-          ),
-        );
+        return jsonResult({
+          approval_required: true,
+          ...approval,
+          instruction:
+            'Call the top-level request_approval tool with this approval_id. ' +
+            'Do not retry register_workspace.',
+        });
       } catch (error) {
         return toolError(error);
       }
@@ -615,7 +520,7 @@ export function registerCoreTools(registry, runtime) {
       'If no project has been selected, first discover ccm.create_projectless_context with tool_search and invoke it through exec; then pass the returned workspace_context here. When sandbox_read_scope=host, that projectless context is sufficient for absolute-path reads anywhere readable on the selected Worker; do not select/register the target path merely to inspect it.',
       'In workspace-write environments, normal remote Git commands such as git clone/fetch/pull/push/ls-remote are handled automatically and do not require sandbox_permissions=require_escalated. Run remote Git as Git-only shell commands so CCM can recognize the trusted path.',
       'Controller-trusted package scripts such as a specifically trusted workspace npm test are also handled automatically through exec_command. Trust is bound to the workspace and current package.json script hash; if the script changes it stops matching and must not be treated as trusted.',
-      'For a non-Git command that genuinely requires full-access outside a workspace-write sandbox, use the direct request_escalated_exec tool. Do not start a new approval with sandbox_permissions=require_escalated; that legacy parameter is retained only for migration of an already-issued approval_id.',
+      'For a non-Git command that genuinely requires full-access outside a workspace-write sandbox, set sandbox_permissions=require_escalated and include an optional user-facing justification. CCM freezes the exact command and returns approval_required=true; then call the top-level request_approval tool with the returned approval_id.',
       'A CCM-originated result is identifiable by its structured CCM fields. If a host reports a Script error or safety/policy/tool-call failure without this tool returning a structured result, do not attribute that failure to CCM or claim CCM blocked the command.',
       'On Windows, keep destructive filesystem operations in one shell and verify resolved targets before recursive deletes or moves.',
     ].join('\n\n'),
@@ -627,9 +532,8 @@ export function registerCoreTools(registry, runtime) {
       yield_time_ms: z.number().int().max(30_000).nonnegative().optional().describe('Wait before the initial command call yields output or a session. Defaults to 2000 ms. Values above 5000 ms are accepted for compatibility but are clamped to 5000 ms; long-running commands continue in a session and should be resumed with write_stdin.'),
       max_output_tokens: z.number().int().positive().optional().describe('Output token budget. Defaults to 10000 tokens.'),
       shell: z.string().optional().describe("Shell binary to launch. Defaults to the environment's default shell."),
-      sandbox_permissions: z.enum(['use_default', 'require_escalated']).optional().describe('Legacy compatibility override. New escalations must use request_escalated_exec; ordinary calls should omit this or use use_default.'),
-      justification: z.string().optional().describe('Legacy execution-approval compatibility field. New escalations put the justification on request_escalated_exec.'),
-      approval_id: z.string().uuid().optional().describe('Legacy one-shot execution approval id. New CCM approval-card requests never expose an approval_id for model-driven retry.'),
+      sandbox_permissions: z.enum(['use_default', 'require_escalated']).optional().describe('Set require_escalated when this exact command genuinely needs full-access outside the normal sandbox.'),
+      justification: z.string().optional().describe('User-facing explanation for a require_escalated approval request.'),
     },
     outputSchema: UNIFIED_EXEC_OUTPUT_SCHEMA,
     handler: async (args) => {
@@ -637,13 +541,6 @@ export function registerCoreTools(registry, runtime) {
         if (!args.workspace_context) {
           throw new Error(
             'exec_command requires workspace_context for Worker routing/cwd. Use ccm.create_projectless_context through tool_search + exec when no project is selected; the target read path does not need to be selected as a workspace when sandbox_read_scope=host.',
-          );
-        }
-        if (args.sandbox_permissions === 'require_escalated' &&
-            !args.approval_id) {
-          throw new Error(
-            'Direct escalation moved to request_escalated_exec. ' +
-            'Call request_escalated_exec with the same frozen command and workspace_context so ChatGPT can render the CCM approval card.',
           );
         }
         return execResult(await runtime.processManager.execCommand(args));
@@ -654,7 +551,7 @@ export function registerCoreTools(registry, runtime) {
   });
 
   registry.register({
-    name: 'request_escalated_exec',
+    name: 'request_approval',
     provider: 'ccm-core',
     surfaces: { direct: true },
     annotations: {
@@ -671,35 +568,32 @@ export function registerCoreTools(registry, runtime) {
       'openai/outputTemplate': APPROVAL_UI_URI,
       'openai/widgetAccessible': true,
     },
-    tags: ['approval', 'sandbox', 'permission', 'shell', 'process'],
-    environmentRequirements: { capabilities: ['exec'] },
+    tags: ['approval', 'permission', 'ui'],
     description: [
-      'Prepare one full-access command for explicit user approval in the CCM approval card. This tool freezes the exact action but does not execute it.',
-      'Use this direct tool instead of exec_command(sandbox_permissions=require_escalated) when a workspace-write environment genuinely requires execution outside the sandbox.',
-      'The user decision is handled inside the CCM approval card. After this tool returns, do not call respond_to_escalation, do not reconstruct the command, and do not issue a second execution request for the same action.',
-      'Trusted remote Git uses exec_command directly and should not use this tool.',
-      'Controller-trusted package scripts also use exec_command directly and should not use this tool while their workspace/script-hash rule still matches.',
+      'Render the CCM approval card for one already-frozen pending action.',
+      'Pass only the approval_id returned by a CCM business tool with approval_required=true. This tool does not accept or modify the command, workspace, path, or other frozen action fields.',
+      'After the card is shown, the approval app handles the user decision through resolve_pending_action. Do not recreate or retry the original action.',
     ].join('\n\n'),
     inputSchema: {
-      cmd: z.string().min(1).describe('Exact shell command to freeze for one approved full-access execution.'),
-      workspace_context: z.string().uuid().describe('Existing workspace context that owns this command.'),
-      workdir: z.string().optional().describe('Relative subdirectory inside the selected workspace.'),
-      tty: z.boolean().optional().describe('True allocates a PTY; false or omitted uses plain pipes.'),
-      yield_time_ms: z.number().int().max(30_000).nonnegative().optional().describe('Initial wait before yielding output or a session. Values above 5000 ms are clamped to 5000 ms.'),
-      max_output_tokens: z.number().int().positive().optional().describe('Output token budget. Defaults to 10000 tokens.'),
-      shell: z.string().optional().describe("Shell binary to launch. Defaults to the environment's default shell."),
-      justification: z.string().min(1).optional().describe('User-facing explanation of why this exact command requires full-access.'),
+      approval_id: z.string().uuid().describe('Opaque pending approval id returned by a CCM tool.'),
     },
     outputSchema: UNIFIED_EXEC_OUTPUT_SCHEMA,
     handler: async (args, context) => {
       try {
         const hostSession = context?.extra?._meta?.['openai/session'] || null;
-        return approvalCardResult(
-          await runtime.processManager.prepareEscalatedCommand(
-            args,
-            { hostSession },
-          ),
+        const prepared = runtime.approvalManager.prepareAppApproval(
+          args.approval_id,
+          { hostSession },
         );
+        return approvalCardResult({
+          value: {
+            wall_time_seconds: 0,
+            output: 'Waiting for the user to approve or deny this frozen action.',
+            approval_required: true,
+            ...prepared.request,
+          },
+          approvalNonce: prepared.approvalNonce,
+        });
       } catch (error) {
         return toolError(error);
       }
@@ -754,34 +648,6 @@ export function registerCoreTools(registry, runtime) {
     },
   });
 
-  registry.register({
-    name: 'respond_to_escalation',
-    provider: 'ccm-core',
-    surfaces: { direct: true },
-    tags: ['approval', 'sandbox', 'permission'],
-    description: [
-      'Records the user response to an already-issued legacy CCM approval request.',
-      'MUST NOT approve unless the user explicitly approved the displayed request in a user message.',
-      'Do not use this tool for new direct execution or workspace approval-card requests; those are resolved only by the CCM approval card. A legacy workspace approval does not perform the pending action; retry the exact workspace tool with the same approval_id.',
-    ].join('\n\n'),
-    inputSchema: {
-      approval_id: z.string().uuid().describe('Pending approval id returned by the requesting CCM tool.'),
-      decision: z.enum(['approve', 'deny']).describe('The user\'s explicit decision.'),
-    },
-    handler: async (args) => {
-      try {
-        if (!runtime.approvalManager) {
-          throw new Error('CCM approval manager is not available.');
-        }
-        return jsonResult(runtime.approvalManager.respond(
-          args.approval_id,
-          args.decision,
-        ));
-      } catch (error) {
-        return toolError(error);
-      }
-    },
-  });
   registry.register({
     name: 'write_stdin',
     provider: 'ccm-core',

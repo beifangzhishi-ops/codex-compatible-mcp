@@ -40,26 +40,11 @@ function fileResourceResult(value, environmentId, fileTransferStore) {
   }
   const transfer = fileTransferStore.put(value, { environmentId });
   return {
-    content: [
-      {
-        type: 'text',
-        text: 'Attached ' + value.filename + ' from ' + environmentId +
-          ' (' + value.byte_length + ' bytes, sha256 ' + value.sha256 +
-          '). The file is available through the returned MCP resource link.',
-      },
-      {
-        type: 'resource_link',
-        uri: transfer.uri,
-        name: value.filename,
-        description: 'File transferred from CCM environment ' + environmentId,
-        mimeType: value.mime_type,
-        size: value.byte_length,
-        _meta: {
-          sha256: value.sha256,
-          source_environment_id: environmentId,
-        },
-      },
-    ],
+    content: [{
+      type: 'text',
+      text: 'Attached ' + value.filename + ' from ' + environmentId +
+        ' (' + value.byte_length + ' bytes, sha256 ' + value.sha256 + ').',
+    }],
     structuredContent: {
       capability: 'send_file',
       environment_id: environmentId,
@@ -140,34 +125,6 @@ function toolPath(relativePath) {
   ].join('; ');
 }
 
-function oneTimeLinkCommand(args, ttl) {
-  return [
-    toolPath('tools\\ccm-once\\server.cjs'),
-    '$directoryFile=' + psQuote(args.directory_file_path),
-    '$filenameFile=' + psQuote(args.filename_file_path),
-    "try{$directory=(Get-Content -LiteralPath $directoryFile -Raw -ErrorAction Stop).Trim()}catch{throw 'Directory descriptor file is unavailable.'}",
-    "if(-not $directory){throw 'Directory descriptor is empty.'}",
-    "if($directory -match '[\\r\\n]'){throw 'Directory descriptor must contain exactly one value.'}",
-    "try{$filename=(Get-Content -LiteralPath $filenameFile -Raw -ErrorAction Stop).Trim()}catch{throw 'Filename descriptor file is unavailable.'}",
-    "if(-not $filename){throw 'Filename descriptor is empty.'}",
-    "if($filename -match '[\\r\\n<>:\"/\\\\|?*]' -or $filename -eq '.' -or $filename -eq '..'){throw 'Filename descriptor must contain only one valid leaf filename.'}",
-    "try{$directory=(Resolve-Path -LiteralPath $directory -ErrorAction Stop).Path;if(-not(Test-Path -LiteralPath $directory -PathType Container)){throw 'missing'}}catch{throw 'Target directory is unavailable.'}",
-    "try{$target=Join-Path -Path $directory -ChildPath $filename;if(-not(Test-Path -LiteralPath $target -PathType Leaf)){throw 'missing'};$target=(Resolve-Path -LiteralPath $target -ErrorAction Stop).Path}catch{throw 'Target text file is unavailable.'}",
-    "$token=((New-Guid).Guid -replace '-','')",
-    '$node=(Get-Command node.exe -ErrorAction Stop).Source',
-    'Get-NetTCPConnection -LocalPort 18444 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }',
-    '$process=Start-Process -FilePath $node -ArgumentList @($tool,$token,$target,' +
-      psQuote(String(ttl)) + ') -WindowStyle Hidden -PassThru',
-    'Start-Sleep -Milliseconds 500',
-    "if($process.HasExited){throw 'One-time secret server failed to start.'}",
-    'tailscale funnel --bg --set-path /ccm-once http://127.0.0.1:18444 | Out-Null',
-    "$issuer=Get-Content -LiteralPath (Join-Path $root 'config\\ccm.env') | Where-Object { $_ -match '^CCM_ISSUER=' } | Select-Object -First 1",
-    "if(-not $issuer){throw 'CCM_ISSUER is unavailable.'}",
-    "$origin=(($issuer -replace '^CCM_ISSUER=','').Trim() -replace '/ccm$','')",
-    "Write-Output ($origin + '/ccm-once/' + $token)",
-  ].join('; ');
-}
-
 async function run(runtime, args, command) {
   if (!runtime.workspaceContextManager) {
     throw new Error('Workspace context manager is unavailable.');
@@ -183,45 +140,13 @@ async function run(runtime, args, command) {
   });
 }
 
-async function runOneTimeLinkToCompletion(runtime, args, command) {
-  if (!runtime.workspaceContextManager) {
-    throw new Error('Workspace context manager is unavailable.');
-  }
-  const context = await runtime.workspaceContextManager.createProjectless(
-    args.environment_id,
-  );
-  let result = await runtime.processManager.execCommand({
-    workspace_context: context.workspace_context,
-    cmd: command,
-    yield_time_ms: args.yield_time_ms,
-    max_output_tokens: args.max_output_tokens,
-  });
-  let output = String(result.output || '');
-
-  for (let poll = 0; result.session_id !== undefined && poll < 6; poll += 1) {
-    result = await runtime.processManager.writeStdin({
-      workspace_context: context.workspace_context,
-      session_id: result.session_id,
-      chars: '',
-      yield_time_ms: 5_000,
-      max_output_tokens: args.max_output_tokens,
-    });
-    output += String(result.output || '');
-  }
-
-  if (result.session_id !== undefined) {
-    throw new Error('One-time key helper did not complete within 30 seconds.');
-  }
-  return { ...result, output };
-}
-
 export function registerSpecializedTools(registry, runtime) {
   registry.register({
     namespace: 'ccm-extra',
     name: 'send_file',
     provider: 'ccm-specialized',
     provenance: 'ccm-native-file-transfer',
-    surfaces: { direct: true, codeMode: true },
+    surfaces: { direct: true, codeMode: false },
     tags: ['file', 'attachment', 'preview', 'transfer', 'gpt'],
     environmentRequirements: {
       capabilities: ['sendFile'],
@@ -233,7 +158,7 @@ export function registerSpecializedTools(registry, runtime) {
     },
     supportsParallel: false,
     description: [
-      'Send exactly one file per call from a CCM environment to the GPT client as an MCP resource link. If the user needs multiple files, call send_file sequentially and wait for each call to return before starting the next. Never issue concurrent or parallel send_file calls.',
+      'Send exactly one file per call from a CCM environment to the GPT client through the direct ChatGPT file-card handoff. If the user needs multiple files, call send_file sequentially and wait for each call to return before starting the next. Never issue concurrent or parallel send_file calls.',
       'Use send_file only when the user actually needs the file in chat for preview, download, upload to another tool, or handoff.',
       'workspace_context is required and determines the Worker. Relative paths are resolved from that context root; absolute paths remain absolute on the selected Worker.',
       'If the user has not selected a project, automatically obtain a projectless context first through ccm.create_projectless_context; do not ask the user to choose or register a temporary directory.',
@@ -483,71 +408,6 @@ export function registerSpecializedTools(registry, runtime) {
           capability: 'quark_upload',
           destination: 'Quark system manual_upload',
         });
-      } catch (error) {
-        return toolError(error);
-      }
-    },
-  });
-
-
-
-  registry.register({
-    namespace: 'ccm-extra',
-    name: 'one_time_link',
-    provider: 'ccm-specialized',
-    provenance: 'ccm-local-one-time-key',
-    surfaces: { deferred: true, codeMode: true },
-    tags: ['key', 'secret', 'file', 'one-time', 'share'],
-    environmentRequirements: { platform: 'windows', capabilities: ['exec'] },
-    description: [
-      'Create a short-lived, single-reveal HTTPS page containing the complete text of a local file.',
-      'Do not pass the target file path or secret text directly. First, in one standalone command/tool call, create a temporary text file containing only the target directory. Then, in a second standalone command/tool call, create another temporary text file containing only the target leaf filename. In a third standalone call, invoke this tool with only those two descriptor-file paths. Do not combine either descriptor write, this tool call, or later cleanup into one shell command, script, pipeline, or wrapper. After this tool returns the URL, remove the descriptor files in subsequent standalone cleanup calls. The target path is reconstructed only on the Windows worker, and the target file remains there until the user explicitly presses Reveal once.',
-    ].join('\n\n'),
-    inputSchema: {
-      directory_file_path: z.string().min(1).describe(
-        'Path to a temporary text descriptor file containing only the target file directory. Create this descriptor in its own command/tool call before invoking one_time_link; do not combine that write with the filename descriptor write or this tool call.',
-      ),
-      filename_file_path: z.string().min(1).describe(
-        'Path to a separate temporary text descriptor file containing only the target leaf filename. Create this descriptor in its own command/tool call before invoking one_time_link; do not combine that write with the directory descriptor write or this tool call.',
-      ),
-      ttl_seconds: z.number().int().min(30).max(900).optional().describe(
-        'Lifetime in seconds. Defaults to 300.',
-      ),
-      environment_id: z.string().optional().describe(
-        'Windows CCM worker. Omit to use the default environment.',
-      ),
-      yield_time_ms: z.number().int().min(0).max(30_000).optional(),
-      max_output_tokens: z.number().int().min(256).max(10_000).optional(),
-    },
-    handler: async (args) => {
-      try {
-        const environment = resolveWindowsEnvironment(runtime, args.environment_id);
-        const ttl = Number(args.ttl_seconds || 300);
-        const command = oneTimeLinkCommand(args, ttl);
-        const result = await runOneTimeLinkToCompletion(runtime, args, command);
-        const oneTimeUrl = String(result.output || '')
-          .split(/\r?\n/)
-          .map((line) => line.trim())
-          .filter((line) => /^https:\/\/\S+$/i.test(line))
-          .at(-1);
-        if (!/^https:\/\//i.test(oneTimeUrl || '')) {
-          throw new Error('One-time key helper did not return an HTTPS URL.');
-        }
-        return {
-          content: [{
-            type: 'text',
-            text: [
-              'One-time key URL: ' + oneTimeUrl,
-              'Expires in: ' + ttl + ' seconds',
-            ].join('\n'),
-          }],
-          structuredContent: {
-            environment_id: environment.id,
-            capability: 'one_time_link',
-            one_time_url: oneTimeUrl,
-            expires_in_seconds: ttl,
-          },
-        };
       } catch (error) {
         return toolError(error);
       }

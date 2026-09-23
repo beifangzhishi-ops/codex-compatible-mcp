@@ -39,6 +39,20 @@ function fakeElement() {
 
 function toolResult() {
   return {
+    content: [{ type: 'text', text: 'Attached deck.zip.' }],
+    structuredContent: {
+      capability: 'send_file',
+      filename: 'deck.zip',
+      mime_type: 'application/zip',
+      byte_length: 4,
+      sha256: 'sha-test',
+      resource_uri: 'ccm-file:///00000000-0000-4000-8000-000000000123',
+    },
+  };
+}
+
+function legacyToolResult() {
+  return {
     content: [{
       type: 'resource_link',
       uri: 'ccm-file:///00000000-0000-4000-8000-000000000123',
@@ -56,7 +70,7 @@ function toolResult() {
   };
 }
 
-test('send_file widget materializes MCP resource into a non-Library ChatGPT file', async () => {
+test('send_file widget materializes once even when host widgetState reflection is delayed', async () => {
   const listeners = new Map();
   const elements = new Map([
     ['file-name', fakeElement()],
@@ -123,7 +137,6 @@ test('send_file widget materializes MCP resource into a non-Library ChatGPT file
       },
       setWidgetState(state) {
         widgetState = state;
-        this.widgetState = state;
       },
       async getFileDownloadUrl({ fileId }) {
         downloadFileId = fileId;
@@ -208,6 +221,9 @@ test('send_file widget materializes MCP resource into a non-Library ChatGPT file
       },
     });
   }
+  for (const listener of listeners.get('openai:set_globals') || []) {
+    listener({});
+  }
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(readCount, 1);
   assert.equal(uploadCount, 1);
@@ -269,7 +285,7 @@ test('send_file widget reuses persisted fileId without re-uploading', async () =
     parent,
     openai: {
       widgetState: persisted,
-      toolResponseMetadata: { mcp_tool_result: toolResult() },
+      toolResponseMetadata: { mcp_tool_result: legacyToolResult() },
       async uploadFile() {
         uploadCount += 1;
         return { fileId: 'unexpected' };
