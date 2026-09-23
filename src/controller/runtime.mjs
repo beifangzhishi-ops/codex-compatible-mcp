@@ -10,6 +10,8 @@ import { FileTransferStore } from './file-transfer-store.mjs';
 import { PlanManager } from './plan-manager.mjs';
 import { createAuditLogger } from './audit-log.mjs';
 import { ExecPolicyStore } from './exec-policy-store.mjs';
+import { TrustedPackageScriptStore } from './trusted-package-script-store.mjs';
+import { defaultControllerStateFile } from './controller-state.mjs';
 
 const installRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -35,9 +37,15 @@ export function createControllerRuntime(options = {}) {
   const approvalManager = options.approvalManager || new ApprovalManager({ audit });
   const execPolicyStore = options.execPolicyStore || new ExecPolicyStore({
     stateFile: options.execPolicyStateFile ||
-      path.join(installRoot, '.state', 'exec-policy.json'),
+      defaultControllerStateFile('exec-policy.json'),
     audit,
   });
+  const trustedPackageScriptStore = options.trustedPackageScriptStore ||
+    new TrustedPackageScriptStore({
+      stateFile: options.trustedPackageScriptStateFile ||
+        defaultControllerStateFile('trusted-package-scripts.json'),
+      audit,
+    });
   const workspaceContextManager = options.workspaceContextManager ||
     new WorkspaceContextManager({
       environmentRegistry,
@@ -50,6 +58,7 @@ export function createControllerRuntime(options = {}) {
     approvalManager,
     workspaceContextManager,
     execPolicyStore,
+    trustedPackageScriptStore,
     audit,
   });
   const fileService = options.fileService || new RemoteFileService({
@@ -70,6 +79,7 @@ export function createControllerRuntime(options = {}) {
     workerHub,
     approvalManager,
     execPolicyStore,
+    trustedPackageScriptStore,
     audit,
     workspaceContextManager,
     processManager,
@@ -83,6 +93,7 @@ export function createControllerRuntime(options = {}) {
       await processManager.close();
       fileTransferStore.close();
       execPolicyStore?.close?.();
+      trustedPackageScriptStore?.close?.();
       await planManager?.close();
       workspaceContextManager.close();
       await workerHub.close();

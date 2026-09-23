@@ -21,6 +21,7 @@ export class RemoteProcessManager {
     approvalManager = null,
     workspaceContextManager = null,
     execPolicyStore = null,
+    trustedPackageScriptStore = null,
     audit = null,
   }) {
     if (!environmentRegistry || !workerHub) {
@@ -31,6 +32,7 @@ export class RemoteProcessManager {
     this.approvalManager = approvalManager;
     this.workspaceContextManager = workspaceContextManager;
     this.execPolicyStore = execPolicyStore;
+    this.trustedPackageScriptStore = trustedPackageScriptStore;
     this.audit = typeof audit === 'function' ? audit : null;
     this.sessions = new Map();
     this.nextSessionId = 1000;
@@ -204,6 +206,39 @@ export class RemoteProcessManager {
       : null;
   }
 
+  async #matchTrustedPackageScript(args, workspaceContext, environment) {
+    if (!this.trustedPackageScriptStore ||
+        environment.permissionProfile !== 'workspace-write' ||
+        !this.trustedPackageScriptStore.mayMatch({
+          workspaceContext,
+          environment,
+          args,
+        })) {
+      return null;
+    }
+    try {
+      const packageScript = await this.#resolvePackageScriptBinding(
+        args,
+        workspaceContext,
+        environment,
+      );
+      return this.trustedPackageScriptStore.match({
+        workspaceContext,
+        environment,
+        args,
+        packageScript,
+      });
+    } catch (error) {
+      this.#emit('trusted_package_script_probe_failed', {
+        environment_id: environment.id,
+        workspace_context: workspaceContext.workspace_context,
+        workspace_id: workspaceContext.workspace_id,
+        error_name: error?.name || 'Error',
+      });
+      return null;
+    }
+  }
+
   isSessionLive(sessionId, workspaceContext = null) {
     const session = this.sessions.get(sessionId);
     if (!session) return false;
@@ -258,7 +293,14 @@ export class RemoteProcessManager {
     const requestedEscalation = args.sandbox_permissions === 'require_escalated';
     const trustedGit = environment.permissionProfile === 'workspace-write' &&
       isTrustedRemoteGitCommand(args.cmd);
-    const wantsEscalation = requestedEscalation && !trustedGit;
+    const trustedPackageScriptRule = await this.#matchTrustedPackageScript(
+      args,
+      workspaceContext,
+      environment,
+    );
+    const trustedPackageScript = Boolean(trustedPackageScriptRule);
+    const wantsEscalation =
+      requestedEscalation && !trustedGit && !trustedPackageScript;
     let policyRule = policyRuleOverride;
     let legacyApprovalId = null;
     let legacyApprovalArgs = null;
@@ -270,6 +312,22 @@ export class RemoteProcessManager {
       };
       delete forwardedArgs.approval_id;
       delete forwardedArgs.justification;
+    }
+
+    if (trustedPackageScript) {
+      forwardedArgs = {
+        ...forwardedArgs,
+        sandbox_permissions: 'approved_escalated',
+      };
+      delete forwardedArgs.approval_id;
+      delete forwardedArgs.justification;
+      this.#emit('trusted_package_script_auto_allowed', {
+        rule_id: trustedPackageScriptRule.rule_id,
+        operation_id: operationId,
+        environment_id: environment.id,
+        workspace_context: workspaceContext.workspace_context,
+        workspace_id: workspaceContext.workspace_id,
+      });
     }
 
     if (args.approval_id && !requestedEscalation) {
@@ -408,6 +466,13 @@ export class RemoteProcessManager {
       workspaceContext,
       operationId,
     );
+    if (trustedPackageScriptRule) {
+      return {
+        ...recorded,
+        trusted_package_script: true,
+        trusted_package_script_rule_id: trustedPackageScriptRule.rule_id,
+      };
+    }
     return policyRule
       ? {
         ...recorded,
@@ -442,6 +507,23 @@ export class RemoteProcessManager {
       throw new Error(
         'Trusted remote Git does not require escalation; use exec_command directly.',
       );
+    }
+    const trustedPackageScriptRule = await this.#matchTrustedPackageScript(
+      args,
+      workspaceContext,
+      environment,
+    );
+    if (trustedPackageScriptRule) {
+      const result = await this.execCommand(args);
+      return {
+        autoApproved: true,
+        value: {
+          ...result,
+          command: String(args.cmd),
+          trusted_package_script: true,
+          trusted_package_script_rule_id: trustedPackageScriptRule.rule_id,
+        },
+      };
     }
 
     const policyRule = await this.#matchExecPolicy(

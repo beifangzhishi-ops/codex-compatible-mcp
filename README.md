@@ -314,6 +314,7 @@ The legacy `CCM_WORKER_HUB_HOST` variable is accepted as a fallback for both bin
 | `CCM_PROJECTLESS_ROOT` | `~/Documents/CCM` | Root used for automatically created projectless workspaces. |
 | `CCM_WORKSPACE_REGISTRY_FILE` | `<install>/.state/workspaces.json` for the packaged Worker | Worker-local registered and projectless workspace registry. |
 | `CCM_WORKSPACE_CONTEXT_FILE` | `<install>/.state/workspace-contexts.json` for the packaged Controller | Persistent Controller workspace-context registry. |
+| `CCM_CONTROLLER_STATE_DIR` | Windows: `%LOCALAPPDATA%\CCM`; XDG: `$XDG_STATE_HOME/ccm`; fallback: `~/.ccm` | Protected Controller security state, including execution policies and trusted package-script rules. Keep this outside workspace-write roots. |
 | `CCM_PERMISSION_PROFILE` | `workspace-write` | `read-only`, `workspace-write`, or `full-access`. |
 | `CCM_MAX_MCP_TOOL_RESULT_BYTES` | 2 MiB | Serialized MCP tool-result limit for ordinary results. |
 | `CCM_MAX_MCP_FILE_RESULT_BYTES` | 24 MiB | Serialized MCP result limit when returning an embedded file resource. |
@@ -331,7 +332,33 @@ Windows is the current fully supported restricted-execution platform.
 
 Restricted command execution on Linux/macOS is not implemented yet and **fails closed** rather than silently running unsandboxed. A Linux/macOS Worker therefore currently needs `CCM_PERMISSION_PROFILE=full-access` for shell execution.
 
-`apply_patch` enforces its own workspace-write boundary on the Worker, including real-path checks that reject symlink/junction escapes. Ordinary `exec_command` remains inside the selected environment's normal sandbox. A command can cross that sandbox only through the explicit one-shot approval flow below.
+`apply_patch` enforces its own workspace-write boundary on the Worker, including real-path checks that reject symlink/junction escapes. Ordinary `exec_command` remains inside the selected environment's normal sandbox except for narrowly recognized trusted classes. Remote Git already has a syntax-restricted trusted path. Controller-managed trusted package-script rules provide a second explicit trusted path for selected workspace scripts such as `npm test`; all other commands cross the sandbox only through the approval flow below.
+
+### Trusted package scripts
+
+For repetitive development commands that cannot run under the Windows restricted token, CCM can trust one simple package-manager script in one exact workspace. A trusted rule is bound to the environment, workspace id/root, exact command, workdir, shell/TTY settings, package manager/script name, and the SHA-256 of the current `package.json` script text. A matching rule lets ordinary `exec_command` run that invocation with full host permissions without rendering an approval card. If the script text changes, the rule immediately stops matching and CCM falls back to the normal sandbox/escalation path.
+
+Trusted package-script state is stored under the protected Controller state directory rather than inside the workspace. The target repository therefore cannot grant itself trust through ordinary `workspace-write` access.
+
+Manage rules from the Controller host with the explicit local CLI:
+
+```powershell
+node scripts/manage-trusted-package-script.mjs trust `
+  --environment-id DESKTOP-KFL6V1F `
+  --workspace-id codex-compatible-mcp `
+  --workspace-root C:\path\to\codex-compatible-mcp `
+  --command "npm test"
+
+node scripts/manage-trusted-package-script.mjs list
+
+node scripts/manage-trusted-package-script.mjs revoke `
+  --environment-id DESKTOP-KFL6V1F `
+  --workspace-id codex-compatible-mcp `
+  --workspace-root C:\path\to\codex-compatible-mcp `
+  --command "npm test"
+```
+
+Only structurally simple package-script commands qualify. Shell chaining, pipes/redirection, and extra script arguments do not enter this trusted class. Adding or refreshing trust is an explicit Controller-host management action; the model-visible `exec_command` tool cannot write trust rules.
 
 ### Sandbox escalation and workspace allow rules
 
@@ -347,7 +374,7 @@ On Approve, CCM resumes the already-frozen action directly. There is no second m
 - runs that one command with `full-access`,
 - cannot be reused after execution.
 
-**Always allow in workspace** still executes the current frozen action through the same approval state machine, but after successful Worker dispatch CCM stores a constrained `allow` rule under ignored Controller state. Future escalations skip the approval prompt only when the environment, workspace identity/root, exact command, working directory, shell, and TTY mode all still match.
+**Always allow in workspace** still executes the current frozen action through the same approval state machine, but after successful Worker dispatch CCM stores a constrained `allow` rule under the protected Controller state directory. Future escalations skip the approval prompt only when the environment, workspace identity/root, exact command, working directory, shell, and TTY mode all still match.
 
 Simple package-manager scripts such as `npm test`, `npm run test`, `pnpm test`, and `yarn lint` receive an additional content binding. Before the persistent rule is created, CCM reads the current `package.json` script through the restricted Worker and stores a SHA-256 of that script text. Future automatic approval re-reads the script; changing the script invalidates the rule and restores the approval prompt. Shell chaining, redirection, extra script arguments, or other compound command forms are not treated as package-script rules.
 

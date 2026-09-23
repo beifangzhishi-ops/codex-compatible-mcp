@@ -39,6 +39,8 @@ const UNIFIED_EXEC_OUTPUT_SCHEMA = {
   policy_auto_approved: z.boolean().optional(),
   policy_saved: z.boolean().optional(),
   policy_rule_id: z.string().optional(),
+  trusted_package_script: z.boolean().optional(),
+  trusted_package_script_rule_id: z.string().optional(),
   action_failed: z.boolean().optional(),
 };
 
@@ -86,20 +88,30 @@ function execResult(value) {
 function approvalCardResult(prepared) {
   const value = prepared.value;
   if (prepared.autoApproved) {
+    const trustedPackageScript = Boolean(value.trusted_package_script);
     return {
       content: [{
         type: 'text',
         text: [
-          'CCM executed this full-access command under an existing workspace policy.',
+          trustedPackageScript
+            ? 'CCM executed this command through a trusted package-script rule.'
+            : 'CCM executed this full-access command under an existing workspace policy.',
           'Environment: ' + value.environment_id,
           'Workspace: ' + value.workspace_id,
           'Command: ' + value.command,
-          'Policy rule: ' + value.policy_rule_id,
+          (trustedPackageScript ? 'Trust rule: ' : 'Policy rule: ') +
+            (trustedPackageScript
+              ? value.trusted_package_script_rule_id
+              : value.policy_rule_id),
           'No additional user approval was required.',
         ].join('\n'),
       }],
       structuredContent: value,
-      _meta: { source: 'ccm.exec-policy' },
+      _meta: {
+        source: trustedPackageScript
+          ? 'ccm.trusted-package-script'
+          : 'ccm.exec-policy',
+      },
     };
   }
   const workspaceAction = value.kind === 'workspace';
@@ -602,6 +614,7 @@ export function registerCoreTools(registry, runtime) {
       'workspace_context is required and determines the Worker, cwd/session ownership, and restricted-write root. It does not narrow filesystem reads below the environment\'s sandbox_read_scope. Do not pass or infer a separate environment for this command.',
       'If no project has been selected, first discover ccm.create_projectless_context with tool_search and invoke it through exec; then pass the returned workspace_context here. When sandbox_read_scope=host, that projectless context is sufficient for absolute-path reads anywhere readable on the selected Worker; do not select/register the target path merely to inspect it.',
       'In workspace-write environments, normal remote Git commands such as git clone/fetch/pull/push/ls-remote are handled automatically and do not require sandbox_permissions=require_escalated. Run remote Git as Git-only shell commands so CCM can recognize the trusted path.',
+      'Controller-trusted package scripts such as a specifically trusted workspace npm test are also handled automatically through exec_command. Trust is bound to the workspace and current package.json script hash; if the script changes it stops matching and must not be treated as trusted.',
       'For a non-Git command that genuinely requires full-access outside a workspace-write sandbox, use the direct request_escalated_exec tool. Do not start a new approval with sandbox_permissions=require_escalated; that legacy parameter is retained only for migration of an already-issued approval_id.',
       'A CCM-originated result is identifiable by its structured CCM fields. If a host reports a Script error or safety/policy/tool-call failure without this tool returning a structured result, do not attribute that failure to CCM or claim CCM blocked the command.',
       'On Windows, keep destructive filesystem operations in one shell and verify resolved targets before recursive deletes or moves.',
@@ -665,6 +678,7 @@ export function registerCoreTools(registry, runtime) {
       'Use this direct tool instead of exec_command(sandbox_permissions=require_escalated) when a workspace-write environment genuinely requires execution outside the sandbox.',
       'The user decision is handled inside the CCM approval card. After this tool returns, do not call respond_to_escalation, do not reconstruct the command, and do not issue a second execution request for the same action.',
       'Trusted remote Git uses exec_command directly and should not use this tool.',
+      'Controller-trusted package scripts also use exec_command directly and should not use this tool while their workspace/script-hash rule still matches.',
     ].join('\n\n'),
     inputSchema: {
       cmd: z.string().min(1).describe('Exact shell command to freeze for one approved full-access execution.'),
