@@ -34,7 +34,10 @@ export function createControllerRuntime(options = {}) {
     port: options.workerPort,
     takeoverToken: options.workerTakeoverToken,
   });
-  const approvalManager = options.approvalManager || new ApprovalManager({ audit });
+  const approvalManager = options.approvalManager || new ApprovalManager({
+    audit,
+    ttlMs: process.env.CCM_APPROVAL_TTL_MS,
+  });
   const execPolicyStore = options.execPolicyStore || new ExecPolicyStore({
     stateFile: options.execPolicyStateFile ||
       defaultControllerStateFile('exec-policy.json'),

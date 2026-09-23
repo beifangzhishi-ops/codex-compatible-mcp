@@ -1,6 +1,12 @@
 import crypto from 'node:crypto';
 
-const DEFAULT_APPROVAL_TTL_MS = 5 * 60 * 1000;
+const DEFAULT_APPROVAL_TTL_MS = 15 * 60 * 1000;
+const DEFAULT_TERMINAL_RETENTION_MS = 5 * 60 * 1000;
+
+function normalizePositiveDuration(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
 
 function intentFor(args, environmentId) {
   return {
@@ -85,10 +91,15 @@ function frozenExecutionAction(args, environmentId, workspace = {}) {
 export class ApprovalManager {
   constructor({
     ttlMs = DEFAULT_APPROVAL_TTL_MS,
+    terminalRetentionMs = DEFAULT_TERMINAL_RETENTION_MS,
     now = () => Date.now(),
     audit = null,
   } = {}) {
-    this.ttlMs = ttlMs;
+    this.ttlMs = normalizePositiveDuration(ttlMs, DEFAULT_APPROVAL_TTL_MS);
+    this.terminalRetentionMs = normalizePositiveDuration(
+      terminalRetentionMs,
+      DEFAULT_TERMINAL_RETENTION_MS,
+    );
     this.now = now;
     this.audit = typeof audit === 'function' ? audit : null;
     this.requests = new Map();
@@ -121,10 +132,14 @@ export class ApprovalManager {
         'approved',
         'approved_retryable',
       ]);
+      const terminalAt = request.consumedAt ??
+        request.unknownAt ??
+        request.respondedAt ??
+        request.expiresAt;
       const terminalRetentionExpired =
         !activeExpiryStates.has(request.state) &&
         request.state !== 'dispatching' &&
-        request.expiresAt + this.ttlMs <= now;
+        terminalAt + this.terminalRetentionMs <= now;
       if ((activeExpiryStates.has(request.state) && request.expiresAt <= now) ||
           terminalRetentionExpired) {
         this.#emit('expired', request);
@@ -595,4 +610,7 @@ export class ApprovalManager {
   }
 }
 
-export { DEFAULT_APPROVAL_TTL_MS };
+export {
+  DEFAULT_APPROVAL_TTL_MS,
+  DEFAULT_TERMINAL_RETENTION_MS,
+};

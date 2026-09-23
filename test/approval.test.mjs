@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { ApprovalManager } from '../src/controller/approval-manager.mjs';
+import {
+  ApprovalManager,
+  DEFAULT_APPROVAL_TTL_MS,
+  DEFAULT_TERMINAL_RETENTION_MS,
+} from '../src/controller/approval-manager.mjs';
 import { hashPackageScript } from '../src/controller/exec-policy-store.mjs';
 import { EnvironmentRegistry } from '../src/runtime/environment-registry.mjs';
 import { RemoteProcessManager } from '../src/runtime/remote-process-manager.mjs';
@@ -36,6 +40,38 @@ class FakeWorkerHub extends EventEmitter {
     };
   }
 }
+
+test('ApprovalManager defaults to a 15-minute approval lifetime', () => {
+  assert.equal(DEFAULT_APPROVAL_TTL_MS, 15 * 60 * 1000);
+  assert.equal(DEFAULT_TERMINAL_RETENTION_MS, 5 * 60 * 1000);
+
+  const now = Date.UTC(2026, 8, 23, 12, 0, 0);
+  const approvals = new ApprovalManager({ now: () => now });
+  const pending = approvals.requestExecution(
+    { cmd: 'Write-Output DEFAULT_TTL' },
+    'approval-worker',
+  );
+
+  assert.equal(
+    Date.parse(pending.expires_at) - now,
+    DEFAULT_APPROVAL_TTL_MS,
+  );
+});
+
+test('ApprovalManager normalizes configured approval durations', () => {
+  const configured = new ApprovalManager({ ttlMs: '120000' });
+  assert.equal(configured.ttlMs, 120000);
+
+  const invalid = new ApprovalManager({
+    ttlMs: 0,
+    terminalRetentionMs: Number.NaN,
+  });
+  assert.equal(invalid.ttlMs, DEFAULT_APPROVAL_TTL_MS);
+  assert.equal(
+    invalid.terminalRetentionMs,
+    DEFAULT_TERMINAL_RETENTION_MS,
+  );
+});
 
 function fakeWorkspaceContextManager() {
   return {
@@ -101,6 +137,36 @@ test('ApprovalManager binds a grant to one exact execution and expires it', () =
   now += 1001;
   assert.throws(
     () => approvals.respond(expiring.approval_id, 'approve'),
+    /Unknown or expired/,
+  );
+});
+
+test('ApprovalManager applies the configured TTL to workspace approvals', () => {
+  let now = Date.UTC(2026, 8, 23, 12, 0, 0);
+  const approvals = new ApprovalManager({
+    ttlMs: 2000,
+    now: () => now,
+  });
+  const pending = approvals.requestWorkspaceAction(
+    'select_workspace',
+    {
+      environment_id: 'approval-worker',
+      workspace_id: 'approval-workspace',
+      workspace_root: 'C:\\workspace',
+      create_if_missing: false,
+    },
+    'Enter workspace?',
+  );
+
+  now += 1999;
+  assert.equal(
+    approvals.getRequest(pending.approval_id).state,
+    'pending',
+  );
+
+  now += 2;
+  assert.throws(
+    () => approvals.getRequest(pending.approval_id),
     /Unknown or expired/,
   );
 });
@@ -216,6 +282,32 @@ test('ApprovalManager does not expire an action while it is dispatching', () => 
     prepared.request.approval_id,
   );
   assert.equal(consumed.state, 'consumed');
+});
+
+test('ApprovalManager terminal retention is independent of active approval TTL', () => {
+  let now = Date.UTC(2026, 8, 23, 7, 0, 0);
+  const approvals = new ApprovalManager({
+    ttlMs: 60_000,
+    terminalRetentionMs: 1000,
+    now: () => now,
+  });
+  const args = {
+    cmd: 'Write-Output TERMINAL_RETENTION',
+  };
+  const pending = approvals.requestExecution(args, 'approval-worker');
+  approvals.respond(pending.approval_id, 'deny');
+
+  now += 999;
+  assert.equal(
+    approvals.getRequest(pending.approval_id).state,
+    'denied',
+  );
+
+  now += 2;
+  assert.throws(
+    () => approvals.getRequest(pending.approval_id),
+    /Unknown or expired/,
+  );
 });
 
 test('ApprovalManager binds workspace creation permission into the exact intent', () => {
