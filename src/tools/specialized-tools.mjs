@@ -433,7 +433,7 @@ export function registerSpecializedTools(registry, runtime) {
 
   registry.register({
     namespace: 'ccm-extra',
-    name: 'one_time_key_link',
+    name: 'one_time_link',
     provider: 'ccm-specialized',
     provenance: 'ccm-local-one-time-key',
     surfaces: { deferred: true, codeMode: true },
@@ -480,7 +480,7 @@ export function registerSpecializedTools(registry, runtime) {
           }],
           structuredContent: {
             environment_id: environment.id,
-            capability: 'one_time_key_link',
+            capability: 'one_time_link',
             one_time_url: oneTimeUrl,
             expires_in_seconds: ttl,
           },

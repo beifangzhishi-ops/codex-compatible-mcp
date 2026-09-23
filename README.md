@@ -282,7 +282,7 @@ ChatGPT-side CCM/plugin/connector rebuilds are **user-operated**. The assistant 
 When a Direct-tool schema change means the ChatGPT registration needs to be rebuilt, the assistant should stop at the handoff boundary and provide only the information the user needs to rebuild it:
 
 1. Resolve the current public MCP resource from `CCM_RESOURCE` (normally from ignored `config/ccm.env`) and give that MCP address to the user.
-2. Do **not** print or copy the local approval secret into chat. Discover `ccm-extra.one_time_key_link` and use it with the local approval-secret file (normally ignored `.state/ccm-approval-secret.txt`) to create a short-lived, single-reveal HTTPS page. Give the resulting one-time key URL to the user.
+2. Do **not** print or copy the local approval secret into chat. Discover `ccm-extra.one_time_link` and use it with the local approval-secret file (normally ignored `.state/ccm-approval-secret.txt`) to create a short-lived, single-reveal HTTPS page. Give the resulting one-time key URL to the user.
 3. Do not use BMG to operate ChatGPT settings, rename the existing connector, create a replacement connector/plugin, or complete OAuth/consent for the user.
 4. Do not run the legacy `tools/chatgpt-schema-refresh/refresh.ps1` rebuild workflow by default. It may remain as a manual/debugging utility, but normal assistant behavior is the two-item handoff above: **one-time key URL + MCP address**.
 5. If the current ChatGPT UI requires an archive upload, do not proactively build or upload a plugin archive as part of rebuild. Only build/provide one when the user explicitly asks for the archive.

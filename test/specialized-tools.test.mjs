@@ -245,7 +245,7 @@ test('one-time key link accepts a file path without exposing file contents', asy
       exit_code: 0,
     };
   };
-  const result = await registry.get('ccm-extra.one_time_key_link').handler({
+  const result = await registry.get('ccm-extra.one_time_link').handler({
     environment_id: 'worker-b',
     file_path: 'C:\\secrets\\api-key.txt',
     ttl_seconds: 180,
