@@ -1,5 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { isTrustedRemoteGitCommand } from './sandbox/git-policy.mjs';
+import {
+  hashPackageScript,
+  parsePackageScriptCommand,
+} from '../controller/exec-policy-store.mjs';
 
 const DEFAULT_EXEC_YIELD_TIME_MS = 2_000;
 const MAX_INITIAL_EXEC_YIELD_TIME_MS = 5_000;
@@ -16,6 +20,7 @@ export class RemoteProcessManager {
     workerHub,
     approvalManager = null,
     workspaceContextManager = null,
+    execPolicyStore = null,
     audit = null,
   }) {
     if (!environmentRegistry || !workerHub) {
@@ -25,6 +30,7 @@ export class RemoteProcessManager {
     this.workerHub = workerHub;
     this.approvalManager = approvalManager;
     this.workspaceContextManager = workspaceContextManager;
+    this.execPolicyStore = execPolicyStore;
     this.audit = typeof audit === 'function' ? audit : null;
     this.sessions = new Map();
     this.nextSessionId = 1000;
@@ -104,6 +110,96 @@ export class RemoteProcessManager {
     };
   }
 
+  async #resolvePackageScriptBinding(args, workspaceContext, environment) {
+    const parsed = parsePackageScriptCommand(args.cmd);
+    if (!parsed) return null;
+    if (environment.platform !== 'windows') {
+      throw new Error(
+        'Persistent package-script approval currently requires a Windows worker.',
+      );
+    }
+    const scriptName = parsed.script.replace(/'/g, "''");
+    const probe = [
+      "$p=Get-Content -Raw -LiteralPath package.json | ConvertFrom-Json",
+      "$prop=$p.scripts.PSObject.Properties['" + scriptName + "']",
+      "if($null -eq $prop){exit 42}",
+      "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([string]$prop.Value))",
+    ].join('; ');
+    const result = await this.workerHub.call(
+      environment.id,
+      'exec_command',
+      {
+        cmd: probe,
+        environment_id: environment.id,
+        workspace_id: workspaceContext.workspace_id,
+        expected_workspace_root: workspaceContext.workspace_root,
+        sandbox_permissions: 'use_default',
+        shell: 'powershell.exe',
+        yield_time_ms: 2_000,
+        ...(args.workdir ? { workdir: args.workdir } : {}),
+      },
+      { timeoutMs: 12_000 },
+    );
+    if (result?.exit_code !== 0) {
+      throw new Error(
+        'Could not resolve package.json script "' + parsed.script + '" for persistent approval.',
+      );
+    }
+    const encoded = String(result?.output || '').trim();
+    if (!encoded) {
+      throw new Error(
+        'Package script "' + parsed.script + '" resolved to an empty policy probe.',
+      );
+    }
+    let scriptText;
+    try {
+      scriptText = Buffer.from(encoded, 'base64').toString('utf8');
+    } catch {
+      throw new Error('Package script policy probe returned invalid data.');
+    }
+    return {
+      ...parsed,
+      script_sha256: hashPackageScript(scriptText),
+    };
+  }
+
+  async #matchExecPolicy(args, workspaceContext, environment) {
+    if (!this.execPolicyStore) return null;
+    let packageScript = null;
+    if (parsePackageScriptCommand(args.cmd)) {
+      try {
+        packageScript = await this.#resolvePackageScriptBinding(
+          args,
+          workspaceContext,
+          environment,
+        );
+      } catch (error) {
+        this.#emit('exec_policy_probe_failed', {
+          environment_id: environment.id,
+          workspace_context: workspaceContext.workspace_context,
+          workspace_id: workspaceContext.workspace_id,
+          error_name: error?.name || 'Error',
+        });
+        return null;
+      }
+    }
+    return this.execPolicyStore.match({
+      workspaceContext,
+      environment,
+      args,
+      packageScript,
+    });
+  }
+
+  async #prepareExecPolicyBinding(args, workspaceContext, environment) {
+    if (!this.execPolicyStore) {
+      throw new Error('CCM exec policy store is not available.');
+    }
+    return parsePackageScriptCommand(args.cmd)
+      ? await this.#resolvePackageScriptBinding(args, workspaceContext, environment)
+      : null;
+  }
+
   isSessionLive(sessionId, workspaceContext = null) {
     const session = this.sessions.get(sessionId);
     if (!session) return false;
@@ -122,7 +218,7 @@ export class RemoteProcessManager {
     };
   }
 
-  async execCommand(args) {
+  async execCommand(args, { policyRuleOverride = null } = {}) {
     if (!args.workspace_context) {
       throw new Error(
         'exec_command requires workspace_context. Obtain one explicitly before execution.',
@@ -159,6 +255,7 @@ export class RemoteProcessManager {
     const trustedGit = environment.permissionProfile === 'workspace-write' &&
       isTrustedRemoteGitCommand(args.cmd);
     const wantsEscalation = requestedEscalation && !trustedGit;
+    let policyRule = policyRuleOverride;
     let legacyApprovalId = null;
     let legacyApprovalArgs = null;
 
@@ -181,7 +278,28 @@ export class RemoteProcessManager {
       if (!this.approvalManager) {
         throw new Error('Escalated execution requires an approval manager.');
       }
-      if (!args.approval_id) {
+      if (!args.approval_id && !policyRule) {
+        policyRule = await this.#matchExecPolicy(
+          args,
+          workspaceContext,
+          environment,
+        );
+      }
+      if (policyRule?.decision === 'allow') {
+        forwardedArgs = {
+          ...forwardedArgs,
+          sandbox_permissions: 'approved_escalated',
+        };
+        delete forwardedArgs.approval_id;
+        delete forwardedArgs.justification;
+        this.#emit('exec_policy_auto_allowed', {
+          rule_id: policyRule.rule_id,
+          operation_id: operationId,
+          environment_id: environment.id,
+          workspace_context: workspaceContext.workspace_context,
+          workspace_id: workspaceContext.workspace_id,
+        });
+      } else if (!args.approval_id) {
         const approval = this.approvalManager.requestExecution(
           {
             ...args,
@@ -198,24 +316,24 @@ export class RemoteProcessManager {
           ...approval,
           ...(workspaceContext || {}),
         };
+      } else {
+        legacyApprovalArgs = {
+          ...args,
+          workspace_context: workspaceContext.workspace_context,
+        };
+        const validatedApproval = this.approvalManager.claimLegacyExecution(
+          args.approval_id,
+          legacyApprovalArgs,
+          environment.id,
+        );
+        operationId = validatedApproval.operation_id;
+        legacyApprovalId = args.approval_id;
+        forwardedArgs = {
+          ...forwardedArgs,
+          sandbox_permissions: 'approved_escalated',
+        };
+        delete forwardedArgs.approval_id;
       }
-
-      legacyApprovalArgs = {
-        ...args,
-        workspace_context: workspaceContext.workspace_context,
-      };
-      const validatedApproval = this.approvalManager.claimLegacyExecution(
-        args.approval_id,
-        legacyApprovalArgs,
-        environment.id,
-      );
-      operationId = validatedApproval.operation_id;
-      legacyApprovalId = args.approval_id;
-      forwardedArgs = {
-        ...forwardedArgs,
-        sandbox_permissions: 'approved_escalated',
-      };
-      delete forwardedArgs.approval_id;
     } else if (wantsEscalation) {
       forwardedArgs = {
         ...forwardedArgs,
@@ -280,15 +398,22 @@ export class RemoteProcessManager {
         environment.id,
       );
     }
-    return this.#recordExecResult(
+    const recorded = this.#recordExecResult(
       result,
       environment,
       workspaceContext,
       operationId,
     );
+    return policyRule
+      ? {
+        ...recorded,
+        policy_auto_approved: true,
+        policy_rule_id: policyRule.rule_id,
+      }
+      : recorded;
   }
 
-  prepareEscalatedCommand(args, { hostSession = null } = {}) {
+  async prepareEscalatedCommand(args, { hostSession = null } = {}) {
     if (!args.workspace_context) {
       throw new Error(
         'request_escalated_exec requires workspace_context.',
@@ -313,6 +438,29 @@ export class RemoteProcessManager {
       throw new Error(
         'Trusted remote Git does not require escalation; use exec_command directly.',
       );
+    }
+
+    const policyRule = await this.#matchExecPolicy(
+      args,
+      workspaceContext,
+      environment,
+    );
+    if (policyRule?.decision === 'allow') {
+      const result = await this.execCommand({
+        ...args,
+        sandbox_permissions: 'require_escalated',
+      }, {
+        policyRuleOverride: policyRule,
+      });
+      return {
+        autoApproved: true,
+        value: {
+          ...result,
+          command: String(args.cmd),
+          policy_auto_approved: true,
+          policy_rule_id: policyRule.rule_id,
+        },
+      };
     }
 
     const prepared = this.approvalManager.requestExecutionForApp(
@@ -362,8 +510,10 @@ export class RemoteProcessManager {
         'The user denied this escalated command. It was not dispatched.',
       );
     }
-    if (decision !== 'approve') {
-      throw new Error('Approval decision must be approve or deny.');
+    if (!['approve', 'approve_workspace'].includes(decision)) {
+      throw new Error(
+        'Approval decision must be approve, approve_workspace, or deny.',
+      );
     }
 
     const claimed = this.approvalManager.claimAppExecution(
@@ -374,6 +524,8 @@ export class RemoteProcessManager {
     const action = claimed.action;
     let workspaceContext;
     let environment;
+    let persistentPolicy = null;
+    let persistentPolicyPackageScript = null;
     try {
       workspaceContext = this.workspaceContextManager.resolve(
         action.workspace_context,
@@ -386,6 +538,13 @@ export class RemoteProcessManager {
           workspaceContext.workspace_root !== action.workspace_root) {
         throw new Error(
           'Frozen workspace identity no longer matches the current workspace context.',
+        );
+      }
+      if (decision === 'approve_workspace') {
+        persistentPolicyPackageScript = await this.#prepareExecPolicyBinding(
+          action,
+          workspaceContext,
+          environment,
         );
       }
     } catch (error) {
@@ -493,6 +652,25 @@ export class RemoteProcessManager {
       workspaceContext,
       claimed.request.operation_id,
     );
+    if (decision === 'approve_workspace') {
+      try {
+        persistentPolicy = this.execPolicyStore.allow({
+          workspaceContext,
+          environment,
+          args: action,
+          packageScript: persistentPolicyPackageScript,
+        });
+      } catch (error) {
+        this.#emit('exec_policy_save_failed', {
+          approval_id: approvalId,
+          operation_id: claimed.request.operation_id,
+          environment_id: environment.id,
+          workspace_context: workspaceContext.workspace_context,
+          workspace_id: workspaceContext.workspace_id,
+          error_name: error?.name || 'Error',
+        });
+      }
+    }
     const consumed = this.approvalManager.markAppExecutionConsumed(approvalId);
     this.#emit('approval_consumed', {
       approval_id: approvalId,
@@ -508,6 +686,10 @@ export class RemoteProcessManager {
       approval_id: consumed.approval_id,
       state: consumed.state,
       intent_sha256: consumed.intent_sha256,
+      ...(persistentPolicy ? {
+        policy_saved: true,
+        policy_rule_id: persistentPolicy.rule_id,
+      } : {}),
     };
   }
 

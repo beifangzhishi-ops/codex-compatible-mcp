@@ -33,6 +33,9 @@ const UNIFIED_EXEC_OUTPUT_SCHEMA = {
   workspace_kind: z.enum(['registered', 'projectless']).optional(),
   workspace_root: z.string().optional(),
   created_at: z.string().optional(),
+  policy_auto_approved: z.boolean().optional(),
+  policy_saved: z.boolean().optional(),
+  policy_rule_id: z.string().optional(),
 };
 
 function jsonResult(value) {
@@ -78,6 +81,23 @@ function execResult(value) {
 
 function approvalCardResult(prepared) {
   const value = prepared.value;
+  if (prepared.autoApproved) {
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          'CCM executed this full-access command under an existing workspace policy.',
+          'Environment: ' + value.environment_id,
+          'Workspace: ' + value.workspace_id,
+          'Command: ' + value.command,
+          'Policy rule: ' + value.policy_rule_id,
+          'No additional user approval was required.',
+        ].join('\n'),
+      }],
+      structuredContent: value,
+      _meta: { source: 'ccm.exec-policy' },
+    };
+  }
   const lines = [
     'CCM prepared a frozen full-access command for user approval.',
     'Approval ID: ' + value.approval_id,
@@ -462,7 +482,7 @@ export function registerCoreTools(registry, runtime) {
       try {
         const hostSession = context?.extra?._meta?.['openai/session'] || null;
         return approvalCardResult(
-          runtime.processManager.prepareEscalatedCommand(
+          await runtime.processManager.prepareEscalatedCommand(
             args,
             { hostSession },
           ),
@@ -490,12 +510,12 @@ export function registerCoreTools(registry, runtime) {
     environmentRequirements: { capabilities: ['exec'] },
     description: [
       'App-only resolver for a frozen CCM approval request. It is invoked by the CCM approval card, not by the model.',
-      'On approve, CCM resumes only the previously frozen action. This tool accepts no command, workspace, workdir, or shell override.',
+      'On approve, CCM resumes only the previously frozen action. approve_workspace also stores a constrained workspace policy for future matching executions. This tool accepts no command, workspace, workdir, or shell override.',
     ].join('\n\n'),
     inputSchema: {
       approval_id: z.string().uuid().describe('Frozen CCM approval identifier.'),
       approval_nonce: z.string().min(20).describe('One-time card secret delivered only through tool-result _meta.'),
-      decision: z.enum(['approve', 'deny']).describe('User decision from the CCM approval card.'),
+      decision: z.enum(['approve', 'approve_workspace', 'deny']).describe('User decision from the CCM approval card.'),
     },
     outputSchema: UNIFIED_EXEC_OUTPUT_SCHEMA,
     handler: async (args, context) => {

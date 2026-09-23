@@ -320,7 +320,7 @@ test('RemoteProcessManager app approval executes only the frozen action', async 
     workspaceContextManager: fakeWorkspaceContextManager(),
   });
   try {
-    const prepared = manager.prepareEscalatedCommand({
+    const prepared = await manager.prepareEscalatedCommand({
       workspace_context: '00000000-0000-4000-8000-000000000001',
       cmd: 'Write-Output FROZEN_ACTION',
       workdir: '.',
@@ -368,7 +368,7 @@ test('RemoteProcessManager marks app approval unknown after an in-flight Worker 
     workspaceContextManager: fakeWorkspaceContextManager(),
   });
   try {
-    const prepared = manager.prepareEscalatedCommand({
+    const prepared = await manager.prepareEscalatedCommand({
       workspace_context: '00000000-0000-4000-8000-000000000001',
       cmd: 'Write-Output MAYBE_STARTED',
       justification: 'Run once?',
@@ -480,6 +480,77 @@ test('RemoteProcessManager does not request approval for trusted remote Git', as
     assert.equal(workerHub.calls[0].params.sandbox_permissions, 'use_default');
     assert.equal(Object.hasOwn(workerHub.calls[0].params, 'approval_id'), false);
     assert.equal(Object.hasOwn(workerHub.calls[0].params, 'justification'), false);
+  } finally {
+    await manager.close();
+  }
+});
+
+test('approval can persist a workspace execution policy and reuse it', async () => {
+  const environmentRegistry = restrictedRegistry();
+  const workerHub = new FakeWorkerHub();
+  const approvalManager = new ApprovalManager();
+  let allowed = false;
+  const execPolicyStore = {
+    match({ args }) {
+      if (!allowed || args.cmd !== 'Write-Output POLICY_OK') return null;
+      return {
+        rule_id: '11111111-1111-4111-8111-111111111111',
+        decision: 'allow',
+      };
+    },
+    allow({ args }) {
+      assert.equal(args.cmd, 'Write-Output POLICY_OK');
+      allowed = true;
+      return {
+        rule_id: '11111111-1111-4111-8111-111111111111',
+        decision: 'allow',
+      };
+    },
+  };
+  const manager = new RemoteProcessManager({
+    environmentRegistry,
+    workerHub,
+    approvalManager,
+    workspaceContextManager: fakeWorkspaceContextManager(),
+    execPolicyStore,
+  });
+  const args = {
+    workspace_context: '00000000-0000-4000-8000-000000000001',
+    cmd: 'Write-Output POLICY_OK',
+    justification: 'Allow this debugging command?',
+  };
+
+  try {
+    const prepared = await manager.prepareEscalatedCommand(args);
+    assert.equal(prepared.autoApproved, undefined);
+    assert.equal(prepared.value.state, 'pending');
+
+    const resolved = await manager.resolvePendingExecution({
+      approval_id: prepared.value.approval_id,
+      approval_nonce: prepared.approvalNonce,
+      decision: 'approve_workspace',
+    });
+    assert.equal(resolved.state, 'consumed');
+    assert.equal(resolved.policy_saved, true);
+    assert.equal(allowed, true);
+    assert.equal(workerHub.calls.length, 1);
+    assert.equal(
+      workerHub.calls[0].params.sandbox_permissions,
+      'approved_escalated',
+    );
+
+    const automatic = await manager.prepareEscalatedCommand(args);
+    assert.equal(automatic.autoApproved, true);
+    assert.equal(automatic.value.policy_auto_approved, true);
+    assert.equal(
+      automatic.value.policy_rule_id,
+      '11111111-1111-4111-8111-111111111111',
+    );
+    assert.equal(workerHub.calls.length, 2);
+    assert.equal(
+      workerHub.calls[1].params.sandbox_permissions,
+      'approved_escalated',
+    );
   } finally {
     await manager.close();
   }

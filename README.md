@@ -331,11 +331,11 @@ Restricted command execution on Linux/macOS is not implemented yet and **fails c
 
 `apply_patch` enforces its own workspace-write boundary on the Worker, including real-path checks that reject symlink/junction escapes. Ordinary `exec_command` remains inside the selected environment's normal sandbox. A command can cross that sandbox only through the explicit one-shot approval flow below.
 
-### One-shot sandbox escalation
+### Sandbox escalation and workspace allow rules
 
 Restricted Workers support an explicit one-shot escalation flow through the direct `request_escalated_exec` tool. The model supplies the exact command, `workspace_context`, optional working directory/shell/TTY settings, output/yield settings, and user-facing justification once. CCM freezes those fields into a `PendingAction`, assigns an `approval_id` and `operation_id`, and returns an MCP App approval card. **The command is not executed by `request_escalated_exec`.**
 
-The approval card receives a high-entropy approval capability only through tool-result `_meta`; that secret is not placed in `content` or `structuredContent`. The card displays the frozen workspace/environment/command/justification and invokes the app-only `resolve_pending_action` tool when the user presses Approve or Deny. The resolver accepts only `approval_id`, the card capability, and the user's decision. It does not accept a replacement command, workspace, workdir, shell, or TTY value.
+The approval card receives a high-entropy approval capability only through tool-result `_meta`; that secret is not placed in `content` or `structuredContent`. The card displays the frozen workspace/environment/command/justification and invokes the app-only `resolve_pending_action` tool when the user presses **Approve once**, **Always allow in workspace**, or **Deny**. The resolver accepts only `approval_id`, the card capability, and the user's decision. It does not accept a replacement command, workspace, workdir, shell, or TTY value.
 
 On Approve, CCM resumes the already-frozen action directly. There is no second model decision and no model-generated retry of the command. The grant:
 
@@ -343,8 +343,13 @@ On Approve, CCM resumes the already-frozen action directly. There is no second m
 - is atomically dispatchable only while the frozen approval is in an allowed state,
 - is bound to the environment, workspace context/root, command, working directory, shell, TTY mode, and execution output/yield settings,
 - runs that one command with `full-access`,
-- cannot be reused after execution,
-- does not create a persistent allow rule.
+- cannot be reused after execution.
+
+**Always allow in workspace** still executes the current frozen action through the same approval state machine, but after successful Worker dispatch CCM stores a constrained `allow` rule under ignored Controller state. Future escalations skip the approval prompt only when the environment, workspace identity/root, exact command, working directory, shell, and TTY mode all still match.
+
+Simple package-manager scripts such as `npm test`, `npm run test`, `pnpm test`, and `yarn lint` receive an additional content binding. Before the persistent rule is created, CCM reads the current `package.json` script through the restricted Worker and stores a SHA-256 of that script text. Future automatic approval re-reads the script; changing the script invalidates the rule and restores the approval prompt. Shell chaining, redirection, extra script arguments, or other compound command forms are not treated as package-script rules.
+
+The persistent policy affects approval only. It does not weaken `workspace-write`, change ordinary `exec_command` behavior, or turn package-manager commands into a general unsandboxed trust class. A matching rule authorizes only the exact escalation that the user previously chose to persist.
 
 If CCM can prove a failure occurred before Worker dispatch, the same frozen action may be presented for retry. If a timeout/disconnect makes it uncertain whether the Worker started the command, the approval enters `execution_unknown` and CCM will not retry automatically. Denied, consumed, unknown-outcome, and expired requests cannot start another execution.
 

@@ -68,7 +68,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
       color: inherit;
       background: color-mix(in srgb, currentColor 11%, transparent);
     }
-    #approve { background: color-mix(in srgb, currentColor 18%, transparent); }
+    #approve, #approveAlways { background: color-mix(in srgb, currentColor 18%, transparent); }
     button:disabled { cursor: default; opacity: 0.45; }
     @media (max-width: 430px) {
       .row { grid-template-columns: 76px minmax(0, 1fr); }
@@ -88,6 +88,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
     <div id="actions">
       <button id="deny" type="button">Deny</button>
       <button id="approve" type="button">Approve once</button>
+      <button id="approveAlways" type="button">Always allow in workspace</button>
     </div>
   </div>
   <script>
@@ -106,6 +107,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
       const command = document.getElementById("command");
       const status = document.getElementById("status");
       const approve = document.getElementById("approve");
+      const approveAlways = document.getElementById("approveAlways");
       const deny = document.getElementById("deny");
 
       function post(message) {
@@ -136,7 +138,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         const structured = envelope?.structuredContent ||
           window.openai?.toolOutput || null;
         const hidden = envelope?._meta || {};
-        if (!structured || !structured.approval_id) return false;
+        if (!structured) return false;
         approval = structured;
         approvalNonce = hidden.approval_nonce || null;
         justification.textContent = structured.justification ||
@@ -148,9 +150,22 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         environment.textContent = structured.environment_id || "Unknown";
         expires.textContent = structured.expires_at || "";
         command.textContent = structured.command || "";
+        if (structured.policy_auto_approved) {
+          setStatus(
+            "Automatically allowed by workspace policy" +
+            (structured.policy_rule_id ? " (" + structured.policy_rule_id + ")." : ".")
+          );
+          approve.disabled = true;
+          approveAlways.disabled = true;
+          deny.disabled = true;
+          updateHeight();
+          return true;
+        }
+        if (!structured.approval_id) return false;
         if (!approvalNonce) {
           setStatus("Approval token is unavailable in this host.", true);
           approve.disabled = true;
+          approveAlways.disabled = true;
           deny.disabled = true;
         }
         updateHeight();
@@ -170,6 +185,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
       function setBusy(value) {
         busy = value;
         approve.disabled = value || !approvalNonce;
+        approveAlways.disabled = value || !approvalNonce;
         deny.disabled = value || !approvalNonce;
       }
 
@@ -184,6 +200,8 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
           workspace_id: structured?.workspace_id,
           session_id: structured?.session_id,
           exit_code: structured?.exit_code,
+          policy_saved: structured?.policy_saved,
+          policy_rule_id: structured?.policy_rule_id,
           output: typeof structured?.output === "string"
             ? structured.output.slice(0, 12000)
             : ""
@@ -201,7 +219,9 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
               type: "text",
               text: decision === "deny"
                 ? "The user denied the frozen CCM full-access action."
-                : "The user approved the frozen CCM action and CCM handled it without a second model execution request."
+                : decision === "approve_workspace"
+                  ? "The user approved the frozen CCM action and asked CCM to allow future matching executions in this workspace."
+                  : "The user approved the frozen CCM action and CCM handled it without a second model execution request."
             }],
             structuredContent: summary
           }, 10000);
@@ -211,7 +231,9 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         if (!openai || typeof openai.sendFollowUpMessage !== "function") return;
         const prompt = decision === "deny"
           ? "Continue after my CCM approval-card decision. I denied the frozen action; do not run it."
-          : "Continue from the CCM approval result already placed in model context. CCM already handled the frozen approved action; do not recreate or rerun that command.";
+          : decision === "approve_workspace"
+            ? "Continue from the CCM approval result already placed in model context. CCM handled the action and saved the workspace policy; do not recreate or rerun that command."
+            : "Continue from the CCM approval result already placed in model context. CCM already handled the frozen approved action; do not recreate or rerun that command.";
         try {
           await openai.sendFollowUpMessage({ prompt, scrollToBottom: false });
         } catch {}
@@ -220,7 +242,13 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
       async function resolve(decision) {
         if (busy || !approval || !approvalNonce) return;
         setBusy(true);
-        setStatus(decision === "approve" ? "Executing approved action…" : "Denying request…");
+        setStatus(
+          decision === "deny"
+            ? "Denying request…"
+            : decision === "approve_workspace"
+              ? "Executing and saving workspace policy…"
+              : "Executing approved action…"
+        );
         try {
           const result = await request("tools/call", {
             name: "resolve_pending_action",
@@ -243,6 +271,10 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
             setStatus(structured.output || "Execution outcome is unknown. CCM will not retry automatically.", true);
           } else if (structured.state === "denied") {
             setStatus("Denied. The command was not dispatched.");
+          } else if (structured.policy_saved) {
+            setStatus(
+              "Approved, executed, and saved for future matching commands in this workspace."
+            );
           } else if (structured.session_id != null) {
             setStatus("Approved and started. Session ID: " + structured.session_id);
           } else if (structured.exit_code != null) {
@@ -251,6 +283,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
             setStatus(structured.output || "Decision recorded.");
           }
           approve.disabled = true;
+          approveAlways.disabled = true;
           deny.disabled = true;
           void notifyModel(decision, structured);
         } catch (error) {
@@ -264,6 +297,9 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
       }
 
       approve.addEventListener("click", () => { void resolve("approve"); });
+      approveAlways.addEventListener("click", () => {
+        void resolve("approve_workspace");
+      });
       deny.addEventListener("click", () => { void resolve("deny"); });
 
       window.addEventListener("message", (event) => {

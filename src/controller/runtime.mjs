@@ -9,6 +9,7 @@ import { WorkspaceContextManager } from './workspace-context-manager.mjs';
 import { FileTransferStore } from './file-transfer-store.mjs';
 import { PlanManager } from './plan-manager.mjs';
 import { createAuditLogger } from './audit-log.mjs';
+import { ExecPolicyStore } from './exec-policy-store.mjs';
 
 const installRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -32,6 +33,11 @@ export function createControllerRuntime(options = {}) {
     takeoverToken: options.workerTakeoverToken,
   });
   const approvalManager = options.approvalManager || new ApprovalManager({ audit });
+  const execPolicyStore = options.execPolicyStore || new ExecPolicyStore({
+    stateFile: options.execPolicyStateFile ||
+      path.join(installRoot, '.state', 'exec-policy.json'),
+    audit,
+  });
   const workspaceContextManager = options.workspaceContextManager ||
     new WorkspaceContextManager({
       environmentRegistry,
@@ -43,6 +49,7 @@ export function createControllerRuntime(options = {}) {
     workerHub,
     approvalManager,
     workspaceContextManager,
+    execPolicyStore,
     audit,
   });
   const fileService = options.fileService || new RemoteFileService({
@@ -62,6 +69,7 @@ export function createControllerRuntime(options = {}) {
     environmentRegistry,
     workerHub,
     approvalManager,
+    execPolicyStore,
     audit,
     workspaceContextManager,
     processManager,
@@ -74,6 +82,7 @@ export function createControllerRuntime(options = {}) {
     async close() {
       await processManager.close();
       fileTransferStore.close();
+      execPolicyStore?.close?.();
       await planManager?.close();
       workspaceContextManager.close();
       await workerHub.close();

@@ -106,6 +106,8 @@ test('approval app keeps its capability in result _meta and resolves only the fr
     assert.match(resource.contents[0].text, /tools\/call/);
     assert.match(resource.contents[0].text, /ui\/update-model-context/);
     assert.match(resource.contents[0].text, /sendFollowUpMessage/);
+    assert.match(resource.contents[0].text, /Always allow in workspace/);
+    assert.match(resource.contents[0].text, /approve_workspace/);
 
     const prepared = await client.callTool({
       name: 'request_escalated_exec',
