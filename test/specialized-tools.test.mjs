@@ -258,13 +258,17 @@ test('one-time key link accepts separate descriptor paths without reconstructing
   assert.equal(result.isError, undefined);
   assert.equal(result.structuredContent.one_time_url, 'https://ccm.example.test/ccm-once/random-token');
   assert.equal(result.structuredContent.expires_in_seconds, 180);
-  assert.match(runtime.calls[0].cmd, /ccm-once\\start\.ps1/);
-  assert.match(runtime.calls[0].cmd, /-DirectoryFilePath 'C:\\temp\\directory\.txt'/);
-  assert.match(runtime.calls[0].cmd, /-FilenameFilePath 'C:\\temp\\filename\.txt'/);
-  assert.match(runtime.calls[0].cmd, /-TtlSeconds 180/);
+  assert.match(runtime.calls[0].cmd, /ccm-once\\server\.cjs/);
+  assert.match(runtime.calls[0].cmd, /\$directoryFile='C:\\temp\\directory\.txt'/);
+  assert.match(runtime.calls[0].cmd, /\$filenameFile='C:\\temp\\filename\.txt'/);
+  assert.match(runtime.calls[0].cmd, /Get-Content -LiteralPath \$directoryFile -Raw/);
+  assert.match(runtime.calls[0].cmd, /Join-Path -Path \$directory -ChildPath \$filename/);
+  assert.match(runtime.calls[0].cmd, /New-Guid/);
+  assert.match(runtime.calls[0].cmd, /'180'\) -WindowStyle Hidden/);
   assert.equal(runtime.calls[0].cmd.includes('C:\\secrets\\api-key.txt'), false);
-  assert.equal(runtime.calls[0].cmd.includes('-FilePath'), false);
+  assert.equal(runtime.calls[0].cmd.includes('start.ps1'), false);
   assert.equal(runtime.calls[0].cmd.includes('powershell.exe'), false);
+  assert.equal(runtime.calls[0].cmd.includes('resolve-target.ps1'), false);
 });
 
 test('one-time key link schema requires descriptor paths and documents separate operations', () => {

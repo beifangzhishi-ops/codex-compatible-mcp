@@ -140,6 +140,34 @@ function toolPath(relativePath) {
   ].join('; ');
 }
 
+function oneTimeLinkCommand(args, ttl) {
+  return [
+    toolPath('tools\\ccm-once\\server.cjs'),
+    '$directoryFile=' + psQuote(args.directory_file_path),
+    '$filenameFile=' + psQuote(args.filename_file_path),
+    "try{$directory=(Get-Content -LiteralPath $directoryFile -Raw -ErrorAction Stop).Trim()}catch{throw 'Directory descriptor file is unavailable.'}",
+    "if(-not $directory){throw 'Directory descriptor is empty.'}",
+    "if($directory -match '[\\r\\n]'){throw 'Directory descriptor must contain exactly one value.'}",
+    "try{$filename=(Get-Content -LiteralPath $filenameFile -Raw -ErrorAction Stop).Trim()}catch{throw 'Filename descriptor file is unavailable.'}",
+    "if(-not $filename){throw 'Filename descriptor is empty.'}",
+    "if($filename -match '[\\r\\n<>:\"/\\\\|?*]' -or $filename -eq '.' -or $filename -eq '..'){throw 'Filename descriptor must contain only one valid leaf filename.'}",
+    "try{$directory=(Resolve-Path -LiteralPath $directory -ErrorAction Stop).Path;if(-not(Test-Path -LiteralPath $directory -PathType Container)){throw 'missing'}}catch{throw 'Target directory is unavailable.'}",
+    "try{$target=Join-Path -Path $directory -ChildPath $filename;if(-not(Test-Path -LiteralPath $target -PathType Leaf)){throw 'missing'};$target=(Resolve-Path -LiteralPath $target -ErrorAction Stop).Path}catch{throw 'Target text file is unavailable.'}",
+    "$token=((New-Guid).Guid -replace '-','')",
+    '$node=(Get-Command node.exe -ErrorAction Stop).Source',
+    'Get-NetTCPConnection -LocalPort 18444 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }',
+    '$process=Start-Process -FilePath $node -ArgumentList @($tool,$token,$target,' +
+      psQuote(String(ttl)) + ') -WindowStyle Hidden -PassThru',
+    'Start-Sleep -Milliseconds 500',
+    "if($process.HasExited){throw 'One-time secret server failed to start.'}",
+    'tailscale funnel --bg --set-path /ccm-once http://127.0.0.1:18444 | Out-Null',
+    "$issuer=Get-Content -LiteralPath (Join-Path $root 'config\\ccm.env') | Where-Object { $_ -match '^CCM_ISSUER=' } | Select-Object -First 1",
+    "if(-not $issuer){throw 'CCM_ISSUER is unavailable.'}",
+    "$origin=(($issuer -replace '^CCM_ISSUER=','').Trim() -replace '/ccm$','')",
+    "Write-Output ($origin + '/ccm-once/' + $token)",
+  ].join('; ');
+}
+
 async function run(runtime, args, command) {
   if (!runtime.workspaceContextManager) {
     throw new Error('Workspace context manager is unavailable.');
@@ -463,12 +491,7 @@ export function registerSpecializedTools(registry, runtime) {
       try {
         const environment = resolveWindowsEnvironment(runtime, args.environment_id);
         const ttl = Number(args.ttl_seconds || 300);
-        const command = [
-          toolPath('tools\\ccm-once\\start.ps1'),
-          '& $tool -DirectoryFilePath ' +
-            psQuote(args.directory_file_path) + ' -FilenameFilePath ' +
-            psQuote(args.filename_file_path) + ' -TtlSeconds ' + ttl,
-        ].join('; ');
+        const command = oneTimeLinkCommand(args, ttl);
         const result = await run(runtime, args, command);
         const oneTimeUrl = String(result.output || '').trim().split(/\r?\n/).filter(Boolean).at(-1);
         if (!/^https:\/\//i.test(oneTimeUrl || '')) {
