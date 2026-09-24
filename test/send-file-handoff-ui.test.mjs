@@ -40,14 +40,11 @@ function createHarness({
   widgetState = null,
   readContent = {},
   upload = async () => ({ fileId: 'file_ccm_deck' }),
-  requestClose = async () => {},
   includeUpload = true,
-  includeRequestClose = true,
 } = {}) {
   const listeners = new Map();
   let readCount = 0;
   let uploadCount = 0;
-  let closeCount = 0;
   let heightCount = 0;
   let uploadedFile = null;
   let uploadOptions = null;
@@ -115,13 +112,6 @@ function createHarness({
       return upload(file, options);
     };
   }
-  if (includeRequestClose) {
-    openai.requestClose = async () => {
-      closeCount += 1;
-      return requestClose();
-    };
-  }
-
   const window = {
     parent,
     openai,
@@ -161,7 +151,6 @@ function createHarness({
     body,
     get readCount() { return readCount; },
     get uploadCount() { return uploadCount; },
-    get closeCount() { return closeCount; },
     get heightCount() { return heightCount; },
     get uploadedFile() { return uploadedFile; },
     get uploadOptions() { return uploadOptions; },
@@ -186,9 +175,9 @@ function createHarness({
   };
 }
 
-test('send_file handoff uploads once with library=false and closes the widget', async () => {
+test('send_file handoff uploads once with library=false and remains visually hidden', async () => {
   const harness = createHarness();
-  await waitFor(() => harness.closeCount === 1, 'widget close');
+  await waitFor(() => harness.savedState !== null, 'saved handoff state');
   assert.equal(harness.readCount, 1);
   assert.equal(harness.uploadCount, 1);
   assert.equal(harness.uploadedFile.name, 'deck.zip');
@@ -202,6 +191,7 @@ test('send_file handoff uploads once with library=false and closes the widget', 
     harness.savedState.privateContent.resourceKey,
     toolOutput().resource_uri + '|sha-test',
   );
+  assert.ok(harness.heightCount > 0);
 });
 
 test('send_file handoff suppresses replay while widgetState reflection is delayed', async () => {
@@ -220,7 +210,7 @@ test('send_file handoff suppresses replay while widgetState reflection is delaye
   assert.equal(harness.readCount, 1);
   assert.equal(harness.uploadCount, 1);
   releaseUpload();
-  await waitFor(() => harness.closeCount === 1, 'close after delayed upload');
+  await waitFor(() => harness.savedState !== null, 'saved delayed handoff state');
   harness.emitToolResult(toolOutput());
   harness.emitGlobals();
   await new Promise((resolve) => setTimeout(resolve, 20));
@@ -240,19 +230,18 @@ test('send_file handoff reuses matching widgetState without reading or uploading
       },
     },
   });
-  await waitFor(() => harness.closeCount === 1, 'close from restored state');
+  await waitFor(() => harness.heightCount > 0, 'hidden restored state');
   assert.equal(harness.readCount, 0);
   assert.equal(harness.uploadCount, 0);
 });
 
 test('send_file handoff treats a new bridge URI as a new explicit transfer', async () => {
   const harness = createHarness();
-  await waitFor(() => harness.closeCount === 1, 'first close');
+  await waitFor(() => harness.savedState !== null, 'first handoff state');
   harness.emitToolResult(toolOutput({
     resource_uri: 'ccm-file:///00000000-0000-4000-8000-000000000456',
   }));
   await waitFor(() => harness.uploadCount === 2, 'second explicit upload');
-  await waitFor(() => harness.closeCount === 2, 'second close');
   assert.equal(harness.readCount, 2);
 });
 
@@ -264,7 +253,6 @@ test('send_file handoff rejects bridge metadata mismatches before upload', async
   });
   await waitFor(() => harness.errorBox.hidden === false, 'metadata error');
   assert.equal(harness.uploadCount, 0);
-  assert.equal(harness.closeCount, 0);
   assert.match(harness.errorBox.textContent, /name does not match/i);
 });
 
@@ -289,18 +277,16 @@ for (const [label, readContent, pattern] of [
     const harness = createHarness({ readContent });
     await waitFor(() => harness.errorBox.hidden === false, label + ' error');
     assert.equal(harness.uploadCount, 0);
-    assert.equal(harness.closeCount, 0);
     assert.match(harness.errorBox.textContent, pattern);
   });
 }
 
-test('send_file handoff reports upload failures without a success close', async () => {
+test('send_file handoff reports upload failures', async () => {
   const harness = createHarness({
     upload: async () => { throw new Error('upload failed'); },
   });
   await waitFor(() => harness.errorBox.hidden === false, 'upload error');
   assert.equal(harness.uploadCount, 1);
-  assert.equal(harness.closeCount, 0);
   assert.match(harness.errorBox.textContent, /upload failed/i);
 });
 
@@ -309,7 +295,6 @@ test('send_file handoff reports a missing host upload API', async () => {
   await waitFor(() => harness.errorBox.hidden === false, 'missing upload API');
   assert.equal(harness.readCount, 0);
   assert.equal(harness.uploadCount, 0);
-  assert.equal(harness.closeCount, 0);
   assert.match(harness.errorBox.textContent, /upload is unavailable/i);
 });
 
@@ -317,37 +302,41 @@ test('send_file handoff rejects an upload response without fileId', async () => 
   const harness = createHarness({ upload: async () => ({}) });
   await waitFor(() => harness.errorBox.hidden === false, 'missing fileId');
   assert.equal(harness.uploadCount, 1);
-  assert.equal(harness.closeCount, 0);
   assert.match(harness.errorBox.textContent, /returned no fileId/i);
 });
 
-test('send_file handoff remains visually hidden when requestClose is unavailable', async () => {
-  const harness = createHarness({ includeRequestClose: false });
-  await waitFor(() => harness.savedState !== null, 'saved handoff state');
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.equal(harness.uploadCount, 1);
-  assert.equal(harness.closeCount, 0);
-  assert.equal(harness.errorBox.hidden, true);
-  assert.equal(harness.body.dataset.error, 'false');
-  assert.ok(harness.heightCount > 0);
-});
-
-test('send_file handoff remains visually hidden when requestClose fails', async () => {
-  const harness = createHarness({
-    requestClose: async () => { throw new Error('close failed'); },
+for (const [filename, mimeType] of [
+  ['sample.png', 'image/png'],
+  ['sample.jpg', 'image/jpeg'],
+]) {
+  test('send_file handoff uploads ' + mimeType + ' once without closing the widget', async () => {
+    const output = toolOutput({
+      path: 'C:\\docs\\' + filename,
+      filename,
+      mime_type: mimeType,
+    });
+    const harness = createHarness({
+      output,
+      readContent: {
+        mimeType,
+        _meta: { filename, sha256: 'sha-test' },
+      },
+    });
+    await waitFor(() => harness.savedState !== null, mimeType + ' handoff state');
+    assert.equal(harness.readCount, 1);
+    assert.equal(harness.uploadCount, 1);
+    assert.equal(harness.uploadedFile.name, filename);
+    assert.equal(harness.uploadedFile.type, mimeType);
+    assert.equal(harness.uploadOptions.library, false);
+    assert.equal(harness.errorBox.hidden, true);
+    assert.equal(harness.body.dataset.error, 'false');
+    assert.ok(harness.heightCount > 0);
   });
-  await waitFor(() => harness.savedState !== null, 'saved handoff state');
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.equal(harness.uploadCount, 1);
-  assert.equal(harness.closeCount, 1);
-  assert.equal(harness.errorBox.hidden, true);
-  assert.equal(harness.body.dataset.error, 'false');
-  assert.ok(harness.heightCount > 0);
-});
+}
 
 test('send_file handoff UI contains only the hidden handoff surface and error state', () => {
   assert.equal(SEND_FILE_HANDOFF_UI_URI, 'ui://ccm/send-file-handoff.html');
-  assert.match(SEND_FILE_HANDOFF_UI_HTML, /requestClose/);
+  assert.doesNotMatch(SEND_FILE_HANDOFF_UI_HTML, /requestClose/);
   assert.match(SEND_FILE_HANDOFF_UI_HTML, /uploadFile\(file, \{ library: false \}\)/);
   assert.match(SEND_FILE_HANDOFF_UI_HTML, /id="error" hidden/);
   assert.doesNotMatch(SEND_FILE_HANDOFF_UI_HTML, /<button/i);

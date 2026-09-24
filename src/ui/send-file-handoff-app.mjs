@@ -174,16 +174,6 @@ export const SEND_FILE_HANDOFF_UI_HTML = String.raw`<!doctype html>
         }
       }
 
-      async function closeWidget() {
-        const openai = window.openai;
-        if (typeof openai?.requestClose === "function") {
-          try {
-            await openai.requestClose();
-          } catch {}
-        }
-        notifyHeight();
-      }
-
       async function processResult(result) {
         let transfer;
         try {
@@ -199,7 +189,7 @@ export const SEND_FILE_HANDOFF_UI_HTML = String.raw`<!doctype html>
         if (completedResourceKey === transfer.key ||
             restored?.resourceKey === transfer.key) {
           completedResourceKey = transfer.key;
-          await closeWidget();
+          notifyHeight();
           return;
         }
         if (materializingKey) return;
@@ -239,7 +229,7 @@ export const SEND_FILE_HANDOFF_UI_HTML = String.raw`<!doctype html>
               }
             });
           }
-          await closeWidget();
+          notifyHeight();
         } catch (error) {
           showError(transfer.filename, error);
         } finally {
