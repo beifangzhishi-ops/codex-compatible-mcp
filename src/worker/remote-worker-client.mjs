@@ -8,6 +8,14 @@ function send(socket, message) {
   socket.write(JSON.stringify(message) + '\n');
 }
 
+class RemoteWorkerDispatchError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.name = 'RemoteWorkerDispatchError';
+    this.code = code;
+  }
+}
+
 function environmentDescriptor(runtime) {
   const environment = runtime.environmentRegistry.resolve();
   return {
@@ -180,7 +188,10 @@ export class RemoteWorkerClient {
       send(this.socket, {
         type: 'response',
         id: message.id,
-        error: { message: String(error?.message || error) },
+        error: {
+          ...(error?.code ? { code: String(error.code) } : {}),
+          message: String(error?.message || error),
+        },
       });
     }
   }
@@ -242,7 +253,10 @@ export class RemoteWorkerClient {
           ),
         };
       default:
-        throw new Error('Unknown Remote Worker method: ' + method);
+        throw new RemoteWorkerDispatchError(
+          'unknown_method',
+          'Unknown Remote Worker method: ' + method,
+        );
     }
   }
 }

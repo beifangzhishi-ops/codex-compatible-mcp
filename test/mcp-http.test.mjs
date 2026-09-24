@@ -17,6 +17,51 @@ import {
   APPROVAL_UI_URI,
 } from '../src/ui/approval-app.mjs';
 
+test('health exposes connected abnormal environments as degraded', async () => {
+  const runtime = {
+    environmentRegistry: {
+      defaultEnvironmentId: 'stale-worker',
+      listPublic: () => [{
+        id: 'stale-worker',
+        name: 'stale-worker',
+        platform: 'windows',
+        shell: { type: 'powershell', path: 'powershell.exe' },
+        capabilities: { exec: true },
+        sandbox_read_scope: 'host',
+        sandbox_write_scope: 'context_root',
+        backend: 'remote-worker',
+        is_default: true,
+      }],
+    },
+    workerHub: {
+      environmentStatus: () => ({
+        state: 'abnormal',
+        abnormal_code: 'unknown_method',
+        abnormal_reason: 'Unknown Remote Worker method: list_projects',
+      }),
+    },
+    async close() {},
+  };
+  const controller = createHttpController({
+    toolRegistry: new ToolRegistry(),
+    runtime,
+    port: 0,
+  });
+  await controller.start();
+  try {
+    const response = await fetch(
+      'http://127.0.0.1:' + controller.address.port + '/ccm/health',
+      { headers: { Connection: 'close' } },
+    );
+    const health = await response.json();
+    assert.equal(health.status, 'degraded');
+    assert.equal(health.environments[0].state, 'abnormal');
+    assert.equal(health.environments[0].abnormal_code, 'unknown_method');
+  } finally {
+    await controller.close();
+  }
+});
+
 test('MCP lists and calls tools through a Remote Worker', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-mcp-'));
   const runtime = createControllerRuntime({

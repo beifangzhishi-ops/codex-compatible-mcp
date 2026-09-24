@@ -259,6 +259,66 @@ test('core tool surface keeps workspace lifecycle deferred and centralizes appro
     'projectless-primary',
   );
 
+  const partialRuntime = runtimeStub();
+  const abnormal = new Map();
+  const originalCall = partialRuntime.workerHub.call;
+  partialRuntime.workerHub.environmentStatus = (environmentId) =>
+    abnormal.get(environmentId) || { state: 'normal' };
+  partialRuntime.workerHub.quarantine = (environmentId, code, reason) => {
+    abnormal.set(environmentId, {
+      state: 'abnormal',
+      abnormal_code: code,
+      abnormal_reason: reason,
+    });
+    return true;
+  };
+  partialRuntime.workerHub.call = async (environmentId, method, params) => {
+    if (environmentId === 'noha' && method === 'list_projects') {
+      throw new Error('Unknown Remote Worker method: list_projects');
+    }
+    return originalCall(environmentId, method, params);
+  };
+  const partialRegistry = registerCoreTools(new ToolRegistry(), partialRuntime);
+  const partialProjects = await partialRegistry.get('list_projects').handler({});
+  assert.equal(partialProjects.isError, undefined);
+  assert.equal(
+    partialProjects.structuredContent.environments[0].projects[0].project_id,
+    'primary-project',
+  );
+  assert.equal(partialProjects.structuredContent.environments[1].state, 'abnormal');
+  assert.equal(
+    partialProjects.structuredContent.environments[1].abnormal_code,
+    'project_discovery_failed',
+  );
+  assert.match(
+    partialProjects.structuredContent.environments[1].project_discovery_error,
+    /Unknown Remote Worker method/,
+  );
+  assert.equal(
+    Object.hasOwn(partialProjects.structuredContent.environments[1], 'projects'),
+    false,
+  );
+  const partialAllProjects = await partialRegistry.get('list_projects').handler({
+    all: true,
+  });
+  assert.equal(
+    partialAllProjects.structuredContent.environments[0]
+      .projectless_contexts[0].projectless_id,
+    'projectless-primary',
+  );
+  assert.equal(
+    Object.hasOwn(
+      partialAllProjects.structuredContent.environments[1],
+      'projectless_contexts',
+    ),
+    false,
+  );
+  const strictProjects = await partialRegistry.get('list_projects').handler({
+    environment_id: 'noha',
+  });
+  assert.equal(strictProjects.isError, true);
+  assert.match(strictProjects.content[0].text, /Unknown Remote Worker method/);
+
   const created = await registry.get('create_projectless_context').handler({
     environment_id: 'noha',
   });

@@ -12,6 +12,7 @@ import { createAuditLogger } from './audit-log.mjs';
 import { ExecPolicyStore } from './exec-policy-store.mjs';
 import { TrustedPackageScriptStore } from './trusted-package-script-store.mjs';
 import { defaultControllerStateFile } from './controller-state.mjs';
+import { WorkerQuarantinePolicy } from './worker-quarantine-policy.mjs';
 
 const installRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -28,11 +29,19 @@ export function createControllerRuntime(options = {}) {
       defaultEnvironmentId: options.defaultEnvironmentId || null,
       resolvePaths: false,
     });
+  const workerQuarantinePolicy = options.workerQuarantinePolicy ||
+    new WorkerQuarantinePolicy({
+      file: options.workerQuarantinePolicyFile ||
+        path.join(installRoot, 'config', 'worker-quarantine-errors.json'),
+      pollIntervalMs: options.workerQuarantinePolicyPollIntervalMs,
+      log: options.workerQuarantinePolicyLog,
+    });
   const workerHub = options.workerHub || new WorkerHub({
     environmentRegistry,
     host: options.workerHost,
     port: options.workerPort,
     takeoverToken: options.workerTakeoverToken,
+    quarantinePolicy: workerQuarantinePolicy,
   });
   const approvalManager = options.approvalManager || new ApprovalManager({
     audit,
@@ -90,16 +99,26 @@ export function createControllerRuntime(options = {}) {
     fileTransferStore,
     planManager,
     async start() {
-      await workerHub.start();
+      workerQuarantinePolicy.start();
+      try {
+        await workerHub.start();
+      } catch (error) {
+        workerQuarantinePolicy.close();
+        throw error;
+      }
     },
     async close() {
-      await processManager.close();
-      fileTransferStore.close();
-      execPolicyStore?.close?.();
-      trustedPackageScriptStore?.close?.();
-      await planManager?.close();
-      workspaceContextManager.close();
-      await workerHub.close();
+      try {
+        await processManager.close();
+        fileTransferStore.close();
+        execPolicyStore?.close?.();
+        trustedPackageScriptStore?.close?.();
+        await planManager?.close();
+        workspaceContextManager.close();
+        await workerHub.close();
+      } finally {
+        workerQuarantinePolicy.close();
+      }
     },
   };
 }

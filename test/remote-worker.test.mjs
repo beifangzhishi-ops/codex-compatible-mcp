@@ -78,6 +78,124 @@ test('Remote Worker connect times out when hello_ack never arrives', async () =>
   }
 });
 
+test('Worker contract errors quarantine one Worker without disconnecting it', async () => {
+  const quarantinePolicy = {
+    start() {},
+    close() {},
+    has(code) {
+      return code === 'unknown_method';
+    },
+  };
+  const controller = createControllerRuntime({
+    workerPort: 0,
+    workerQuarantinePolicy: quarantinePolicy,
+  });
+  const worker = workerRuntime('worker-quarantine');
+  let client = null;
+  await controller.start();
+  try {
+    client = new RemoteWorkerClient({
+      runtime: worker,
+      workerId: 'worker-quarantine',
+      port: controller.workerHub.address.port,
+    });
+    await client.connect();
+    assert.equal(
+      await controller.workerHub.waitForEnvironment('worker-quarantine'),
+      true,
+    );
+
+    await assert.rejects(
+      controller.workerHub.call(
+        'worker-quarantine',
+        'get_workspace',
+        { workspace_id: 'missing-workspace' },
+      ),
+      /Unknown workspace/,
+    );
+    assert.deepEqual(
+      controller.workerHub.environmentStatus('worker-quarantine'),
+      { state: 'normal' },
+    );
+
+    await assert.rejects(
+      controller.workerHub.call('worker-quarantine', 'not_a_real_method'),
+      (error) => error?.code === 'unknown_method',
+    );
+    assert.equal(client.connected, true);
+    const status = controller.workerHub.environmentStatus('worker-quarantine');
+    assert.equal(status.state, 'abnormal');
+    assert.equal(status.abnormal_code, 'unknown_method');
+    assert.match(status.abnormal_reason, /Unknown Remote Worker method/);
+
+    await assert.rejects(
+      async () => controller.workerHub.call('worker-quarantine', 'ping'),
+      (error) => error?.code === 'worker_quarantined',
+    );
+    assert.equal(client.connected, true);
+
+    await client.close();
+    await client.connect();
+    assert.equal(
+      await controller.workerHub.waitForEnvironment('worker-quarantine'),
+      true,
+    );
+    assert.deepEqual(
+      controller.workerHub.environmentStatus('worker-quarantine'),
+      { state: 'normal' },
+    );
+    assert.deepEqual(
+      await controller.workerHub.call('worker-quarantine', 'ping'),
+      { ok: true, worker_id: 'worker-quarantine' },
+    );
+  } finally {
+    await client?.close().catch(() => {});
+    worker.close();
+    await controller.close();
+  }
+});
+
+test('Worker errors not configured for quarantine leave the Worker normal', async () => {
+  const quarantinePolicy = {
+    start() {},
+    close() {},
+    has() {
+      return false;
+    },
+  };
+  const controller = createControllerRuntime({
+    workerPort: 0,
+    workerQuarantinePolicy: quarantinePolicy,
+  });
+  const worker = workerRuntime('worker-no-quarantine');
+  let client = null;
+  await controller.start();
+  try {
+    client = new RemoteWorkerClient({
+      runtime: worker,
+      workerId: 'worker-no-quarantine',
+      port: controller.workerHub.address.port,
+    });
+    await client.connect();
+    await assert.rejects(
+      controller.workerHub.call('worker-no-quarantine', 'not_a_real_method'),
+      (error) => error?.code === 'unknown_method',
+    );
+    assert.deepEqual(
+      controller.workerHub.environmentStatus('worker-no-quarantine'),
+      { state: 'normal' },
+    );
+    assert.deepEqual(
+      await controller.workerHub.call('worker-no-quarantine', 'ping'),
+      { ok: true, worker_id: 'worker-no-quarantine' },
+    );
+  } finally {
+    await client?.close().catch(() => {});
+    worker.close();
+    await controller.close();
+  }
+});
+
 test('Controller rejects a duplicate worker id without replacing the active worker', async () => {
   const controller = createControllerRuntime({ workerPort: 0 });
   const firstRuntime = workerRuntime('worker-duplicate');

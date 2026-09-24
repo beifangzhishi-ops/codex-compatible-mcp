@@ -138,12 +138,27 @@ export function createHttpController({
     const extraHealth = typeof healthProvider === 'function'
       ? healthProvider()
       : {};
+    const environments = runtime.environmentRegistry.listPublic().map(
+      (environment) => ({
+        ...environment,
+        ...(runtime.workerHub?.environmentStatus?.(environment.id) || {
+          state: 'normal',
+        }),
+      }),
+    );
+    const hasAbnormalEnvironment = environments.some(
+      (environment) => environment.state === 'abnormal',
+    );
+    const reportedStatus = extraHealth.status || 'ok';
+    const status = hasAbnormalEnvironment && reportedStatus === 'ok'
+      ? 'degraded'
+      : reportedStatus;
     res.json({
-      status: extraHealth.status || 'ok',
+      ...extraHealth,
       service: 'ccm',
       default_environment_id: runtime.environmentRegistry.defaultEnvironmentId,
-      environments: runtime.environmentRegistry.listPublic(),
-      ...extraHealth,
+      environments,
+      status,
     });
   });
 

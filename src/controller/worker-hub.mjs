@@ -17,6 +17,7 @@ export class WorkerHub extends EventEmitter {
     port = Number(process.env.CCM_WORKER_HUB_PORT || 18301),
     requestTimeoutMs = 30_000,
     takeoverToken = null,
+    quarantinePolicy = null,
   } = {}) {
     super();
     if (!environmentRegistry) throw new Error('WorkerHub requires an environment registry.');
@@ -25,6 +26,7 @@ export class WorkerHub extends EventEmitter {
     this.port = port;
     this.requestTimeoutMs = requestTimeoutMs;
     this.takeoverToken = takeoverToken ? String(takeoverToken) : null;
+    this.quarantinePolicy = quarantinePolicy;
     this.server = null;
     this.connections = new Map();
     this.environmentOwners = new Map();
@@ -57,7 +59,26 @@ export class WorkerHub extends EventEmitter {
       worker_id: connection.workerId,
       environments: [...connection.environmentIds],
       remote_address: connection.socket.remoteAddress,
+      ...this.#connectionStatus(connection),
     }));
+  }
+  environmentStatus(environmentId) {
+    const workerId = this.environmentOwners.get(environmentId);
+    const connection = workerId ? this.connections.get(workerId) : null;
+    if (!connection) {
+      return {
+        state: 'unavailable',
+        abnormal_reason: 'No connected Remote Worker owns this environment.',
+      };
+    }
+    return this.#connectionStatus(connection);
+  }
+  quarantine(environmentId, code, reason) {
+    const workerId = this.environmentOwners.get(environmentId);
+    const connection = workerId ? this.connections.get(workerId) : null;
+    if (!connection) return false;
+    this.#quarantineConnection(connection, code, reason);
+    return true;
   }
   async waitForEnvironment(environmentId, timeoutMs = 10_000) {
     const deadline = Date.now() + timeoutMs;
@@ -73,6 +94,17 @@ export class WorkerHub extends EventEmitter {
     const connection = workerId ? this.connections.get(workerId) : null;
     if (!connection) {
       throw new Error('No connected Remote Worker owns environment: ' + environmentId);
+    }
+    if (connection.quarantine) {
+      const error = new Error(
+        'Remote Worker is quarantined for environment ' + environmentId +
+        ': ' + connection.quarantine.reason,
+      );
+      error.code = 'worker_quarantined';
+      error.worker_id = connection.workerId;
+      error.environment_id = environmentId;
+      error.quarantine_code = connection.quarantine.code;
+      throw error;
     }
 
     const id = randomUUID();
@@ -107,6 +139,7 @@ export class WorkerHub extends EventEmitter {
       environmentIds: new Set(),
       pending: new Map(),
       buffer: '',
+      quarantine: null,
     };
 
     socket.setNoDelay(true);
@@ -159,7 +192,12 @@ export class WorkerHub extends EventEmitter {
     connection.pending.delete(message.id);
     clearTimeout(pending.timer);
     if (message.error) {
-      pending.reject(new Error(String(message.error.message || message.error)));
+      const error = new Error(String(message.error.message || message.error));
+      if (message.error.code) error.code = String(message.error.code);
+      if (error.code && this.quarantinePolicy?.has(error.code)) {
+        this.#quarantineConnection(connection, error.code, error.message);
+      }
+      pending.reject(error);
     } else {
       pending.resolve(message.result);
     }
@@ -289,5 +327,28 @@ export class WorkerHub extends EventEmitter {
         this.emit('environment_disconnected', environmentId, connection.workerId);
       }
     }
+  }
+
+  #connectionStatus(connection) {
+    if (!connection?.quarantine) return { state: 'normal' };
+    return {
+      state: 'abnormal',
+      abnormal_code: connection.quarantine.code,
+      abnormal_reason: connection.quarantine.reason,
+      abnormal_since: connection.quarantine.since,
+    };
+  }
+
+  #quarantineConnection(connection, code, reason) {
+    const next = {
+      code: String(code || 'worker_contract_error'),
+      reason: String(reason || 'Remote Worker contract failure.'),
+      since: new Date().toISOString(),
+    };
+    connection.quarantine = next;
+    this.emit('worker_quarantined', connection.workerId, {
+      ...next,
+      environments: [...connection.environmentIds],
+    });
   }
 }

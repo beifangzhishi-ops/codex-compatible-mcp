@@ -44,6 +44,10 @@ CCM Controller
 
 Every execution environment uses the same Remote Worker protocol. The machine hosting the Controller is not a special execution backend: by default, `npm start` launches a normal Remote Worker locally and connects it through loopback.
 
+Worker feature churn does not require monotonically bumping the transport protocol version. A Worker that proves incompatible with the running Controller at RPC time is quarantined in memory rather than disconnected: all environments owned by that Worker remain visible as `state=abnormal`, later RPC dispatch to them fails fast, and healthy Workers continue normally. A fresh Worker connection clears the quarantine. Ordinary command/tool failures do not quarantine a Worker.
+
+The contract-error codes that trigger quarantine are configured in the tracked, non-secret `config/worker-quarantine-errors.json` file. CCM hot-reloads valid edits to this file with no Controller restart. Invalid live edits are logged and ignored while the last known-good policy remains active; invalid configuration at Controller startup is fatal.
+
 Registered workspaces are owned by each Worker, not by the Controller. Entering or hot-registering a real project requires one-shot user approval and returns an opaque `workspace_context`. Deferred `select_workspace` / `register_workspace` calls validate and freeze the exact workspace action, then return an opaque `approval_id`; the top-level Direct `request_approval` tool renders that frozen action in the CCM approval app. When the user approves, CCM performs the frozen action itself and returns the resulting context without a model-generated retry. `register_workspace` combines registration and entry; with `create_if_missing=true`, the same approval may also create the exact missing project directory before registration, so a new project does not need a separate shell mkdir approval followed by workspace approval. Normal development tools carry only the resulting context. Workspace contexts are persisted by the Controller and remain valid across Controller or Worker restarts. Worker-local projectless mappings are persisted as well, so a surviving projectless directory can be resumed after a Worker restart.
 
 An environment does not expose a default workspace or default working directory to the MCP client. Worker bootstrap cwd is a runtime seed only; it is not a project-location hint, a default project, or the parent directory for newly created projects. CCM deliberately has no "Projects Root" policy: project placement comes from the user or the upper-layer orchestrator.
@@ -233,6 +237,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\uninstall-ccm-
 ```
 
 The Remote Worker supervisor reads `config/worker.env` itself, builds the native helpers on startup, and launches `src/worker/agent.mjs`. The Worker agent owns connection retry/reconnect behavior, so temporary Controller/network loss does not cause a process restart. `config/worker.env`, PID files, and supervisor logs are local runtime state and are not committed.
+
+`list_projects` performs per-environment discovery. When called without `environment_id`, a stale or failing Worker cannot make healthy Worker results fail: the affected environment is returned as abnormal with its discovery error while healthy environments still return their projects. When `environment_id` explicitly targets a failing environment, the call remains strict and returns an error.
 
 The Worker task installer resolves the current fully qualified Windows identity for both the logon trigger and task principal. This also supports machines whose hostname and local username are identical.
 

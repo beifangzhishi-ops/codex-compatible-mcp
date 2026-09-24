@@ -345,6 +345,7 @@ export function registerCoreTools(registry, runtime) {
       'List connected CCM environments and their registered projects without entering a project.',
       'With no environment_id, returns every connected environment. Pass environment_id to restrict discovery to one environment.',
       'Registered projects are returned by default. Set all=true only when existing projectless contexts also need to be inspected.',
+      'Discovery is isolated per environment: an abnormal or stale Worker is reported on that environment without blocking healthy Workers. Explicit environment_id calls remain strict.',
       'Each environment includes platform/shell metadata, capabilities, independent effective sandbox_read_scope and sandbox_write_scope values, backend, and default selection. Internal bootstrap directories, raw permission profiles, and filesystem permission topology are intentionally not exposed.',
     ].join('\n\n'),
     inputSchema: {
@@ -362,21 +363,57 @@ export function registerCoreTools(registry, runtime) {
           );
         }
         const includeAll = Boolean(args.all);
-        const enriched = await Promise.all(environments.map(async (environment) => {
-          const result = await runtime.workerHub.call(
+        const discover = async (environment) => {
+          const currentStatus = runtime.workerHub.environmentStatus?.(
             environment.id,
-            'list_projects',
-            { all: includeAll },
-            { timeoutMs: 10_000 },
-          );
-          return {
-            ...environment,
-            projects: result.projects || [],
-            ...(includeAll
-              ? { projectless_contexts: result.projectless_contexts || [] }
-              : {}),
-          };
-        }));
+          ) || { state: 'normal' };
+          if (currentStatus.state === 'abnormal') {
+            const error = new Error(
+              currentStatus.abnormal_reason ||
+              'Remote Worker is quarantined.',
+            );
+            error.code = 'worker_quarantined';
+            if (args.environment_id) throw error;
+            return { ...environment, ...currentStatus };
+          }
+
+          try {
+            const result = await runtime.workerHub.call(
+              environment.id,
+              'list_projects',
+              { all: includeAll },
+              { timeoutMs: 10_000 },
+            );
+            return {
+              ...environment,
+              state: 'normal',
+              projects: result.projects || [],
+              ...(includeAll
+                ? { projectless_contexts: result.projectless_contexts || [] }
+                : {}),
+            };
+          } catch (error) {
+            runtime.workerHub.quarantine?.(
+              environment.id,
+              error?.code || 'project_discovery_failed',
+              String(error?.message || error),
+            );
+            if (args.environment_id) throw error;
+            const failedStatus = runtime.workerHub.environmentStatus?.(
+              environment.id,
+            ) || {
+              state: 'abnormal',
+              abnormal_code: error?.code || 'project_discovery_failed',
+              abnormal_reason: String(error?.message || error),
+            };
+            return {
+              ...environment,
+              ...failedStatus,
+              project_discovery_error: String(error?.message || error),
+            };
+          }
+        };
+        const enriched = await Promise.all(environments.map(discover));
         return jsonResult({
           default_environment_id: runtime.environmentRegistry.defaultEnvironmentId,
           environments: enriched,
