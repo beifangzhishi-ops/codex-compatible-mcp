@@ -371,10 +371,9 @@ export function registerCoreTools(registry, runtime) {
     tags: ['workspace', 'projectless', 'context', 'environment'],
     supportsParallel: true,
     description: [
-      'Create a projectless workspace_context for temporary execution without entering or registering a real project.',
-      'Use this whenever a target environment is known but the user did not explicitly select a project. If environment_id is omitted, CCM uses the primary environment.',
-      'A projectless context is sufficient for read-only host inspection when list_environments reports sandbox_read_scope=host: exec_command may use absolute paths outside the projectless root. The projectless root is the execution cwd/restricted-write root, not the read boundary.',
-      'Projectless context creation does not require workspace approval. Do not register Temp, Documents, a drive root, or another arbitrary directory merely to obtain an execution context.',
+      'Create a projectless workspace_context for operations that do not belong to a registered project.',
+      'Use this when no project has been selected. If environment_id is omitted, CCM uses the primary environment.',
+      'The returned workspace_context supplies Worker routing and the context root for subsequent CCM operations. Read-scope decisions, including whether absolute paths outside the projectless root are readable, belong to list_environments and exec_command rather than this lifecycle tool.',
     ].join('\n\n'),
     inputSchema: {
       environment_id: z.string().optional().describe('Environment on which to create the projectless context. Omit to use the primary environment.'),
@@ -400,7 +399,7 @@ export function registerCoreTools(registry, runtime) {
     tags: ['workspace', 'project', 'approval'],
     description: [
       'Prepare entry into a registered workspace and return a frozen approval request.',
-      'Use this only when the user explicitly intends to work in a registered project. Do not select a workspace merely to read or search a path that is already readable under sandbox_read_scope=host; use create_projectless_context for temporary execution without a selected project.',
+      'Use this only when the user explicitly intends to work in that registered project. Do not select a workspace merely to read or search a path; if no project has been selected, use create_projectless_context for temporary execution context instead.',
       'Discover through tool_search and invoke through exec. If approval_required=true, call the top-level request_approval tool with the returned approval_id; do not retry select_workspace.',
     ].join('\n\n'),
     inputSchema: {
@@ -453,7 +452,7 @@ export function registerCoreTools(registry, runtime) {
     tags: ['workspace', 'project', 'approval', 'register'],
     description: [
       'Prepare registration/entry of a project directory and return a frozen approval request. With create_if_missing=true, the approved action may create the missing directory before registration.',
-      'Use this only when the user explicitly intends to register that concrete directory as a project. Do not register a directory merely to gain read access to a path that is already readable under sandbox_read_scope=host; use create_projectless_context instead when only temporary execution context is needed.',
+      'Use this only when the user explicitly intends to register that concrete directory as a project. Do not register a directory merely to gain read access; if only temporary execution context is needed, use create_projectless_context instead.',
       'Discover through tool_search and invoke through exec. If approval_required=true, call the top-level request_approval tool with the returned approval_id; do not retry register_workspace.',
       'This workspace approval authorizes only the create/register/enter action. It is not authorization to begin implementation when the user is still planning.',
     ].join('\n\n'),
