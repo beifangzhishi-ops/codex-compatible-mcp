@@ -51,6 +51,9 @@ test('approval app keeps its capability in result _meta and resolves only the fr
         workdir: null,
         tty: false,
         shell: null,
+        prefix_rule: ['Write-Output', 'APPROVAL_UI_OK'],
+        policy_kind: 'prefix',
+        policy_persistable: true,
         justification: args.justification,
         expires_at: '2026-09-23T08:00:00.000Z',
         intent_sha256: 'a'.repeat(64),
@@ -81,6 +84,9 @@ test('approval app keeps its capability in result _meta and resolves only the fr
             workdir: null,
             tty: false,
             shell: null,
+            prefix_rule: ['Write-Output', 'APPROVAL_UI_OK'],
+            policy_kind: 'prefix',
+            policy_persistable: true,
             justification: 'Approve this frozen test command?',
             expires_at: '2026-09-23T08:00:00.000Z',
             intent_sha256: 'a'.repeat(64),
@@ -136,8 +142,10 @@ test('approval app keeps its capability in result _meta and resolves only the fr
     );
     assert.match(
       resource.contents[0].text,
-      /approveAlways\.hidden = workspaceAction/,
+      /approveAlways\.hidden = !policyPersistable/,
     );
+    assert.match(resource.contents[0].text, /Token prefix:/);
+    assert.match(resource.contents[0].text, /policy_save_failed/);
     assert.match(
       resource.contents[0].text,
       /workspace approval result already placed in model context/,

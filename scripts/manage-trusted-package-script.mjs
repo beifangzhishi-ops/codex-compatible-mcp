@@ -4,7 +4,7 @@ import { defaultControllerStateFile } from '../src/controller/controller-state.m
 import {
   hashPackageScript,
   parsePackageScriptCommand,
-} from '../src/controller/exec-policy-store.mjs';
+} from '../src/controller/package-script-policy.mjs';
 import { TrustedPackageScriptStore } from '../src/controller/trusted-package-script-store.mjs';
 
 function readArgs(argv) {

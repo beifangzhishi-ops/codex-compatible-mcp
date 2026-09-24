@@ -17,7 +17,6 @@
     "public": "node scripts/start-public.mjs",
     "preworker": "npm run build:native",
     "worker": "node src/worker/agent.mjs",
-    "pretest": "npm run build:native",
     "test": "node --test"
   },
   "dependencies": {

@@ -16,6 +16,11 @@ function intentFor(args, environmentId) {
     workdir: args.workdir == null ? null : String(args.workdir),
     tty: Boolean(args.tty),
     shell: args.shell == null ? null : String(args.shell),
+    prefix_rule: Array.isArray(args.prefix_rule)
+      ? args.prefix_rule.map((token) => String(token))
+      : null,
+    policy_kind: args.policy_kind == null ? null : String(args.policy_kind),
+    policy_persistable: Boolean(args.policy_persistable),
     workspace_context: args.workspace_context == null
       ? null
       : String(args.workspace_context),
@@ -79,6 +84,11 @@ function frozenExecutionAction(args, environmentId, workspace = {}) {
     workdir: args.workdir == null ? null : String(args.workdir),
     tty: Boolean(args.tty),
     shell: args.shell == null ? null : String(args.shell),
+    prefix_rule: Array.isArray(args.prefix_rule)
+      ? Object.freeze(args.prefix_rule.map((token) => String(token)))
+      : null,
+    policy_kind: args.policy_kind == null ? null : String(args.policy_kind),
+    policy_persistable: Boolean(args.policy_persistable),
     yield_time_ms: args.yield_time_ms == null
       ? null
       : Number(args.yield_time_ms),
@@ -417,6 +427,9 @@ export class ApprovalManager {
       workdir: request.intent.workdir,
       tty: request.intent.tty,
       shell: request.intent.shell,
+      prefix_rule: request.intent.prefix_rule,
+      policy_kind: request.intent.policy_kind,
+      policy_persistable: request.intent.policy_persistable,
       workspace_context: request.intent.workspace_context,
       ...(request.action?.workspace_id
         ? { workspace_id: request.action.workspace_id }

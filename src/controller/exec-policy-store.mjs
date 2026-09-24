@@ -1,31 +1,15 @@
-import crypto from 'node:crypto';
 import fs from 'node:fs';
-import path from 'node:path';
+import crypto from 'node:crypto';
+import { writeJsonAtomicSync } from './json-state.mjs';
+import {
+  effectiveShell,
+  normalizeWorkdir,
+  parseShellCommand,
+  tokenPrefixMatches,
+  validatePrefixTokens,
+} from '../runtime/sandbox/shell-policy-parser.mjs';
 
-function normalizeCommand(value) {
-  return String(value || '').trim();
-}
-
-function normalizeNullable(value) {
-  return value == null || value === '' ? null : String(value);
-}
-
-export function parsePackageScriptCommand(command) {
-  const match = normalizeCommand(command).match(
-    /^(npm(?:\.cmd)?|pnpm(?:\.cmd)?|yarn(?:\.cmd)?)\s+(?:(run)\s+)?([A-Za-z0-9:_-]+)$/i,
-  );
-  if (!match) return null;
-  const executable = match[1].toLowerCase().replace(/\.cmd$/, '');
-  const script = match[3];
-  return { package_manager: executable, script };
-}
-
-export function hashPackageScript(scriptText) {
-  return crypto
-    .createHash('sha256')
-    .update(String(scriptText))
-    .digest('hex');
-}
+const STATE_VERSION = 2;
 
 function publicRule(rule) {
   return {
@@ -34,13 +18,21 @@ function publicRule(rule) {
     environment_id: rule.environment_id,
     workspace_id: rule.workspace_id,
     workspace_root: rule.workspace_root,
-    command: rule.command,
+    prefix_tokens: [...rule.prefix_tokens],
     workdir: rule.workdir,
     tty: rule.tty,
     shell: rule.shell,
-    package_script: rule.package_script || null,
     created_at: rule.created_at,
   };
+}
+
+function sameScope(rule, { workspaceContext, environment, args }) {
+  return rule.environment_id === String(environment.id) &&
+    rule.workspace_id === String(workspaceContext.workspace_id) &&
+    rule.workspace_root === String(workspaceContext.workspace_root) &&
+    rule.workdir === normalizeWorkdir(args.workdir) &&
+    rule.shell === effectiveShell(args, environment) &&
+    Boolean(rule.tty) === Boolean(args.tty);
 }
 
 export class ExecPolicyStore {
@@ -63,14 +55,20 @@ export class ExecPolicyStore {
       const parsed = JSON.parse(
         fs.readFileSync(this.stateFile, 'utf8').replace(/^\uFEFF/, ''),
       );
-      this.rules = Array.isArray(parsed?.rules)
+      if (parsed?.version !== STATE_VERSION) {
+        this.rules = [];
+        this.#emit('legacy_state_reset', { previous_version: parsed?.version });
+        this.#persist();
+        return;
+      }
+      this.rules = Array.isArray(parsed.rules)
         ? parsed.rules.filter((rule) => (
           rule?.rule_id &&
-          rule?.decision &&
+          rule?.decision === 'allow' &&
           rule?.environment_id &&
           rule?.workspace_id &&
           rule?.workspace_root &&
-          rule?.command
+          validatePrefixTokens(rule?.prefix_tokens)
         ))
         : [];
     } catch (error) {
@@ -84,77 +82,92 @@ export class ExecPolicyStore {
 
   #persist() {
     if (!this.stateFile) return;
-    fs.mkdirSync(path.dirname(this.stateFile), { recursive: true });
-    fs.writeFileSync(
+    writeJsonAtomicSync(
       this.stateFile,
-      JSON.stringify({ version: 1, rules: this.rules }, null, 2) + '\n',
-      'utf8',
+      { version: STATE_VERSION, rules: this.rules },
     );
   }
 
-  match({ workspaceContext, environment, args, packageScript = null }) {
-    const command = normalizeCommand(args.cmd);
-    const workdir = normalizeNullable(args.workdir);
-    const shell = normalizeNullable(args.shell);
-    const tty = Boolean(args.tty);
-    for (const rule of this.rules) {
-      if (rule.environment_id !== String(environment.id) ||
-          rule.workspace_id !== String(workspaceContext.workspace_id) ||
-          rule.workspace_root !== String(workspaceContext.workspace_root) ||
-          rule.command !== command ||
-          rule.workdir !== workdir ||
-          rule.shell !== shell ||
-          Boolean(rule.tty) !== tty) {
-        continue;
-      }
-      if (rule.package_script) {
-        if (!packageScript ||
-            rule.package_script.package_manager !== packageScript.package_manager ||
-            rule.package_script.script !== packageScript.script ||
-            rule.package_script.script_sha256 !== packageScript.script_sha256) {
-          this.#emit('rule_invalidated', {
-            rule_id: rule.rule_id,
-            environment_id: rule.environment_id,
-            workspace_id: rule.workspace_id,
-            reason: 'package_script_changed',
-          });
-          continue;
-        }
-      }
+  match({ workspaceContext, environment, args, parsed = null }) {
+    const shell = effectiveShell(args, environment);
+    const command = parsed || parseShellCommand(args.cmd, { shell });
+    if (!command?.segments.length) return null;
+
+    const matched = [];
+    for (const segment of command.segments) {
+      const rule = this.matchSegment({
+        workspaceContext,
+        environment,
+        args,
+        tokens: segment.tokens,
+        emit: false,
+      });
+      if (!rule) return null;
+      matched.push(rule);
+    }
+    const unique = [...new Map(matched.map((rule) => [rule.rule_id, rule])).values()];
+    for (const rule of unique) {
       this.#emit('matched', {
         rule_id: rule.rule_id,
         decision: rule.decision,
         environment_id: rule.environment_id,
         workspace_id: rule.workspace_id,
+        prefix_tokens: rule.prefix_tokens,
       });
-      return publicRule(rule);
     }
-    return null;
+    return {
+      decision: 'allow',
+      rule_id: unique[0].rule_id,
+      rule_ids: unique.map((rule) => rule.rule_id),
+      prefix_tokens: unique.length === 1
+        ? [...unique[0].prefix_tokens]
+        : unique.map((rule) => [...rule.prefix_tokens]),
+    };
   }
 
-  allow({ workspaceContext, environment, args, packageScript = null }) {
+  matchSegment({ workspaceContext, environment, args, tokens, emit = true }) {
+    const rule = this.rules.find((candidate) =>
+      sameScope(candidate, { workspaceContext, environment, args }) &&
+      tokenPrefixMatches(candidate.prefix_tokens, tokens, {
+        platform: environment.platform || 'windows',
+      }));
+    if (!rule) return null;
+    if (emit) {
+      this.#emit('matched', {
+        rule_id: rule.rule_id,
+        decision: rule.decision,
+        environment_id: rule.environment_id,
+        workspace_id: rule.workspace_id,
+        prefix_tokens: rule.prefix_tokens,
+      });
+    }
+    return publicRule(rule);
+  }
+
+  allow({ workspaceContext, environment, args, prefixTokens }) {
+    const normalizedPrefix = validatePrefixTokens(prefixTokens);
+    if (!normalizedPrefix) {
+      throw new Error('Persistent execution policy requires valid prefix tokens.');
+    }
     const candidate = {
       decision: 'allow',
       environment_id: String(environment.id),
       workspace_id: String(workspaceContext.workspace_id),
       workspace_root: String(workspaceContext.workspace_root),
-      command: normalizeCommand(args.cmd),
-      workdir: normalizeNullable(args.workdir),
+      prefix_tokens: normalizedPrefix,
+      workdir: normalizeWorkdir(args.workdir),
       tty: Boolean(args.tty),
-      shell: normalizeNullable(args.shell),
-      package_script: packageScript || null,
+      shell: effectiveShell(args, environment),
     };
     const existing = this.rules.find((rule) => (
       rule.decision === candidate.decision &&
       rule.environment_id === candidate.environment_id &&
       rule.workspace_id === candidate.workspace_id &&
       rule.workspace_root === candidate.workspace_root &&
-      rule.command === candidate.command &&
+      JSON.stringify(rule.prefix_tokens) === JSON.stringify(candidate.prefix_tokens) &&
       rule.workdir === candidate.workdir &&
       Boolean(rule.tty) === candidate.tty &&
-      rule.shell === candidate.shell &&
-      JSON.stringify(rule.package_script || null) ===
-        JSON.stringify(candidate.package_script || null)
+      rule.shell === candidate.shell
     ));
     if (existing) return publicRule(existing);
 
@@ -170,13 +183,18 @@ export class ExecPolicyStore {
       decision: rule.decision,
       environment_id: rule.environment_id,
       workspace_id: rule.workspace_id,
-      package_manager: rule.package_script?.package_manager,
-      package_script: rule.package_script?.script,
+      prefix_tokens: rule.prefix_tokens,
     });
     return publicRule(rule);
+  }
+
+  list() {
+    return this.rules.map(publicRule);
   }
 
   close() {
     this.#persist();
   }
 }
+
+export { STATE_VERSION as EXEC_POLICY_STATE_VERSION };

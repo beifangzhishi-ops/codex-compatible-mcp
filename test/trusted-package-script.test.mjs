@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   hashPackageScript,
-} from '../src/controller/exec-policy-store.mjs';
+} from '../src/controller/package-script-policy.mjs';
 import { TrustedPackageScriptStore } from '../src/controller/trusted-package-script-store.mjs';
 import { RemoteProcessManager } from '../src/runtime/remote-process-manager.mjs';
 import { EnvironmentRegistry } from '../src/runtime/environment-registry.mjs';

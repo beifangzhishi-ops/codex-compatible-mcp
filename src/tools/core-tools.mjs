@@ -39,6 +39,17 @@ const UNIFIED_EXEC_OUTPUT_SCHEMA = {
   policy_auto_approved: z.boolean().optional(),
   policy_saved: z.boolean().optional(),
   policy_rule_id: z.string().optional(),
+  policy_rule_ids: z.array(z.string()).optional(),
+  policy_prefix_tokens: z.union([
+    z.array(z.string()),
+    z.array(z.array(z.string())),
+  ]).optional(),
+  policy_persistable: z.boolean().optional(),
+  policy_kind: z.enum(['prefix', 'package_script']).nullable().optional(),
+  prefix_rule: z.array(z.string()).nullable().optional(),
+  policy_save_failed: z.boolean().optional(),
+  policy_save_error: z.string().optional(),
+  trusted_node_test: z.boolean().optional(),
   trusted_package_script: z.boolean().optional(),
   trusted_package_script_rule_id: z.string().optional(),
   action_failed: z.boolean().optional(),
@@ -59,6 +70,9 @@ function execResult(value) {
     lines.push('Environment: ' + value.environment_id);
     lines.push('Command: ' + value.command);
     lines.push('Permission: full-access for this execution only');
+    if (value.policy_persistable && Array.isArray(value.prefix_rule)) {
+      lines.push('Persistent prefix: ' + value.prefix_rule.join(' '));
+    }
     lines.push('Expires: ' + value.expires_at);
     lines.push('Justification: ' + value.justification);
     lines.push(
@@ -519,7 +533,9 @@ export function registerCoreTools(registry, runtime) {
       'If no project has been selected, first discover ccm.create_projectless_context with tool_search and invoke it through exec; then pass the returned workspace_context here. When sandbox_read_scope=host, that projectless context is sufficient for absolute-path reads anywhere readable on the selected Worker; do not select/register the target path merely to inspect it.',
       'In workspace-write environments, normal remote Git commands such as git clone/fetch/pull/push/ls-remote are handled automatically and do not require sandbox_permissions=require_escalated. Run remote Git as Git-only shell commands so CCM can recognize the trusted path.',
       'Controller-trusted package scripts such as a specifically trusted workspace npm test are also handled automatically through exec_command. Trust is bound to the workspace and current package.json script hash; if the script changes it stops matching and must not be treated as trusted.',
-      'For a non-Git command that genuinely requires full-access outside a workspace-write sandbox, set sandbox_permissions=require_escalated and include an optional user-facing justification. CCM freezes the exact command and returns approval_required=true; then call the top-level request_approval tool with the returned approval_id.',
+      'On Windows workspace-write, direct node --test invocations are also a built-in trusted full-access class because the restricted token cannot spawn the Node test workers. Test code therefore runs with host permissions.',
+      'For a command that genuinely requires full-access outside a workspace-write sandbox, set sandbox_permissions=require_escalated and include an optional user-facing justification. You may also provide prefix_rule as ordered command tokens to propose the reusable scope shown by Always allow in workspace. CCM freezes the exact command and the validated persistent scope before returning approval_required=true; then call request_approval with the returned approval_id.',
+      'Persistent execution rules are ordered-token prefixes. A saved prefix can authorize additional suffix arguments on later matching escalations. For WSL, prefix_rule=["wsl.exe"] intentionally authorizes arbitrary later WSL suffix operations in the same workspace/shell context.',
       'A CCM-originated result is identifiable by its structured CCM fields. If a host reports a Script error or safety/policy/tool-call failure without this tool returning a structured result, do not attribute that failure to CCM or claim CCM blocked the command.',
       'On Windows, keep destructive filesystem operations in one shell and verify resolved targets before recursive deletes or moves.',
     ].join('\n\n'),
@@ -531,7 +547,8 @@ export function registerCoreTools(registry, runtime) {
       yield_time_ms: z.number().int().max(30_000).nonnegative().optional().describe('Wait before the initial command call yields output or a session. Defaults to 2000 ms. Values above 5000 ms are clamped to 5000 ms; long-running commands continue in a session and should be resumed with write_stdin.'),
       max_output_tokens: z.number().int().positive().optional().describe('Output token budget. Defaults to 10000 tokens.'),
       shell: z.string().optional().describe("Shell binary to launch. Defaults to the environment's default shell."),
-      sandbox_permissions: z.enum(['use_default', 'require_escalated']).optional().describe('Set require_escalated when this exact command genuinely needs full-access outside the normal sandbox.'),
+      sandbox_permissions: z.enum(['use_default', 'require_escalated']).optional().describe('Set require_escalated when this command genuinely needs full-access outside the normal sandbox.'),
+      prefix_rule: z.array(z.string().min(1).max(4096)).min(1).max(64).optional().describe('Optional reusable ordered-token prefix proposed for Always allow in workspace. Valid only with require_escalated and must match exactly one executable segment of this command.'),
       justification: z.string().optional().describe('User-facing explanation for a require_escalated approval request.'),
     },
     outputSchema: UNIFIED_EXEC_OUTPUT_SCHEMA,

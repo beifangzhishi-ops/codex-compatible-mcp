@@ -6,7 +6,7 @@ import {
   DEFAULT_APPROVAL_TTL_MS,
   DEFAULT_TERMINAL_RETENTION_MS,
 } from '../src/controller/approval-manager.mjs';
-import { hashPackageScript } from '../src/controller/exec-policy-store.mjs';
+import { hashPackageScript } from '../src/controller/package-script-policy.mjs';
 import { EnvironmentRegistry } from '../src/runtime/environment-registry.mjs';
 import { RemoteProcessManager } from '../src/runtime/remote-process-manager.mjs';
 import { resolvePermissionProfile } from '../src/runtime/sandbox/sandbox-policy.mjs';
@@ -668,25 +668,80 @@ test('RemoteProcessManager does not request approval for trusted remote Git', as
   }
 });
 
-test('approval can persist a workspace execution policy and reuse it', async () => {
+test('RemoteProcessManager runs direct node --test through built-in Windows trust', async () => {
+  const environmentRegistry = restrictedRegistry();
+  const workerHub = new FakeWorkerHub();
+  const manager = new RemoteProcessManager({
+    environmentRegistry,
+    workerHub,
+    approvalManager: {
+      requestExecution() {
+        throw new Error('approval must not be requested');
+      },
+    },
+    workspaceContextManager: fakeWorkspaceContextManager(),
+  });
+  try {
+    const result = await manager.execCommand({
+      workspace_context: '00000000-0000-4000-8000-000000000001',
+      cmd: 'node --test test/approval.test.mjs',
+    });
+    assert.equal(result.exit_code, 0);
+    assert.equal(result.trusted_node_test, true);
+    assert.equal(workerHub.calls.length, 1);
+    assert.equal(
+      workerHub.calls[0].params.sandbox_permissions,
+      'approved_escalated',
+    );
+  } finally {
+    await manager.close();
+  }
+});
+
+test('built-in node --test trust does not apply through an explicit cmd shell', async () => {
+  const environmentRegistry = restrictedRegistry();
+  const workerHub = new FakeWorkerHub();
+  const manager = new RemoteProcessManager({
+    environmentRegistry,
+    workerHub,
+    workspaceContextManager: fakeWorkspaceContextManager(),
+  });
+  try {
+    const result = await manager.execCommand({
+      workspace_context: '00000000-0000-4000-8000-000000000001',
+      cmd: 'node --test test/approval.test.mjs',
+      shell: 'cmd.exe',
+    });
+    assert.equal(result.trusted_node_test, undefined);
+    assert.equal(workerHub.calls.length, 1);
+    assert.equal(workerHub.calls[0].params.sandbox_permissions, undefined);
+  } finally {
+    await manager.close();
+  }
+});
+
+test('approval can persist a token-prefix workspace policy and reuse it for suffixes', async () => {
   const environmentRegistry = restrictedRegistry();
   const workerHub = new FakeWorkerHub();
   const approvalManager = new ApprovalManager();
   let allowed = false;
   const execPolicyStore = {
-    match({ args }) {
-      if (!allowed || args.cmd !== 'Write-Output POLICY_OK') return null;
+    matchSegment({ tokens }) {
+      if (!allowed || tokens[0] !== 'wsl.exe') return null;
       return {
         rule_id: '11111111-1111-4111-8111-111111111111',
         decision: 'allow',
+        prefix_tokens: ['wsl.exe'],
       };
     },
-    allow({ args }) {
-      assert.equal(args.cmd, 'Write-Output POLICY_OK');
+    allow({ args, prefixTokens }) {
+      assert.equal(args.cmd, 'wsl.exe --status');
+      assert.deepEqual(prefixTokens, ['wsl.exe']);
       allowed = true;
       return {
         rule_id: '11111111-1111-4111-8111-111111111111',
         decision: 'allow',
+        prefix_tokens: ['wsl.exe'],
       };
     },
   };
@@ -699,14 +754,17 @@ test('approval can persist a workspace execution policy and reuse it', async () 
   });
   const args = {
     workspace_context: '00000000-0000-4000-8000-000000000001',
-    cmd: 'Write-Output POLICY_OK',
+    cmd: 'wsl.exe --status',
     sandbox_permissions: 'require_escalated',
-    justification: 'Allow this debugging command?',
+    prefix_rule: ['wsl.exe'],
+    justification: 'Allow WSL in this workspace?',
   };
 
   try {
     const pending = await manager.execCommand(args);
     assert.equal(pending.state, 'pending');
+    assert.deepEqual(pending.prefix_rule, ['wsl.exe']);
+    assert.equal(pending.policy_persistable, true);
     const prepared = approvalManager.prepareAppApproval(pending.approval_id);
 
     const resolved = await manager.resolvePendingExecution({
@@ -723,7 +781,10 @@ test('approval can persist a workspace execution policy and reuse it', async () 
       'approved_escalated',
     );
 
-    const automatic = await manager.execCommand(args);
+    const automatic = await manager.execCommand({
+      ...args,
+      cmd: 'wsl.exe -d PhD-CFD -- bash -lc "rm -f /tmp/example"',
+    });
     assert.equal(automatic.policy_auto_approved, true);
     assert.equal(
       automatic.policy_rule_id,
@@ -733,6 +794,206 @@ test('approval can persist a workspace execution policy and reuse it', async () 
     assert.equal(
       workerHub.calls[1].params.sandbox_permissions,
       'approved_escalated',
+    );
+    assert.deepEqual(automatic.policy_prefix_tokens, ['wsl.exe']);
+  } finally {
+    await manager.close();
+  }
+});
+
+test('invalid explicit prefix_rule is rejected before approval creation', async () => {
+  const environmentRegistry = restrictedRegistry();
+  const workerHub = new FakeWorkerHub();
+  let approvals = 0;
+  const manager = new RemoteProcessManager({
+    environmentRegistry,
+    workerHub,
+    approvalManager: {
+      requestExecution() {
+        approvals += 1;
+        throw new Error('must not create approval');
+      },
+    },
+    workspaceContextManager: fakeWorkspaceContextManager(),
+  });
+  try {
+    await assert.rejects(
+      manager.execCommand({
+        workspace_context: '00000000-0000-4000-8000-000000000001',
+        cmd: 'wsl.exe --status',
+        sandbox_permissions: 'require_escalated',
+        prefix_rule: ['git'],
+      }),
+      /match exactly one executable segment/i,
+    );
+    assert.equal(approvals, 0);
+    assert.equal(workerHub.calls.length, 0);
+  } finally {
+    await manager.close();
+  }
+});
+
+test('compound command without explicit prefix is not persistable', async () => {
+  const environmentRegistry = restrictedRegistry();
+  const workerHub = new FakeWorkerHub();
+  const approvalManager = new ApprovalManager();
+  const manager = new RemoteProcessManager({
+    environmentRegistry,
+    workerHub,
+    approvalManager,
+    workspaceContextManager: fakeWorkspaceContextManager(),
+  });
+  try {
+    const pending = await manager.execCommand({
+      workspace_context: '00000000-0000-4000-8000-000000000001',
+      cmd: 'Write-Output ONE; Write-Output TWO',
+      sandbox_permissions: 'require_escalated',
+    });
+    assert.equal(pending.policy_persistable, false);
+    assert.equal(pending.prefix_rule, null);
+  } finally {
+    await manager.close();
+  }
+});
+
+test('escalated compound command can mix trusted Git and a saved prefix', async () => {
+  const environmentRegistry = restrictedRegistry();
+  const workerHub = new FakeWorkerHub();
+  const manager = new RemoteProcessManager({
+    environmentRegistry,
+    workerHub,
+    approvalManager: {
+      requestExecution() {
+        throw new Error('approval must not be requested');
+      },
+    },
+    workspaceContextManager: fakeWorkspaceContextManager(),
+    execPolicyStore: {
+      matchSegment({ tokens }) {
+        if (tokens[0] !== 'wsl.exe') return null;
+        return {
+          rule_id: '33333333-3333-4333-8333-333333333333',
+          decision: 'allow',
+          prefix_tokens: ['wsl.exe'],
+        };
+      },
+    },
+  });
+  try {
+    const result = await manager.execCommand({
+      workspace_context: '00000000-0000-4000-8000-000000000001',
+      cmd: 'git fetch origin && wsl.exe --status',
+      sandbox_permissions: 'require_escalated',
+    });
+    assert.equal(result.policy_auto_approved, true);
+    assert.equal(
+      result.policy_rule_id,
+      '33333333-3333-4333-8333-333333333333',
+    );
+    assert.equal(workerHub.calls.length, 1);
+    assert.equal(
+      workerHub.calls[0].params.sandbox_permissions,
+      'approved_escalated',
+    );
+  } finally {
+    await manager.close();
+  }
+});
+
+test('Linux workspace-write does not inherit built-in Git trust in mixed escalation', async () => {
+  const environmentRegistry = new EnvironmentRegistry({ resolvePaths: false });
+  environmentRegistry.register({
+    id: 'approval-worker',
+    platform: 'linux',
+    cwd: '/workspace',
+    workspaceRoots: ['/workspace'],
+    permissionProfile: 'workspace-write',
+    backend: 'remote-worker',
+  });
+  const workerHub = new FakeWorkerHub();
+  const approvalManager = new ApprovalManager();
+  const manager = new RemoteProcessManager({
+    environmentRegistry,
+    workerHub,
+    approvalManager,
+    workspaceContextManager: {
+      resolve(contextId) {
+        return {
+          workspace_context: contextId,
+          environment_id: 'approval-worker',
+          workspace_id: 'approval-workspace',
+          workspace_kind: 'registered',
+          workspace_root: '/workspace',
+        };
+      },
+    },
+    execPolicyStore: {
+      matchSegment({ tokens }) {
+        if (tokens[0] !== 'echo') return null;
+        return {
+          rule_id: '44444444-4444-4444-8444-444444444444',
+          decision: 'allow',
+          prefix_tokens: ['echo'],
+        };
+      },
+    },
+  });
+  try {
+    const result = await manager.execCommand({
+      workspace_context: '00000000-0000-4000-8000-000000000001',
+      cmd: 'git fetch origin && echo ok',
+      sandbox_permissions: 'require_escalated',
+    });
+    assert.equal(result.approval_required, true);
+    assert.equal(result.state, 'pending');
+    assert.equal(workerHub.calls.length, 0);
+  } finally {
+    await manager.close();
+  }
+});
+
+test('post-dispatch policy save failure is surfaced without redispatch', async () => {
+  const environmentRegistry = restrictedRegistry();
+  const workerHub = new FakeWorkerHub();
+  const approvalManager = new ApprovalManager();
+  const execPolicyStore = {
+    match() {
+      return null;
+    },
+    allow() {
+      throw new Error('disk full while saving policy');
+    },
+  };
+  const manager = new RemoteProcessManager({
+    environmentRegistry,
+    workerHub,
+    approvalManager,
+    workspaceContextManager: fakeWorkspaceContextManager(),
+    execPolicyStore,
+  });
+  try {
+    const pending = await manager.execCommand({
+      workspace_context: '00000000-0000-4000-8000-000000000001',
+      cmd: 'wsl.exe --status',
+      sandbox_permissions: 'require_escalated',
+      prefix_rule: ['wsl.exe'],
+    });
+    const prepared = approvalManager.prepareAppApproval(pending.approval_id);
+    const resolved = await manager.resolvePendingExecution({
+      approval_id: pending.approval_id,
+      approval_nonce: prepared.approvalNonce,
+      decision: 'approve_workspace',
+    });
+    assert.equal(resolved.state, 'consumed');
+    assert.equal(resolved.policy_save_failed, true);
+    assert.match(resolved.policy_save_error, /disk full/);
+    assert.equal(workerHub.calls.length, 1);
+    assert.throws(
+      () => approvalManager.claimAppExecution(
+        pending.approval_id,
+        prepared.approvalNonce,
+      ),
+      /consumed|already/i,
     );
   } finally {
     await manager.close();
@@ -768,11 +1029,16 @@ test('package-script workspace approval uses a restricted-sandbox-safe policy pr
     match() {
       return null;
     },
-    allow({ packageScript }) {
+  };
+  const trustedPackageScriptStore = {
+    mayMatch() {
+      return false;
+    },
+    trust({ packageScript }) {
       allowedPackageScript = packageScript;
       return {
         rule_id: '22222222-2222-4222-8222-222222222222',
-        decision: 'allow',
+        package_script: packageScript,
       };
     },
   };
@@ -782,6 +1048,7 @@ test('package-script workspace approval uses a restricted-sandbox-safe policy pr
     approvalManager,
     workspaceContextManager: fakeWorkspaceContextManager(),
     execPolicyStore,
+    trustedPackageScriptStore,
   });
 
   try {
@@ -799,15 +1066,15 @@ test('package-script workspace approval uses a restricted-sandbox-safe policy pr
     });
     assert.equal(resolved.state, 'consumed');
     assert.equal(resolved.policy_saved, true);
+    assert.equal(resolved.trusted_package_script, true);
     assert.deepEqual(allowedPackageScript, {
       package_manager: 'npm',
       script: 'test',
       script_sha256: hashPackageScript('node --test'),
     });
-    assert.equal(calls.length, 3);
+    assert.equal(calls.length, 2);
     assert.equal(calls[0].params.sandbox_permissions, 'use_default');
-    assert.equal(calls[1].params.sandbox_permissions, 'use_default');
-    assert.equal(calls[2].params.sandbox_permissions, 'approved_escalated');
+    assert.equal(calls[1].params.sandbox_permissions, 'approved_escalated');
   } finally {
     await manager.close();
   }
@@ -836,7 +1103,12 @@ test('package-script probe failure stays retryable without dispatching', async (
       match() {
         return null;
       },
-      allow() {
+    },
+    trustedPackageScriptStore: {
+      mayMatch() {
+        return false;
+      },
+      trust() {
         throw new Error('must not save');
       },
     },
@@ -857,9 +1129,8 @@ test('package-script probe failure stays retryable without dispatching', async (
     });
     assert.equal(resolved.state, 'approved_retryable');
     assert.match(resolved.output, /Could not resolve package\.json script "test"/);
-    assert.equal(calls.length, 2);
+    assert.equal(calls.length, 1);
     assert.equal(calls[0].params.sandbox_permissions, 'use_default');
-    assert.equal(calls[1].params.sandbox_permissions, 'use_default');
   } finally {
     await manager.close();
   }

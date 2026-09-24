@@ -1,9 +1,20 @@
 import { randomUUID } from 'node:crypto';
-import { isTrustedRemoteGitCommand } from './sandbox/git-policy.mjs';
+import {
+  isTrustedRemoteGitSegment,
+} from './sandbox/git-policy.mjs';
+import {
+  isTrustedNodeTestSegment,
+} from './sandbox/node-test-policy.mjs';
+import {
+  effectiveShell,
+  parseShellCommand,
+  tokenPrefixMatches,
+  validatePrefixTokens,
+} from './sandbox/shell-policy-parser.mjs';
 import {
   hashPackageScript,
   parsePackageScriptCommand,
-} from '../controller/exec-policy-store.mjs';
+} from '../controller/package-script-policy.mjs';
 
 const DEFAULT_EXEC_YIELD_TIME_MS = 2_000;
 const MAX_INITIAL_EXEC_YIELD_TIME_MS = 5_000;
@@ -169,41 +180,136 @@ export class RemoteProcessManager {
     };
   }
 
-  async #matchExecPolicy(args, workspaceContext, environment) {
-    if (!this.execPolicyStore) return null;
-    let packageScript = null;
-    if (parsePackageScriptCommand(args.cmd)) {
-      try {
-        packageScript = await this.#resolvePackageScriptBinding(
-          args,
-          workspaceContext,
-          environment,
-        );
-      } catch (error) {
-        this.#emit('exec_policy_probe_failed', {
-          environment_id: environment.id,
-          workspace_context: workspaceContext.workspace_context,
-          workspace_id: workspaceContext.workspace_id,
-          error_name: error?.name || 'Error',
-        });
-        return null;
-      }
-    }
-    return this.execPolicyStore.match({
-      workspaceContext,
-      environment,
-      args,
-      packageScript,
+  #parseCommand(args, environment) {
+    return parseShellCommand(args.cmd, {
+      shell: effectiveShell(args, environment),
     });
   }
 
-  async #prepareExecPolicyBinding(args, workspaceContext, environment) {
-    if (!this.execPolicyStore) {
-      throw new Error('CCM exec policy store is not available.');
+  #persistentPolicyProposal(args, environment, parsed = null) {
+    const command = parsed || this.#parseCommand(args, environment);
+    const packageScript = parsePackageScriptCommand(args.cmd);
+    if (args.prefix_rule !== undefined && packageScript) {
+      throw new Error(
+        'prefix_rule is not supported for eligible package-script commands; persistent trust is hash-bound instead.',
+      );
     }
-    return parsePackageScriptCommand(args.cmd)
-      ? await this.#resolvePackageScriptBinding(args, workspaceContext, environment)
+    if (args.prefix_rule !== undefined && !command?.segments.length) {
+      throw new Error(
+        'prefix_rule cannot be validated because the shell command is ambiguous or unsupported.',
+      );
+    }
+    if (!command?.segments.length) {
+      return {
+        parsed: command,
+        policy_kind: null,
+        policy_persistable: false,
+        prefix_rule: null,
+      };
+    }
+
+    if (packageScript && command.segments.length === 1) {
+      return {
+        parsed: command,
+        policy_kind: 'package_script',
+        policy_persistable: true,
+        prefix_rule: [...command.segments[0].tokens],
+      };
+    }
+
+    if (args.prefix_rule !== undefined) {
+      const prefix = validatePrefixTokens(args.prefix_rule);
+      if (!prefix) {
+        throw new Error(
+          'prefix_rule must be a non-empty bounded array of complete command tokens.',
+        );
+      }
+      const matches = command.segments.filter((segment) =>
+        tokenPrefixMatches(prefix, segment.tokens, {
+          platform: environment.platform || 'windows',
+        }));
+      if (matches.length !== 1) {
+        throw new Error(
+          'prefix_rule must match exactly one executable segment of the frozen command.',
+        );
+      }
+      return {
+        parsed: command,
+        policy_kind: 'prefix',
+        policy_persistable: true,
+        prefix_rule: prefix,
+      };
+    }
+
+    if (command.segments.length === 1) {
+      return {
+        parsed: command,
+        policy_kind: 'prefix',
+        policy_persistable: true,
+        prefix_rule: [...command.segments[0].tokens],
+      };
+    }
+
+    return {
+      parsed: command,
+      policy_kind: null,
+      policy_persistable: false,
+      prefix_rule: null,
+    };
+  }
+
+  #matchEscalationSegments(
+    args,
+    workspaceContext,
+    environment,
+    parsed,
+    {
+      allowBuiltInTrust = false,
+      trustedNodeShell = false,
+    } = {},
+  ) {
+    if (!parsed?.segments.length) return null;
+    const genericRules = [];
+    let usedBuiltIn = false;
+    for (const segment of parsed.segments) {
+      if (allowBuiltInTrust && isTrustedRemoteGitSegment(segment.tokens, {
+        platform: environment.platform,
+      })) {
+        usedBuiltIn = true;
+        continue;
+      }
+      if (allowBuiltInTrust && trustedNodeShell &&
+          isTrustedNodeTestSegment(segment.tokens, {
+            platform: environment.platform,
+          })) {
+        usedBuiltIn = true;
+        continue;
+      }
+      const rule = this.execPolicyStore?.matchSegment?.({
+        workspaceContext,
+        environment,
+        args,
+        tokens: segment.tokens,
+      });
+      if (!rule) return null;
+      genericRules.push(rule);
+    }
+    if (!genericRules.length) return usedBuiltIn
+      ? { decision: 'allow', built_in_only: true, rules: [] }
       : null;
+    const unique = [...new Map(
+      genericRules.map((rule) => [rule.rule_id, rule]),
+    ).values()];
+    return {
+      decision: 'allow',
+      built_in_only: false,
+      rule_id: unique[0].rule_id,
+      rule_ids: unique.map((rule) => rule.rule_id),
+      prefix_tokens: unique.length === 1
+        ? [...unique[0].prefix_tokens]
+        : unique.map((rule) => [...rule.prefix_tokens]),
+      rules: unique,
+    };
   }
 
   async #matchTrustedPackageScript(args, workspaceContext, environment) {
@@ -285,14 +391,50 @@ export class RemoteProcessManager {
       expected_workspace_root: workspaceContext.workspace_root,
     };
     delete forwardedArgs.workspace_context;
+    delete forwardedArgs.prefix_rule;
     const requestedYieldMs = clampInitialExecYield(args.yield_time_ms);
     forwardedArgs = {
       ...forwardedArgs,
       yield_time_ms: requestedYieldMs,
     };
     const requestedEscalation = args.sandbox_permissions === 'require_escalated';
-    const trustedGit = environment.permissionProfile === 'workspace-write' &&
-      isTrustedRemoteGitCommand(args.cmd);
+    if (args.prefix_rule !== undefined && !requestedEscalation) {
+      throw new Error(
+        'prefix_rule is only valid with sandbox_permissions=require_escalated.',
+      );
+    }
+    const parsedCommand = this.#parseCommand(args, environment);
+    let explicitPolicyProposal = null;
+    if (args.prefix_rule !== undefined) {
+      explicitPolicyProposal = this.#persistentPolicyProposal(
+        args,
+        environment,
+        parsedCommand,
+      );
+    }
+    const shellKind = effectiveShell(args, environment);
+    const windowsWorkspaceWrite =
+      environment.permissionProfile === 'workspace-write' &&
+      environment.platform === 'windows';
+    const trustedNodeShell = ['powershell', 'pwsh'].includes(shellKind);
+    const allBuiltInSegments = windowsWorkspaceWrite &&
+      Boolean(parsedCommand?.segments.length) &&
+      parsedCommand.segments.every((segment) => (
+        isTrustedRemoteGitSegment(segment.tokens, { platform: environment.platform }) ||
+        (trustedNodeShell &&
+          isTrustedNodeTestSegment(segment.tokens, { platform: environment.platform }))
+      ));
+    const hasTrustedGitSegment = allBuiltInSegments &&
+      parsedCommand.segments.some((segment) =>
+        isTrustedRemoteGitSegment(segment.tokens, { platform: environment.platform }));
+    const hasTrustedNodeTestSegment = allBuiltInSegments &&
+      parsedCommand.segments.some((segment) =>
+        trustedNodeShell &&
+        isTrustedNodeTestSegment(segment.tokens, { platform: environment.platform }));
+    const trustedGit = allBuiltInSegments &&
+      hasTrustedGitSegment &&
+      !hasTrustedNodeTestSegment;
+    const trustedNodeOrMixed = allBuiltInSegments && hasTrustedNodeTestSegment;
     const trustedPackageScriptRule = await this.#matchTrustedPackageScript(
       args,
       workspaceContext,
@@ -300,7 +442,10 @@ export class RemoteProcessManager {
     );
     const trustedPackageScript = Boolean(trustedPackageScriptRule);
     const wantsEscalation =
-      requestedEscalation && !trustedGit && !trustedPackageScript;
+      requestedEscalation &&
+      !trustedGit &&
+      !trustedNodeOrMixed &&
+      !trustedPackageScript;
     let policyRule = null;
 
     if (requestedEscalation && trustedGit) {
@@ -326,14 +471,34 @@ export class RemoteProcessManager {
       });
     }
 
+    if (trustedNodeOrMixed) {
+      forwardedArgs = {
+        ...forwardedArgs,
+        sandbox_permissions: 'approved_escalated',
+      };
+      delete forwardedArgs.justification;
+      this.#emit('node_test_builtin_auto_allowed', {
+        operation_id: operationId,
+        environment_id: environment.id,
+        workspace_context: workspaceContext.workspace_context,
+        workspace_id: workspaceContext.workspace_id,
+        mixed_with_trusted_git: hasTrustedGitSegment || undefined,
+      });
+    }
+
     if (wantsEscalation && environment.permissionProfile !== 'full-access') {
       if (!this.approvalManager) {
         throw new Error('Escalated execution requires an approval manager.');
       }
-      policyRule = await this.#matchExecPolicy(
+      policyRule = this.#matchEscalationSegments(
         args,
         workspaceContext,
         environment,
+        parsedCommand,
+        {
+          allowBuiltInTrust: windowsWorkspaceWrite,
+          trustedNodeShell,
+        },
       );
       if (policyRule?.decision === 'allow') {
         forwardedArgs = {
@@ -343,16 +508,26 @@ export class RemoteProcessManager {
         delete forwardedArgs.justification;
         this.#emit('exec_policy_auto_allowed', {
           rule_id: policyRule.rule_id,
+          rule_ids: policyRule.rule_ids,
+          prefix_tokens: policyRule.prefix_tokens,
           operation_id: operationId,
           environment_id: environment.id,
           workspace_context: workspaceContext.workspace_context,
           workspace_id: workspaceContext.workspace_id,
         });
       } else {
+        const proposal = explicitPolicyProposal || this.#persistentPolicyProposal(
+          args,
+          environment,
+          parsedCommand,
+        );
         const approval = this.approvalManager.requestExecution(
           {
             ...args,
             workspace_context: workspaceContext.workspace_context,
+            prefix_rule: proposal.prefix_rule,
+            policy_kind: proposal.policy_kind,
+            policy_persistable: proposal.policy_persistable,
           },
           environment.id,
           { workspace: workspaceContext },
@@ -428,11 +603,19 @@ export class RemoteProcessManager {
         trusted_package_script_rule_id: trustedPackageScriptRule.rule_id,
       };
     }
+    if (trustedNodeOrMixed) {
+      return {
+        ...recorded,
+        trusted_node_test: true,
+      };
+    }
     return policyRule
       ? {
         ...recorded,
         policy_auto_approved: true,
         policy_rule_id: policyRule.rule_id,
+        policy_rule_ids: policyRule.rule_ids,
+        policy_prefix_tokens: policyRule.prefix_tokens,
       }
       : recorded;
   }
@@ -475,6 +658,7 @@ export class RemoteProcessManager {
     let environment;
     let persistentPolicy = null;
     let persistentPolicyPackageScript = null;
+    let policySaveError = null;
     try {
       workspaceContext = this.workspaceContextManager.resolve(
         action.workspace_context,
@@ -490,11 +674,30 @@ export class RemoteProcessManager {
         );
       }
       if (decision === 'approve_workspace') {
-        persistentPolicyPackageScript = await this.#prepareExecPolicyBinding(
-          action,
-          workspaceContext,
-          environment,
-        );
+        if (!action.policy_persistable) {
+          throw new Error(
+            'This frozen approval does not contain a persistable policy scope.',
+          );
+        }
+        if (action.policy_kind === 'package_script') {
+          if (!this.trustedPackageScriptStore) {
+            throw new Error('Trusted package-script store is not available.');
+          }
+          persistentPolicyPackageScript = await this.#resolvePackageScriptBinding(
+            action,
+            workspaceContext,
+            environment,
+          );
+        } else if (action.policy_kind === 'prefix') {
+          if (!this.execPolicyStore) {
+            throw new Error('CCM exec policy store is not available.');
+          }
+          if (!validatePrefixTokens(action.prefix_rule)) {
+            throw new Error('Frozen prefix policy is invalid.');
+          }
+        } else {
+          throw new Error('Frozen persistent policy kind is invalid.');
+        }
       }
     } catch (error) {
       const retryable = this.approvalManager.markAppExecutionRetryable(
@@ -603,13 +806,23 @@ export class RemoteProcessManager {
     );
     if (decision === 'approve_workspace') {
       try {
-        persistentPolicy = this.execPolicyStore.allow({
-          workspaceContext,
-          environment,
-          args: action,
-          packageScript: persistentPolicyPackageScript,
-        });
+        if (action.policy_kind === 'package_script') {
+          persistentPolicy = this.trustedPackageScriptStore.trust({
+            workspaceContext,
+            environment,
+            args: action,
+            packageScript: persistentPolicyPackageScript,
+          });
+        } else {
+          persistentPolicy = this.execPolicyStore.allow({
+            workspaceContext,
+            environment,
+            args: action,
+            prefixTokens: action.prefix_rule,
+          });
+        }
       } catch (error) {
+        policySaveError = String(error?.message || error);
         this.#emit('exec_policy_save_failed', {
           approval_id: approvalId,
           operation_id: claimed.request.operation_id,
@@ -638,6 +851,16 @@ export class RemoteProcessManager {
       ...(persistentPolicy ? {
         policy_saved: true,
         policy_rule_id: persistentPolicy.rule_id,
+        ...(action.policy_kind === 'prefix'
+          ? { policy_prefix_tokens: persistentPolicy.prefix_tokens }
+          : {
+            trusted_package_script: true,
+            trusted_package_script_rule_id: persistentPolicy.rule_id,
+          }),
+      } : {}),
+      ...(policySaveError ? {
+        policy_save_failed: true,
+        policy_save_error: policySaveError.slice(0, 2_000),
       } : {}),
     };
   }

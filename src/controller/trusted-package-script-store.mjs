@@ -1,34 +1,11 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import path from 'node:path';
-import { parsePackageScriptCommand } from './exec-policy-store.mjs';
-
-function normalizeNullable(value) {
-  return value == null || value === '' ? null : String(value);
-}
-
-function normalizeWorkdir(value) {
-  const normalized = normalizeNullable(value);
-  return normalized === '.' || normalized === '.\\' || normalized === './'
-    ? null
-    : normalized;
-}
-
-function canonicalShell(value) {
-  const normalized = normalizeNullable(value);
-  if (!normalized) return null;
-  const name = path.basename(normalized).toLowerCase().replace(/\.exe$/, '');
-  if (name === 'powershell') return 'powershell';
-  if (name === 'pwsh') return 'pwsh';
-  if (name === 'cmd') return 'cmd';
-  return normalized.toLowerCase();
-}
-
-function effectiveShell(args, environment) {
-  return canonicalShell(
-    args.shell || environment.shell?.path || environment.shell?.type || null,
-  );
-}
+import {
+  effectiveShell,
+  normalizeWorkdir,
+} from '../runtime/sandbox/shell-policy-parser.mjs';
+import { writeJsonAtomicSync } from './json-state.mjs';
+import { parsePackageScriptCommand } from './package-script-policy.mjs';
 
 function normalizeCommand(value) {
   return String(value || '').trim();
@@ -102,18 +79,10 @@ export class TrustedPackageScriptStore {
 
   #persist() {
     if (!this.stateFile) return;
-    fs.mkdirSync(path.dirname(this.stateFile), { recursive: true });
-    const temp = this.stateFile + '.' + process.pid + '.tmp';
-    try {
-      fs.writeFileSync(
-        temp,
-        JSON.stringify({ version: 1, rules: this.rules }, null, 2) + '\n',
-        { encoding: 'utf8', flag: 'w' },
-      );
-      fs.renameSync(temp, this.stateFile);
-    } finally {
-      fs.rmSync(temp, { force: true });
-    }
+    writeJsonAtomicSync(
+      this.stateFile,
+      { version: 1, rules: this.rules },
+    );
   }
 
   mayMatch({ workspaceContext, environment, args }) {

@@ -111,6 +111,10 @@ export class ProcessManager {
     const permissionProfile = resolveGitAwarePermissionProfile(
       basePermissionProfile,
       args.cmd,
+      {
+        shell: args.shell || environment.shell?.path || environment.shell?.type,
+        platform: environment.platform,
+      },
     );
     const processId = this.#allocateProcessId();
     const requestedShell = args.shell ? { path: args.shell } : environment.shell;

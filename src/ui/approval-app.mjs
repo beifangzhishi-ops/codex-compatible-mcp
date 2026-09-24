@@ -83,6 +83,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
     <div class="row"><div class="label">Workspace</div><div class="value" id="workspace"></div></div>
     <div class="row"><div class="label">Environment</div><div class="value" id="environment"></div></div>
     <div class="row"><div class="label">Expires</div><div class="value" id="expires"></div></div>
+    <div class="row" id="policyScopeRow" hidden><div class="label">Always allow</div><div class="value" id="policyScope"></div></div>
     <div id="command"></div>
     <div id="status" aria-live="polite">Waiting for your decision.</div>
     <div id="actions">
@@ -106,6 +107,8 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
       const workspace = document.getElementById("workspace");
       const environment = document.getElementById("environment");
       const expires = document.getElementById("expires");
+      const policyScopeRow = document.getElementById("policyScopeRow");
+      const policyScope = document.getElementById("policyScope");
       const command = document.getElementById("command");
       const status = document.getElementById("status");
       const approve = document.getElementById("approve");
@@ -160,6 +163,19 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         ].filter(Boolean).join(" · ") || structured.workspace_context || "Unknown";
         environment.textContent = structured.environment_id || "Unknown";
         expires.textContent = structured.expires_at || "";
+        const policyPersistable =
+          !workspaceAction && structured.policy_persistable === true;
+        policyScopeRow.hidden = !policyPersistable;
+        if (policyPersistable) {
+          const prefix = Array.isArray(structured.prefix_rule)
+            ? structured.prefix_rule.join(" ")
+            : "";
+          policyScope.textContent = structured.policy_kind === "package_script"
+            ? "Hash-bound package script: " + prefix
+            : "Token prefix: " + prefix;
+        } else {
+          policyScope.textContent = "";
+        }
         command.textContent = workspaceAction
           ? (structured.operation === "register_workspace"
               ? (structured.create_if_missing
@@ -168,8 +184,8 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
               : "Enter this exact registered workspace.")
           : (structured.command || "");
         approve.textContent = workspaceAction ? "Approve" : "Approve once";
-        approveAlways.hidden = workspaceAction;
-        approveAlways.disabled = workspaceAction;
+        approveAlways.hidden = !policyPersistable;
+        approveAlways.disabled = !policyPersistable;
         if (structured.policy_auto_approved) {
           setStatus(
             "Automatically allowed by workspace policy" +
@@ -206,7 +222,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         busy = value;
         approve.disabled = value || !approvalNonce;
         approveAlways.disabled =
-          value || !approvalNonce || approval?.kind === "workspace";
+          value || !approvalNonce || approval?.policy_persistable !== true;
         deny.disabled = value || !approvalNonce;
       }
 
@@ -226,6 +242,9 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
           exit_code: structured?.exit_code,
           policy_saved: structured?.policy_saved,
           policy_rule_id: structured?.policy_rule_id,
+          policy_prefix_tokens: structured?.policy_prefix_tokens,
+          policy_save_failed: structured?.policy_save_failed,
+          policy_save_error: structured?.policy_save_error,
           action_failed: structured?.action_failed,
           output: typeof structured?.output === "string"
             ? structured.output.slice(0, 12000)
@@ -249,7 +268,9 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
           : (decision === "deny"
               ? "The user denied the frozen CCM full-access action."
               : decision === "approve_workspace"
-                ? "The user approved the frozen CCM action and asked CCM to allow future matching executions in this workspace."
+                ? (structured?.policy_save_failed
+                    ? "The user approved the frozen CCM action. The command already executed, but saving the persistent policy failed; do not rerun the command to retry persistence."
+                    : "The user approved the frozen CCM action and asked CCM to allow future matching executions in this workspace.")
                 : "The user approved the frozen CCM action and CCM handled it without a second model execution request.");
         try {
           await request("ui/update-model-context", {
@@ -329,9 +350,17 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
                 ? "Denied. No workspace change was made."
                 : "Denied. The command was not dispatched."
             );
+          } else if (structured.policy_save_failed) {
+            setStatus(
+              "Approved and executed, but the persistent policy was not saved. " +
+                (structured.policy_save_error || ""),
+              true
+            );
           } else if (structured.policy_saved) {
             setStatus(
-              "Approved, executed, and saved for future matching commands in this workspace."
+              structured.trusted_package_script
+                ? "Approved, executed, and saved as a hash-bound package-script rule."
+                : "Approved, executed, and saved with the displayed token-prefix scope."
             );
           } else if (structured.session_id != null) {
             setStatus("Approved and started. Session ID: " + structured.session_id);
@@ -360,7 +389,9 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         void resolve(retryDecision || "approve");
       });
       approveAlways.addEventListener("click", () => {
-        if (approval?.kind !== "workspace") void resolve("approve_workspace");
+        if (approval?.policy_persistable === true) {
+          void resolve("approve_workspace");
+        }
       });
       deny.addEventListener("click", () => { void resolve("deny"); });
 
