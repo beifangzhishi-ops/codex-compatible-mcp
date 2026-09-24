@@ -63,7 +63,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       'apply_patch',
       'exec',
       'exec_command',
-      'list_environments',
+      'list_projects',
       'receive_file',
       'request_approval',
       'resolve_pending_action',
@@ -108,6 +108,28 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     );
     assert.match(sendFileTool.description, /1 KiB \(1024 bytes\)/i);
     assert.match(sendFileTool.description, /never pad, rewrite, or otherwise alter/i);
+
+    const projectDiscovery = await client.callTool({
+      name: 'list_projects',
+      arguments: {},
+    });
+    assert.equal(projectDiscovery.isError, undefined);
+    assert.equal(projectDiscovery.structuredContent.default_environment_id, 'mcp-worker');
+    assert.equal(projectDiscovery.structuredContent.environments.length, 1);
+    assert.equal(projectDiscovery.structuredContent.environments[0].id, 'mcp-worker');
+    assert.equal(projectDiscovery.structuredContent.environments[0].projects.length, 1);
+    assert.equal(
+      projectDiscovery.structuredContent.environments[0].projects[0].project_id,
+      workerRuntime.workspaceRegistry.listRegistered()[0].workspace_id,
+    );
+    assert.equal(
+      Object.hasOwn(
+        projectDiscovery.structuredContent.environments[0],
+        'projectless_contexts',
+      ),
+      false,
+    );
+
     const approvalResource = await client.readResource({ uri: APPROVAL_UI_URI });
     assert.equal(approvalResource.contents[0].text, APPROVAL_UI_HTML);
     assert.equal(approvalResource.contents[0]._meta.ui.prefersBorder, true);
@@ -130,7 +152,18 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const workspaceRoot = projectlessResult.workspace_root;
     assert.equal(projectlessResult.workspace_kind, 'projectless');
 
-    const seededWorkspace = workerRuntime.workspaceRegistry.list()[0];
+    const completeProjectDiscovery = await client.callTool({
+      name: 'list_projects',
+      arguments: { all: true },
+    });
+    assert.equal(completeProjectDiscovery.isError, undefined);
+    assert.equal(
+      completeProjectDiscovery.structuredContent.environments[0]
+        .projectless_contexts[0].projectless_id,
+      projectlessResult.workspace_id,
+    );
+
+    const seededWorkspace = workerRuntime.workspaceRegistry.listRegistered()[0];
     const workspacePrepare = await client.callTool({
       name: 'exec',
       arguments: {

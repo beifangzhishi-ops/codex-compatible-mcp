@@ -336,41 +336,50 @@ function toolError(error) {
 
 export function registerCoreTools(registry, runtime) {
   registry.register({
-    name: 'list_environments',
+    name: 'list_projects',
     provider: 'ccm-core',
     surfaces: { direct: true, codeMode: true },
-    tags: ['environment', 'worker', 'capabilities'],
+    tags: ['project', 'environment', 'worker', 'capabilities'],
     supportsParallel: true,
-    description: 'List CCM execution environments, platform/shell metadata, capabilities, independent effective sandbox_read_scope and sandbox_write_scope values, backend, and default selection. sandbox_read_scope describes where ordinary commands may read; sandbox_write_scope describes where ordinary commands may write. Internal bootstrap directories, raw permission profiles, and filesystem permission topology are intentionally not exposed.',
-    inputSchema: {},
-    handler: async () => jsonResult({
-      default_environment_id: runtime.environmentRegistry.defaultEnvironmentId,
-      environments: runtime.environmentRegistry.listPublic(),
-    }),
-  });
-
-  registry.register({
-    name: 'list_workspaces',
-    provider: 'ccm-core',
-    surfaces: { deferred: true, codeMode: true },
-    tags: ['workspace', 'project', 'environment'],
-    supportsParallel: true,
-    description: 'List registered workspaces on one CCM environment. This is discovery only and does not enter a workspace. Discover through tool_search and invoke through exec.',
+    description: [
+      'List connected CCM environments and their registered projects without entering a project.',
+      'With no environment_id, returns every connected environment. Pass environment_id to restrict discovery to one environment.',
+      'Registered projects are returned by default. Set all=true only when existing projectless contexts also need to be inspected.',
+      'Each environment includes platform/shell metadata, capabilities, independent effective sandbox_read_scope and sandbox_write_scope values, backend, and default selection. Internal bootstrap directories, raw permission profiles, and filesystem permission topology are intentionally not exposed.',
+    ].join('\n\n'),
     inputSchema: {
-      environment_id: z.string().optional().describe('Environment whose Worker owns the workspaces. Omit to use the primary environment.'),
+      environment_id: z.string().optional().describe('Optional environment id. Omit to list projects across every connected environment.'),
+      all: z.boolean().optional().describe('Include existing projectless contexts in a separate projectless_contexts collection. Defaults to false.'),
     },
     handler: async (args) => {
       try {
-        const environment = runtime.environmentRegistry.resolve(args.environment_id);
-        const result = await runtime.workerHub.call(
-          environment.id,
-          'list_workspaces',
-          {},
-          { timeoutMs: 10_000 },
-        );
+        const publicEnvironments = runtime.environmentRegistry.listPublic();
+        let environments = publicEnvironments;
+        if (args.environment_id) {
+          runtime.environmentRegistry.resolve(args.environment_id);
+          environments = publicEnvironments.filter(
+            (environment) => environment.id === args.environment_id,
+          );
+        }
+        const includeAll = Boolean(args.all);
+        const enriched = await Promise.all(environments.map(async (environment) => {
+          const result = await runtime.workerHub.call(
+            environment.id,
+            'list_projects',
+            { all: includeAll },
+            { timeoutMs: 10_000 },
+          );
+          return {
+            ...environment,
+            projects: result.projects || [],
+            ...(includeAll
+              ? { projectless_contexts: result.projectless_contexts || [] }
+              : {}),
+          };
+        }));
         return jsonResult({
-          environment_id: environment.id,
-          workspaces: result.workspaces || [],
+          default_environment_id: runtime.environmentRegistry.defaultEnvironmentId,
+          environments: enriched,
         });
       } catch (error) {
         return toolError(error);
@@ -387,7 +396,7 @@ export function registerCoreTools(registry, runtime) {
     description: [
       'Create a projectless workspace_context for operations that do not belong to a registered project.',
       'Use this when no project has been selected. If environment_id is omitted, CCM uses the primary environment.',
-      'The returned workspace_context supplies Worker routing and the context root for subsequent CCM operations. Read-scope decisions, including whether absolute paths outside the projectless root are readable, belong to list_environments and exec_command rather than this lifecycle tool.',
+      'The returned workspace_context supplies Worker routing and the context root for subsequent CCM operations. Read-scope decisions, including whether absolute paths outside the projectless root are readable, belong to list_projects and exec_command rather than this lifecycle tool.',
     ].join('\n\n'),
     inputSchema: {
       environment_id: z.string().optional().describe('Environment on which to create the projectless context. Omit to use the primary environment.'),

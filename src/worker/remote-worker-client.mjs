@@ -201,8 +201,28 @@ export class RemoteWorkerClient {
         return this.runtime.fileService.sendFile(params);
       case 'receive_file':
         return this.runtime.fileService.receiveFile(params);
-      case 'list_workspaces':
-        return { workspaces: this.runtime.workspaceRegistry.list() };
+      case 'list_projects':
+        return {
+          projects: this.runtime.workspaceRegistry.listRegistered().map(
+            (workspace) => ({
+              project_id: workspace.workspace_id,
+              root: workspace.root,
+              created_at: workspace.created_at,
+            }),
+          ),
+          ...(params.all
+            ? {
+                projectless_contexts:
+                  this.runtime.workspaceRegistry.listProjectless().map(
+                    (workspace) => ({
+                      projectless_id: workspace.workspace_id,
+                      root: workspace.root,
+                      created_at: workspace.created_at,
+                    }),
+                  ),
+              }
+            : {}),
+        };
       case 'get_workspace':
         return this.runtime.workspaceRegistry.resolve(params.workspace_id);
       case 'inspect_workspace_path':

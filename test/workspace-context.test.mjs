@@ -37,7 +37,7 @@ test('WorkspaceRegistry keeps registered and projectless workspaces separate', a
   });
 
   try {
-    const seeded = registry.list();
+    const seeded = registry.listRegistered();
     assert.equal(seeded.length, 1);
     assert.equal(seeded[0].root, await fs.realpath(bootstrapRoot));
 
@@ -46,12 +46,13 @@ test('WorkspaceRegistry keeps registered and projectless workspaces separate', a
       path: extraRoot,
     });
     assert.equal(added.workspace_id, 'extra');
-    assert.equal(registry.list().length, 2);
+    assert.equal(registry.listRegistered().length, 2);
 
     const projectless = registry.createProjectless();
     assert.equal(projectless.kind, 'projectless');
     assert.equal(projectless.root.startsWith(projectlessRoot), true);
-    assert.equal(registry.list().length, 2, 'projectless is not registered');
+    assert.equal(registry.listRegistered().length, 2, 'projectless is not registered');
+    assert.equal(registry.listProjectless().length, 1);
 
     const reloaded = new WorkspaceRegistry({
       environmentRegistry: environments,
@@ -306,7 +307,7 @@ test('Controller uses projectless contexts and requires approval for registered 
       'projectless only\n',
     );
 
-    const seeded = worker.workspaceRegistry.list()[0];
+    const seeded = worker.workspaceRegistry.listRegistered()[0];
     const select = tools.registry.get('select_workspace');
     const pending = await select.handler({
       environment_id: 'workspace-worker',
@@ -361,7 +362,7 @@ test('Controller uses projectless contexts and requires approval for registered 
       await fs.realpath(newRoot),
     );
     assert.equal((await fs.stat(newRoot)).isDirectory(), true);
-    assert.equal(worker.workspaceRegistry.list().length, 2);
+    assert.equal(worker.workspaceRegistry.listRegistered().length, 2);
 
     const nestedPending = await select.handler({
       environment_id: 'workspace-worker',

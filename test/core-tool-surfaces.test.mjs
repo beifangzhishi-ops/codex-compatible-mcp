@@ -8,8 +8,37 @@ function runtimeStub() {
   return {
     environmentRegistry: {
       defaultEnvironmentId: 'primary',
-      listPublic: () => [],
-      resolve: (id = null) => ({ id: id || 'primary' }),
+      listPublic: () => [
+        {
+          id: 'primary',
+          name: 'primary',
+          platform: 'windows',
+          shell: { type: 'powershell', path: 'powershell.exe' },
+          capabilities: { exec: true },
+          sandbox_read_scope: 'host',
+          sandbox_write_scope: 'context_root',
+          backend: 'remote-worker',
+          is_default: true,
+        },
+        {
+          id: 'noha',
+          name: 'noha',
+          platform: 'windows',
+          shell: { type: 'powershell', path: 'powershell.exe' },
+          capabilities: { exec: true },
+          sandbox_read_scope: 'host',
+          sandbox_write_scope: 'context_root',
+          backend: 'remote-worker',
+          is_default: false,
+        },
+      ],
+      resolve: (id = null) => {
+        const resolved = id || 'primary';
+        if (!['primary', 'noha'].includes(resolved)) {
+          throw new Error('Unknown environment: ' + resolved);
+        }
+        return { id: resolved };
+      },
     },
     workspaceContextManager: {
       createProjectless: async (environmentId = null) => ({
@@ -28,8 +57,25 @@ function runtimeStub() {
       }),
     },
     workerHub: {
-      call: async (_environmentId, method, params = {}) => {
-        if (method === 'list_workspaces') return { workspaces: [] };
+      call: async (environmentId, method, params = {}) => {
+        if (method === 'list_projects') {
+          return {
+            projects: [{
+              project_id: environmentId + '-project',
+              root: 'C:\\work\\' + environmentId + '-project',
+              created_at: '2026-09-24T00:00:00.000Z',
+            }],
+            ...(params.all
+              ? {
+                  projectless_contexts: [{
+                    projectless_id: 'projectless-' + environmentId,
+                    root: 'C:\\temp\\' + environmentId,
+                    created_at: '2026-09-24T00:00:00.000Z',
+                  }],
+                }
+              : {}),
+          };
+        }
         if (method === 'get_workspace') {
           return {
             workspace_id: 'project',
@@ -136,7 +182,7 @@ test('core tool surface keeps workspace lifecycle deferred and centralizes appro
   assert.deepEqual(direct, [
     'apply_patch',
     'exec_command',
-    'list_environments',
+    'list_projects',
     'request_approval',
     'resolve_pending_action',
     'view_image',
@@ -147,9 +193,12 @@ test('core tool surface keeps workspace lifecycle deferred and centralizes appro
     ['app'],
   );
   assert.match(
-    registry.get('list_environments').description,
+    registry.get('list_projects').description,
     /sandbox_read_scope.*sandbox_write_scope/,
   );
+  assert.equal(registry.get('list_projects').surfaces.direct, true);
+  assert.equal(registry.get('list_projects').surfaces.deferred, false);
+  assert.equal(registry.get('list_projects').surfaces.codeMode, true);
   assert.match(
     registry.get('create_projectless_context').description,
     /absolute paths outside the projectless root/,
@@ -169,7 +218,6 @@ test('core tool surface keeps workspace lifecycle deferred and centralizes appro
 
   for (const name of [
     'create_projectless_context',
-    'list_workspaces',
     'select_workspace',
     'register_workspace',
   ]) {
@@ -181,6 +229,34 @@ test('core tool surface keeps workspace lifecycle deferred and centralizes appro
   assert.deepEqual(
     Object.keys(registry.get('request_approval').inputSchema),
     ['approval_id'],
+  );
+
+  const projects = await registry.get('list_projects').handler({});
+  assert.equal(projects.structuredContent.default_environment_id, 'primary');
+  assert.deepEqual(
+    projects.structuredContent.environments.map((environment) => environment.id),
+    ['primary', 'noha'],
+  );
+  assert.equal(projects.structuredContent.environments[0].projects[0].project_id, 'primary-project');
+  assert.equal(
+    Object.hasOwn(projects.structuredContent.environments[0], 'projectless_contexts'),
+    false,
+  );
+  assert.equal(projects.structuredContent.environments[0].sandbox_read_scope, 'host');
+  assert.equal(projects.structuredContent.environments[0].sandbox_write_scope, 'context_root');
+
+  const filteredProjects = await registry.get('list_projects').handler({
+    environment_id: 'noha',
+  });
+  assert.deepEqual(
+    filteredProjects.structuredContent.environments.map((environment) => environment.id),
+    ['noha'],
+  );
+
+  const allProjects = await registry.get('list_projects').handler({ all: true });
+  assert.equal(
+    allProjects.structuredContent.environments[0].projectless_contexts[0].projectless_id,
+    'projectless-primary',
   );
 
   const created = await registry.get('create_projectless_context').handler({
@@ -233,7 +309,7 @@ test('core tool surface keeps workspace lifecycle deferred and centralizes appro
         'apply_patch',
         'exec',
         'exec_command',
-        'list_environments',
+        'list_projects',
         'request_approval',
         'resolve_pending_action',
         'tool_search',
@@ -263,6 +339,21 @@ test('core tool surface keeps workspace lifecycle deferred and centralizes appro
     assert.equal(
       projectless.structuredContent.calls[0].result.structured_content.environment_id,
       'noha',
+    );
+
+    const nestedProjects = await registry.get('exec').handler({
+      calls: [{
+        tool: 'list_projects',
+        arguments: { environment_id: 'noha', all: true },
+      }],
+      yield_time_ms: 1000,
+    });
+    const nestedProjectResult =
+      nestedProjects.structuredContent.calls[0].result.structured_content;
+    assert.equal(nestedProjectResult.environments[0].id, 'noha');
+    assert.equal(
+      nestedProjectResult.environments[0].projectless_contexts[0].projectless_id,
+      'projectless-noha',
     );
 
     const select = await registry.get('exec').handler({

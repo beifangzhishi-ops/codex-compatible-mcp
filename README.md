@@ -77,7 +77,7 @@ When adding stateful features, choose an identity according to the feature's rea
 
 | Tool | Purpose |
 | --- | --- |
-| `list_environments` | Show connected execution environments, capabilities, and coarse effective filesystem read/write scope. |
+| `list_projects` | Show connected execution environments, their registered projects, capabilities, and coarse effective filesystem read/write scope. Omit `environment_id` to inspect all connected Workers; use `all=true` only to include projectless contexts separately. |
 | `exec_command` | Run a native shell command inside an existing `workspace_context`. |
 | `request_approval` | Render the CCM approval app for one already-frozen pending action. It accepts only the returned `approval_id`. |
 | `resolve_pending_action` | App-only resolver used by the CCM approval app to approve/deny and resume a frozen execution or workspace action. It is hidden from normal model use through MCP Apps visibility metadata. |
@@ -99,7 +99,6 @@ These are core CCM operations but intentionally stay off the top-level MCP schem
 | Capability | Purpose |
 | --- | --- |
 | `ccm.create_projectless_context` | Create a temporary projectless context on a chosen Worker, or on the primary Worker when no environment is specified. |
-| `ccm.list_workspaces` | Discover registered projects on one Worker without entering them. |
 | `ccm.select_workspace` | Validate and freeze entry into one registered workspace. If approval is required, pass its opaque `approval_id` to the top-level `request_approval` tool. |
 | `ccm.register_workspace` | Validate and freeze registration/entry of one exact project path. If approval is required, pass its opaque `approval_id` to the top-level `request_approval` tool. |
 | `ccm.plan_patch` | Create or update one durable Plan using Codex-style patch syntax and an explicit opaque `plan_id`. |
@@ -123,7 +122,7 @@ CCM stores capability exposure as three independent surfaces:
 
 Convenience states such as Direct, Deferred, CodeModeOnly, DirectModelOnly, DeferredModelOnly, and Hidden are derived from those surfaces rather than stored as one rigid enum.
 
-The direct MCP surface is intentionally kept small and stable. New ordinary capabilities should default to the **Deferred + Code Mode** surfaces and be invoked through `tool_search` + `exec`. Add a new top-level Direct tool only when the capability is a common operational primitive or is fundamental to environment discovery, explicit approval, process continuation, host file handoff, or nested-tool discovery/dispatch. `create_projectless_context`, `list_workspaces`, `select_workspace`, and `register_workspace` remain Deferred; approval rendering is centralized in the Direct-only `request_approval` bridge.
+The direct MCP surface is intentionally kept small and stable. New ordinary capabilities should default to the **Deferred + Code Mode** surfaces and be invoked through `tool_search` + `exec`. Add a new top-level Direct tool only when the capability is a common operational primitive or is fundamental to environment/project discovery, explicit approval, process continuation, host file handoff, or nested-tool discovery/dispatch. `list_projects` is Direct + Code Mode because it is the single discovery entry point for connected environments and registered projects. `create_projectless_context`, `select_workspace`, and `register_workspace` remain Deferred; approval rendering is centralized in the Direct-only `request_approval` bridge.
 
 Keeping ordinary additions off the Direct surface prevents routine feature work from changing the client's top-level MCP schema. In particular, adding a deferred capability should **not require deleting and recreating the CCM integration in ChatGPT or another MCP client**. Updating CCM server code may still require restarting the Controller and/or Worker processes so the new implementation is loaded; that is separate from recreating the client integration.
 
@@ -349,7 +348,7 @@ npm run worker
 
 Windows is the current fully supported restricted-execution platform.
 
-`read-only` and `workspace-write` command execution use the CCM Windows native sandbox helper. The public environment-discovery surface intentionally does not expose internal bootstrap directories, raw permission profiles, or filesystem permission topology, but `list_environments` does expose two independent coarse fields derived from the current effective profile: `sandbox_read_scope` and `sandbox_write_scope`. In the current Windows restricted sandbox, `read-only` reports `host` / `none`, `workspace-write` reports `host` / `context_root`, and `full-access` reports `host` / `host`. `context_root` means the active registered-workspace or projectless root. A `workspace_context` selects the Worker, cwd/session ownership, and that context root. Filesystem read scope is determined independently by `sandbox_read_scope`; ordinary write scope is determined by `sandbox_write_scope`. A readable path does not need to become the selected workspace merely because it is outside the current context root. Individual direct file tools may impose narrower path contracts than `exec_command`. PTY sessions use a Rust ConPTY backend aligned with the useful parts of Codex's current Windows PTY implementation. `full-access` runs with the Worker's normal host permissions.
+`read-only` and `workspace-write` command execution use the CCM Windows native sandbox helper. The public environment/project-discovery surface intentionally does not expose internal bootstrap directories, raw permission profiles, or filesystem permission topology, but `list_projects` exposes two independent coarse fields for each connected environment derived from the current effective profile: `sandbox_read_scope` and `sandbox_write_scope`. In the current Windows restricted sandbox, `read-only` reports `host` / `none`, `workspace-write` reports `host` / `context_root`, and `full-access` reports `host` / `host`. `context_root` means the active registered-workspace or projectless root. A `workspace_context` selects the Worker, cwd/session ownership, and that context root. Filesystem read scope is determined independently by `sandbox_read_scope`; ordinary write scope is determined by `sandbox_write_scope`. A readable path does not need to become the selected workspace merely because it is outside the current context root. Individual direct file tools may impose narrower path contracts than `exec_command`. PTY sessions use a Rust ConPTY backend aligned with the useful parts of Codex's current Windows PTY implementation. `full-access` runs with the Worker's normal host permissions.
 
 Restricted command execution on Linux/macOS is not implemented yet and **fails closed** rather than silently running unsandboxed. A Linux/macOS Worker therefore currently needs `CCM_PERMISSION_PROFILE=full-access` for shell execution.
 

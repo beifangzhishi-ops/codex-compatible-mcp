@@ -193,11 +193,11 @@ test('Controller routes execution across Remote Workers', async () => {
 
     const contextA = controller.workspaceContextManager.createRegistered(
       'worker-a',
-      workerA.workspaceRegistry.list()[0],
+      workerA.workspaceRegistry.listRegistered()[0],
     );
     const contextB = controller.workspaceContextManager.createRegistered(
       'worker-b',
-      workerB.workspaceRegistry.list()[0],
+      workerB.workspaceRegistry.listRegistered()[0],
     );
     const a = await controller.processManager.execCommand({
       workspace_context: contextA.workspace_context,
@@ -514,7 +514,7 @@ test('Remote Worker owns apply_patch, view_image, send_file, and receive_file fi
     });
     await client.connect();
     assert.equal(await controller.workerHub.waitForEnvironment('worker-files'), true);
-    const seeded = worker.workspaceRegistry.list()[0];
+    const seeded = worker.workspaceRegistry.listRegistered()[0];
     const workspaceContext = controller.workspaceContextManager.createRegistered(
       'worker-files',
       seeded,

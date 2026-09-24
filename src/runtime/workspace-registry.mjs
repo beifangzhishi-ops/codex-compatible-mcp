@@ -163,8 +163,14 @@ export class WorkspaceRegistry {
     this.#persist();
   }
 
-  list() {
+  listRegistered() {
     return [...this.registered.values()]
+      .map(publicWorkspace)
+      .sort((left, right) => left.workspace_id.localeCompare(right.workspace_id));
+  }
+
+  listProjectless() {
+    return [...this.projectless.values()]
       .map(publicWorkspace)
       .sort((left, right) => left.workspace_id.localeCompare(right.workspace_id));
   }
