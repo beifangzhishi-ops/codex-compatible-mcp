@@ -655,7 +655,7 @@ test('RemoteProcessManager does not request approval for trusted remote Git', as
       workspace_context: '00000000-0000-4000-8000-000000000001',
       cmd: 'git push origin main',
       sandbox_permissions: 'require_escalated',
-      justification: 'Legacy caller requested escalation.',
+      justification: 'Caller requested escalation.',
     });
     assert.equal(result.approval_required, undefined);
     assert.equal(result.exit_code, 0);
@@ -739,7 +739,7 @@ test('approval can persist a workspace execution policy and reuse it', async () 
   }
 });
 
-test('package-script workspace approval uses a restricted-compatible policy probe', async () => {
+test('package-script workspace approval uses a restricted-sandbox-safe policy probe', async () => {
   const environmentRegistry = restrictedRegistry();
   const approvalManager = new ApprovalManager();
   const calls = [];

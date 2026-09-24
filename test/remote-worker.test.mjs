@@ -522,7 +522,6 @@ test('Remote Worker owns apply_patch, view_image, send_file, and receive_file fi
 
     const patch = [
       '*** Begin Patch',
-      '*** Environment ID: worker-files',
       '*** Add File: remote.txt',
       '+hello from worker',
       '*** End Patch',

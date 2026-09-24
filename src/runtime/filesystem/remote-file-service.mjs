@@ -1,5 +1,3 @@
-import { parsePatch } from './apply-patch.mjs';
-
 export class RemoteFileService {
   constructor({ environmentRegistry, workerHub, workspaceContextManager = null }) {
     if (!environmentRegistry || !workerHub) {
@@ -10,7 +8,7 @@ export class RemoteFileService {
     this.workspaceContextManager = workspaceContextManager;
   }
 
-  #resolveExecution(args, fallbackEnvironmentId = null) {
+  #resolveExecution(args) {
     if (!args.workspace_context) {
       throw new Error('File operation requires workspace_context.');
     }
@@ -28,12 +26,6 @@ export class RemoteFileService {
     const environment = this.environmentRegistry.resolve(
       workspaceContext.environment_id,
     );
-    if (fallbackEnvironmentId && fallbackEnvironmentId !== environment.id) {
-      throw new Error(
-        'File operation environment mismatch: context=' + environment.id +
-        ', requested=' + fallbackEnvironmentId,
-      );
-    }
     return {
       environment,
       workspaceContext,
@@ -42,8 +34,7 @@ export class RemoteFileService {
   }
 
   async applyPatch(args) {
-    const parsed = parsePatch(args.patch);
-    const execution = this.#resolveExecution(args, parsed.environmentId);
+    const execution = this.#resolveExecution(args);
     const environment = execution.environment;
     if (!environment.capabilities?.applyPatch) {
       throw new Error(

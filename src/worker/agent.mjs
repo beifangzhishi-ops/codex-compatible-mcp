@@ -59,8 +59,7 @@ async function writeHealth(state, detail = null) {
     state,
     environment_id: environmentId,
     worker_id: workerIdentity,
-    controller_host: process.env.CCM_WORKER_HUB_CONNECT_HOST ||
-      process.env.CCM_WORKER_HUB_HOST || '127.0.0.1',
+    controller_host: process.env.CCM_WORKER_HUB_CONNECT_HOST || '127.0.0.1',
     controller_port: Number(process.env.CCM_WORKER_HUB_PORT || 18301),
     updated_at: new Date().toISOString(),
     ...(detail ? { detail: String(detail) } : {}),

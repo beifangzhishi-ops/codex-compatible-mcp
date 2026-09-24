@@ -149,51 +149,6 @@ def current_origin_and_number(wsg: Wsg, info: dict) -> tuple[str, int]:
     return origin, number
 
 
-def _json_string_hits(raw: bytes, key: str, encoding: str) -> list[tuple[int, str]]:
-    prefix = (f'"{key}":"').encode(encoding)
-    quote = '"'.encode(encoding)
-    hits: list[tuple[int, str]] = []
-    start = 0
-    while True:
-        pos = raw.find(prefix, start)
-        if pos < 0:
-            break
-        value_start = pos + len(prefix)
-        value_end = raw.find(quote, value_start)
-        if value_end >= 0:
-            try:
-                value = raw[value_start:value_end].decode(encoding)
-                hits.append((pos, value))
-            except UnicodeDecodeError:
-                pass
-        start = pos + max(1, len(prefix))
-    return hits
-
-
-def _find_legacy_uid_wsg(origin: str) -> set[str]:
-    root = local_storage_dir()
-    if not root.is_dir():
-        return set()
-    candidates: set[str] = set()
-    files = [p for p in root.iterdir() if p.is_file() and p.suffix in {".ldb", ".log"}]
-    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-    key_forms = [b"atom_user_info", "atom_user_info".encode("utf-16le")]
-    origin_forms = [LOCAL_STORAGE_ORIGIN.encode(), LOCAL_STORAGE_ORIGIN.encode("utf-16le")]
-    for path in files:
-        try:
-            raw = path.read_bytes()
-        except OSError:
-            continue
-        positions = sorted({pos for key in key_forms for pos in _all_positions(raw, key)})
-        for pos in positions:
-            lo, hi = max(0, pos - 65536), min(len(raw), pos + 131072)
-            window = raw[lo:hi]
-            if not any(mark in window for mark in origin_forms):
-                continue
-            candidates.update(_uid_candidates_from_window(window, origin))
-    return candidates
-
-
 def _account_ids_from_config(path: Path | None = None) -> list[str]:
     path = path or account_config_path()
     try:
@@ -255,47 +210,13 @@ def _latest_cache_account(account_ids: list[str],
 
 
 def find_uid_wsg(origin: str) -> str:
-    legacy = _find_legacy_uid_wsg(origin)
-    if len(legacy) == 1:
-        return next(iter(legacy))
     account_ids = _account_ids_from_config()
     active = _latest_cache_account(account_ids)
     if active:
         return active
-    candidate_count = len(legacy) if legacy else len(account_ids)
+    candidate_count = len(account_ids)
     raise ToolError(
         f"当前账号映射无法唯一确认（候选数: {candidate_count}），已安全中止")
-
-
-def _all_positions(raw: bytes, needle: bytes) -> list[int]:
-    if not needle:
-        return []
-    result: list[int] = []
-    start = 0
-    while True:
-        pos = raw.find(needle, start)
-        if pos < 0:
-            return result
-        result.append(pos)
-        start = pos + len(needle)
-
-
-def _uid_candidates_from_window(window: bytes, origin: str) -> set[str]:
-    result: set[str] = set()
-    for encoding in ("utf-16le", "utf-8"):
-        uid_hits = _json_string_hits(window, "uId", encoding)
-        wsg_hits = [(p, v) for p, v in _json_string_hits(window, "uid_wsg", encoding) if v]
-        for uid_pos, uid in uid_hits:
-            if uid != origin:
-                continue
-            nearby = [(abs(p - uid_pos), v) for p, v in wsg_hits if abs(p - uid_pos) <= 16384]
-            if not nearby:
-                continue
-            nearby.sort(key=lambda item: item[0])
-            best_distance = nearby[0][0]
-            best = {value for distance, value in nearby if distance == best_distance}
-            result.update(best)
-    return result
 
 
 def current_upload_db(origin: str) -> Path:

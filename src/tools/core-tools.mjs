@@ -529,7 +529,7 @@ export function registerCoreTools(registry, runtime) {
       workspace_context: z.string().uuid().describe('Existing execution context. It selects the Worker and context root; obtain one with create_projectless_context, select_workspace, or register_workspace before executing. It is not itself the filesystem read boundary.'),
       workdir: z.string().optional().describe('Relative subdirectory inside the selected context root. Defaults to the context root.'),
       tty: z.boolean().optional().describe('True allocates a PTY; false or omitted uses plain pipes.'),
-      yield_time_ms: z.number().int().max(30_000).nonnegative().optional().describe('Wait before the initial command call yields output or a session. Defaults to 2000 ms. Values above 5000 ms are accepted for compatibility but are clamped to 5000 ms; long-running commands continue in a session and should be resumed with write_stdin.'),
+      yield_time_ms: z.number().int().max(30_000).nonnegative().optional().describe('Wait before the initial command call yields output or a session. Defaults to 2000 ms. Values above 5000 ms are clamped to 5000 ms; long-running commands continue in a session and should be resumed with write_stdin.'),
       max_output_tokens: z.number().int().positive().optional().describe('Output token budget. Defaults to 10000 tokens.'),
       shell: z.string().optional().describe("Shell binary to launch. Defaults to the environment's default shell."),
       sandbox_permissions: z.enum(['use_default', 'require_escalated']).optional().describe('Set require_escalated when this exact command genuinely needs full-access outside the normal sandbox.'),

@@ -46,7 +46,7 @@ Every execution environment uses the same Remote Worker protocol. The machine ho
 
 Registered workspaces are owned by each Worker, not by the Controller. Entering or hot-registering a real project requires one-shot user approval and returns an opaque `workspace_context`. Deferred `select_workspace` / `register_workspace` calls validate and freeze the exact workspace action, then return an opaque `approval_id`; the top-level Direct `request_approval` tool renders that frozen action in the CCM approval app. When the user approves, CCM performs the frozen action itself and returns the resulting context without a model-generated retry. `register_workspace` combines registration and entry; with `create_if_missing=true`, the same approval may also create the exact missing project directory before registration, so a new project does not need a separate shell mkdir approval followed by workspace approval. Normal development tools carry only the resulting context. Workspace contexts are persisted by the Controller and remain valid across Controller or Worker restarts. Worker-local projectless mappings are persisted as well, so a surviving projectless directory can be resumed after a Worker restart.
 
-An environment does not expose a default workspace or default working directory to the MCP client. Worker bootstrap cwd is an internal/legacy runtime seed only; it is not a project-location hint, a default project, or the parent directory for newly created projects. CCM deliberately has no "Projects Root" policy: project placement comes from the user or the upper-layer orchestrator.
+An environment does not expose a default workspace or default working directory to the MCP client. Worker bootstrap cwd is a runtime seed only; it is not a project-location hint, a default project, or the parent directory for newly created projects. CCM deliberately has no "Projects Root" policy: project placement comes from the user or the upper-layer orchestrator.
 
 When no real project is selected, create an explicit projectless context with the deferred `ccm.create_projectless_context` capability through `tool_search` + `exec`. Pass `environment_id` to create it on a specific Worker, or omit `environment_id` to use the primary environment. Projectless workspaces are created under `CCM_PROJECTLESS_ROOT` (default: the user's `Documents\\CCM` directory) and do not require workspace approval. Do not register temporary directories, `Documents`, drive roots, or other arbitrary paths merely to obtain an execution context.
 
@@ -151,12 +151,12 @@ The exporter only recovers information present in the public Share payload. Info
 
 CCM ships optional Windows workflows ported from WCM. Specialized workflows remain deferred; file handoff is exposed through the direct `ccm-extra.send_file` and `ccm-extra.receive_file` tools:
 
-- `ccm-extra.send_file` is a Direct-only, strictly single-file ChatGPT handoff: one call transfers one exact file from a selected CCM environment to the GPT client. If multiple files are needed, invoke `send_file` sequentially once per file and wait for each call to return before starting the next; do not issue concurrent/parallel `send_file` calls. Use it only when a user-facing handoff is actually needed (preview/download/upload to another tool). The tool result exposes the bridge URI in `structuredContent.resource_uri`; `resources/read` serves the exact file bytes from a bounded Controller-side bridge cache persisted under ignored `.state/file-transfers`. The associated MCP App materializes that resource into a conversation-scoped ChatGPT file with `library:false`, persists both the ChatGPT `fileId` and CCM recovery resource URI, and suppresses duplicate materialization when the host replays the same tool result before widget state is reflected. If a saved ChatGPT `fileId` later expires, the widget can re-read the persisted CCM resource and materialize a replacement without rerunning `send_file`. Recovery remains subject to the Controller bridge entry still existing: configured TTL expiry or bounded-cache eviction makes that original resource unavailable. New calls do not emit a second user-visible native `resource_link` entry. Do not use `send_file` merely for model-side inspection when the file can be read or viewed locally in CCM; prefer local reading, `view_image`, command-line inspection, or temporary local previews. The transfer does not use BMG.
+- `ccm-extra.send_file` is a Direct-only, strictly single-file ChatGPT handoff: one call transfers one exact file from a selected CCM environment to the GPT client as a native MCP `resource_link`. If multiple files are needed, invoke `send_file` sequentially once per file and wait for each call to return before starting the next; do not issue concurrent/parallel `send_file` calls. Use it only when a user-facing handoff is actually needed (download/open/upload to another tool). The link points to a `ccm-file:///...` resource served through `resources/read`; exact file bytes are retained in the bounded Controller-side bridge cache under ignored `.state/file-transfers`. The bridge persists across Controller restarts, has no time-based expiry by default, and remains subject to configured TTL or cache eviction. `structuredContent.resource_uri` mirrors the same resource URI for machine-readable workflows. Do not use `send_file` merely for model-side inspection when the file can be read or viewed locally in CCM; prefer local reading, `view_image`, command-line inspection, or temporary local previews. The transfer does not use BMG.
 - `ccm-extra.receive_file` is the inverse Direct-only handoff. ChatGPT supplies exactly one native file parameter (`download_url`, `file_id`, and optional MIME/name), and the selected Worker streams that temporary HTTPS URL directly into its current context root. `destination` is workspace-relative only, overwrite is opt-in, redirects and resolved targets are SSRF-checked, and the completed file is published from a same-directory temporary file with SHA-256 metadata. Multiple files must be received sequentially. ChatGPT Files owns Library discovery; CCM only receives the specific file already selected/authorized by ChatGPT and does not enumerate the user's Library, route bytes through BMG, or use the Controller `FileTransferStore`.
 - `ccm-extra.quark_upload` submits one or more files through that local Quark desktop session and can wait for verified completion.
 - `ccm-extra.bilibili_download_dash` downloads signed DASH video/audio URLs obtained from an authenticated browser session and remuxes them with `ffmpeg -c copy`.
 
-Discover deferred specialized workflows with `tool_search` (for example, `quark upload` or `bilibili`) and invoke them through `exec`. `send_file` and `receive_file` are Direct-only because their ChatGPT host metadata/UI semantics occur on the top-level tool call. Long uploads/downloads may return a live process session; continue that session with the top-level `write_stdin` tool.
+Discover deferred specialized workflows with `tool_search` (for example, `quark upload` or `bilibili`) and invoke them through `exec`. `send_file` and `receive_file` are Direct-only because their ChatGPT file-handoff semantics occur on the top-level tool call. Long uploads/downloads may return a live process session; continue that session with the top-level `write_stdin` tool.
 
 The Quark helper reuses only the login state of the local Quark desktop client and does not export account credentials. The Bilibili helper intentionally leaves authenticated `playurl` discovery to the browser/BMG layer and accepts only the resulting short-lived signed media URLs; it does not export cookies or attempt to bypass account/quality restrictions.
 
@@ -220,7 +220,7 @@ Copy-Item .\config\worker.env.example .\config\worker.env
 notepad .\config\worker.env
 ```
 
-Set at least `CCM_WORKER_HUB_CONNECT_HOST`; normally also give the Worker a stable `CCM_ENVIRONMENT_ID`. `CCM_WORKSPACE` is optional legacy/bootstrap configuration and is not a GPT-visible default project. Then install and inspect the Worker task:
+Set at least `CCM_WORKER_HUB_CONNECT_HOST`; normally also give the Worker a stable `CCM_ENVIRONMENT_ID`. `CCM_WORKSPACE` is a Worker bootstrap workspace seed and is not a GPT-visible default project. Then install and inspect the Worker task:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-ccm-worker-autostart.ps1
@@ -283,7 +283,7 @@ When a Direct-tool schema change means the ChatGPT registration needs to be rebu
 1. Resolve the current public MCP resource from `CCM_RESOURCE` (normally from ignored `config/ccm.env`) and give that MCP address to the user.
 2. Do **not** print or copy the local approval secret or its complete path into chat. The assistant does not transfer that secret through a CCM tool. The user retrieves the local approval secret on the Controller machine (or through another user-controlled secure channel) and enters it in the ChatGPT UI themselves.
 3. Do not use BMG to operate ChatGPT settings, rename the existing connector, create a replacement connector/plugin, or complete OAuth/consent for the user.
-4. Do not run the legacy `tools/chatgpt-schema-refresh/refresh.ps1` rebuild workflow by default. It may remain as a manual/debugging utility; normal assistant behavior is to provide the current MCP address and leave local approval-secret entry to the user.
+4. Do not run `tools/chatgpt-schema-refresh/refresh.ps1` by default. It is a manual/debugging utility; normal assistant behavior is to provide the current MCP address and leave local approval-secret entry to the user.
 5. If the current ChatGPT UI requires an archive upload, do not proactively build or upload a plugin archive as part of rebuild. Only build/provide one when the user explicitly asks for the archive.
 
 ## Remote Worker example
@@ -308,8 +308,6 @@ $env:CCM_PERMISSION_PROFILE = "workspace-write"
 npm run worker
 ```
 
-The legacy `CCM_WORKER_HUB_HOST` variable is accepted as a fallback for both bind and connect configuration, but new deployments should use the explicit bind/connect variables.
-
 ## Configuration
 
 | Variable | Default | Meaning |
@@ -323,7 +321,7 @@ The legacy `CCM_WORKER_HUB_HOST` variable is accepted as a fallback for both bin
 | `CCM_SPAWN_LOCAL_WORKER` | enabled | Set to `0` to prevent `npm start` from spawning a local Worker. |
 | `CCM_ENVIRONMENT_ID` | OS hostname | Environment id advertised by a Worker. |
 | `CCM_WORKER_ID` | environment id | Worker connection id. |
-| `CCM_WORKSPACE` | current directory | Legacy/internal Worker bootstrap seed. It may seed Worker-local registry state for compatibility, but it is not a GPT-visible default workspace/project or a new-project parent. |
+| `CCM_WORKSPACE` | current directory | Worker bootstrap workspace seed. It may seed Worker-local registry state, but it is not a GPT-visible default workspace/project or a new-project parent. |
 | `CCM_PROJECTLESS_ROOT` | `~/Documents/CCM` | Root used for automatically created projectless workspaces. |
 | `CCM_WORKSPACE_REGISTRY_FILE` | `<install>/.state/workspaces.json` for the packaged Worker | Worker-local registered and projectless workspace registry. |
 | `CCM_WORKSPACE_CONTEXT_FILE` | `<install>/.state/workspace-contexts.json` for the packaged Controller | Persistent Controller workspace-context registry. |
@@ -407,13 +405,13 @@ This approval mechanism controls CCM's sandbox boundary; it does **not** grant W
 
 CCM treats oversized output as a reliability and context-safety problem.
 
-The OAuth/public sidecar also isolates MCP request identity. Legacy downstream clients that initialize separate MCP sessions receive separate upstream sessions, and downstream POST calls that omit `Mcp-Session-Id` use request-scoped transient upstream sessions instead of sharing one persistent request-id namespace. This prevents concurrent clients that reuse the same JSON-RPC id (for example `id=0`) from overwriting each other's upstream response routing.
+The OAuth/public sidecar also isolates MCP request identity. Downstream clients that initialize separate MCP sessions receive separate upstream sessions, and downstream POST calls that omit `Mcp-Session-Id` use request-scoped transient upstream sessions instead of sharing one persistent request-id namespace. This prevents concurrent clients that reuse the same JSON-RPC id (for example `id=0`) from overwriting each other's upstream response routing.
 
 Command capture is bounded, model-facing command output has a token budget, live process reads are incremental, Worker protocol messages have a hard serialized-size ceiling, final MCP tool results have an absolute byte limit, and `view_image` checks file size before reading/encoding it.
 
 If a hard transport limit would be exceeded, CCM returns or triggers a compact failure instead of attempting to send an oversized response.
 
-## MCP result compatibility
+## MCP result format
 
 CCM returns standard MCP tool results directly. It does not add a custom result envelope such as `resultType`.
 

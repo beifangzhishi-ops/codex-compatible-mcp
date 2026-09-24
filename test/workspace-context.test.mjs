@@ -16,18 +16,18 @@ import { WorkspaceContextManager } from '../src/controller/workspace-context-man
 
 test('WorkspaceRegistry keeps registered and projectless workspaces separate', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-workspaces-'));
-  const legacyRoot = path.join(tempRoot, 'legacy-project');
+  const bootstrapRoot = path.join(tempRoot, 'bootstrap-project');
   const extraRoot = path.join(tempRoot, 'extra-project');
   const projectlessRoot = path.join(tempRoot, 'Documents', 'CCM');
-  await fs.mkdir(legacyRoot, { recursive: true });
+  await fs.mkdir(bootstrapRoot, { recursive: true });
   await fs.mkdir(extraRoot, { recursive: true });
 
   const environments = new EnvironmentRegistry({ resolvePaths: false });
   environments.register({
     id: 'workspace-registry-test',
     platform: 'windows',
-    cwd: legacyRoot,
-    workspaceRoots: [legacyRoot],
+    cwd: bootstrapRoot,
+    workspaceRoots: [bootstrapRoot],
     permissionProfile: 'full-access',
   });
   const registry = new WorkspaceRegistry({
@@ -39,7 +39,7 @@ test('WorkspaceRegistry keeps registered and projectless workspaces separate', a
   try {
     const seeded = registry.list();
     assert.equal(seeded.length, 1);
-    assert.equal(seeded[0].root, await fs.realpath(legacyRoot));
+    assert.equal(seeded[0].root, await fs.realpath(bootstrapRoot));
 
     const added = registry.register({
       workspace_id: 'extra',
@@ -57,20 +57,20 @@ test('WorkspaceRegistry keeps registered and projectless workspaces separate', a
       environmentRegistry: environments,
       stateFile: path.join(tempRoot, 'state', 'workspaces.json'),
       projectlessRoot,
-      seedLegacyWorkspace: false,
+      seedBootstrapWorkspace: false,
     });
     assert.deepEqual(reloaded.resolve(projectless.workspace_id), projectless);
     assert.throws(
-      () => reloaded.environmentFor('extra', legacyRoot),
+      () => reloaded.environmentFor('extra', bootstrapRoot),
       /Workspace root changed/,
     );
 
     assert.throws(
-      () => resolveWorkspaceRelativePath(legacyRoot, '..', 'workdir'),
+      () => resolveWorkspaceRelativePath(bootstrapRoot, '..', 'workdir'),
       /escapes the selected workspace/,
     );
     assert.throws(
-      () => resolveWorkspaceRelativePath(legacyRoot, extraRoot, 'workdir'),
+      () => resolveWorkspaceRelativePath(bootstrapRoot, extraRoot, 'workdir'),
       /must be relative/,
     );
   } finally {
@@ -80,22 +80,22 @@ test('WorkspaceRegistry keeps registered and projectless workspaces separate', a
 
 test('WorkspaceRegistry creates a missing approved project directory only when requested', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-workspace-create-'));
-  const legacyRoot = path.join(tempRoot, 'legacy-project');
+  const bootstrapRoot = path.join(tempRoot, 'bootstrap-project');
   const missingRoot = path.join(tempRoot, 'new-project', 'nested');
-  await fs.mkdir(legacyRoot, { recursive: true });
+  await fs.mkdir(bootstrapRoot, { recursive: true });
 
   const environments = new EnvironmentRegistry({ resolvePaths: false });
   environments.register({
     id: 'workspace-create-test',
     platform: 'windows',
-    cwd: legacyRoot,
-    workspaceRoots: [legacyRoot],
+    cwd: bootstrapRoot,
+    workspaceRoots: [bootstrapRoot],
     permissionProfile: 'full-access',
   });
   const registry = new WorkspaceRegistry({
     environmentRegistry: environments,
     stateFile: path.join(tempRoot, 'state', 'workspaces.json'),
-    seedLegacyWorkspace: false,
+    seedBootstrapWorkspace: false,
   });
 
   try {
@@ -202,7 +202,7 @@ test('WorkspaceRegistry accepts a UTF-8 BOM in persisted state', async () => {
     const registry = new WorkspaceRegistry({
       environmentRegistry: environments,
       stateFile,
-      seedLegacyWorkspace: false,
+      seedBootstrapWorkspace: false,
     });
     assert.equal(registry.resolve('bom-project').root, await fs.realpath(projectRoot));
   } finally {
@@ -212,10 +212,10 @@ test('WorkspaceRegistry accepts a UTF-8 BOM in persisted state', async () => {
 
 test('Controller uses projectless contexts and requires approval for registered workspaces', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-contexts-'));
-  const legacyRoot = path.join(tempRoot, 'existing-project');
+  const bootstrapRoot = path.join(tempRoot, 'existing-project');
   const newRoot = path.join(tempRoot, 'new-project');
   const projectlessRoot = path.join(tempRoot, 'projectless');
-  await fs.mkdir(legacyRoot, { recursive: true });
+  await fs.mkdir(bootstrapRoot, { recursive: true });
 
   const controller = createControllerRuntime({
     workerPort: 0,
@@ -230,7 +230,7 @@ test('Controller uses projectless contexts and requires approval for registered 
   let worker = createWorkerRuntime({
     environment: {
       id: 'workspace-worker',
-      cwd: legacyRoot,
+      cwd: bootstrapRoot,
       permissionProfile: 'full-access',
     },
     workspaceStateFile,
@@ -283,20 +283,19 @@ test('Controller uses projectless contexts and requires approval for registered 
     const tools = createToolRegistry(controller);
     codeModeManager = tools.codeModeManager;
     const applyPatch = tools.registry.get('apply_patch');
-    const legacyPreamblePatch = [
+    const isolatedPatch = [
       '*** Begin Patch',
-      '*** Environment ID: workspace-worker',
       '*** Add File: isolated.txt',
       '+projectless only',
       '*** End Patch',
     ].join('\n');
     const isolated = await applyPatch.handler({
       workspace_context: first.workspace_context,
-      patch: legacyPreamblePatch,
+      patch: isolatedPatch,
     });
     assert.equal(isolated.structuredContent.workspace_kind, 'projectless');
     await assert.rejects(
-      fs.readFile(path.join(legacyRoot, 'isolated.txt'), 'utf8'),
+      fs.readFile(path.join(bootstrapRoot, 'isolated.txt'), 'utf8'),
       /ENOENT/,
     );
     assert.equal(
@@ -332,7 +331,7 @@ test('Controller uses projectless contexts and requires approval for registered 
       decision: 'approve',
     }, { extra: { _meta: { 'openai/session': 'workspace-test' } } });
     assert.equal(selected.structuredContent.workspace_kind, 'registered');
-    assert.equal(selected.structuredContent.workspace_root, await fs.realpath(legacyRoot));
+    assert.equal(selected.structuredContent.workspace_root, await fs.realpath(bootstrapRoot));
 
     const register = tools.registry.get('register_workspace');
     const registerPending = await register.handler({
@@ -392,7 +391,7 @@ test('Controller uses projectless contexts and requires approval for registered 
     worker = createWorkerRuntime({
       environment: {
         id: 'workspace-worker',
-        cwd: legacyRoot,
+        cwd: bootstrapRoot,
         permissionProfile: 'full-access',
       },
       workspaceStateFile,

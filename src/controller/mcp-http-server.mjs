@@ -12,22 +12,6 @@ import {
   resolveMaxMcpToolResultBytes,
 } from './response-guard.mjs';
 import {
-  EXEC_IMAGE_BRIDGE_UI_HTML,
-  EXEC_IMAGE_BRIDGE_UI_URI,
-  VIEW_IMAGE_LEGACY_UI_URI,
-  VIEW_IMAGE_UI_HTML,
-  VIEW_IMAGE_UI_URI,
-  VIEW_IMAGE_V6_UI_URI,
-  VIEW_IMAGE_V5_UI_URI,
-  VIEW_IMAGE_V4_UI_URI,
-  VIEW_IMAGE_V3_UI_URI,
-  VIEW_IMAGE_V2_UI_URI,
-} from '../ui/view-image-app.mjs';
-import {
-  SEND_FILE_UI_HTML,
-  SEND_FILE_UI_URI,
-} from '../ui/send-file-app.mjs';
-import {
   APPROVAL_UI_HTML,
   APPROVAL_UI_URI,
 } from '../ui/approval-app.mjs';
@@ -66,24 +50,6 @@ function createProtocolServer(
   });
 
   server.registerResource(
-    'ccm-exec-image-bridge-ui-legacy',
-    EXEC_IMAGE_BRIDGE_UI_URI,
-    {
-      title: 'CCM legacy exec image bridge',
-      description: 'Compatibility resource for clients that cached the former exec output template.',
-      mimeType: 'text/html;profile=mcp-app',
-    },
-    async () => ({
-      contents: [{
-        uri: EXEC_IMAGE_BRIDGE_UI_URI,
-        mimeType: 'text/html;profile=mcp-app',
-        text: EXEC_IMAGE_BRIDGE_UI_HTML,
-        _meta: { ui: { prefersBorder: false } },
-      }],
-    }),
-  );
-
-  server.registerResource(
     'ccm-file-transfer',
     new ResourceTemplate('ccm-file:///{token}', { list: undefined }),
     {
@@ -113,24 +79,6 @@ function createProtocolServer(
   );
 
   server.registerResource(
-    'ccm-send-file-ui',
-    SEND_FILE_UI_URI,
-    {
-      title: 'CCM file transfer',
-      description: 'Persistent ChatGPT file-transfer card.',
-      mimeType: 'text/html;profile=mcp-app',
-    },
-    async () => ({
-      contents: [{
-        uri: SEND_FILE_UI_URI,
-        mimeType: 'text/html;profile=mcp-app',
-        text: SEND_FILE_UI_HTML,
-        _meta: { ui: { prefersBorder: true } },
-      }],
-    }),
-  );
-
-  server.registerResource(
     'ccm-approval-ui',
     APPROVAL_UI_URI,
     {
@@ -147,34 +95,6 @@ function createProtocolServer(
       }],
     }),
   );
-
-  for (const [name, uri] of [
-    ['ccm-view-image-ui', VIEW_IMAGE_UI_URI],
-    ['ccm-view-image-ui-v6', VIEW_IMAGE_V6_UI_URI],
-    ['ccm-view-image-ui-v5', VIEW_IMAGE_V5_UI_URI],
-    ['ccm-view-image-ui-v4', VIEW_IMAGE_V4_UI_URI],
-    ['ccm-view-image-ui-v3', VIEW_IMAGE_V3_UI_URI],
-    ['ccm-view-image-ui-v2', VIEW_IMAGE_V2_UI_URI],
-    ['ccm-view-image-ui-v1', VIEW_IMAGE_LEGACY_UI_URI],
-  ]) {
-    server.registerResource(
-      name,
-      uri,
-      {
-        title: 'CCM image preview',
-        description: 'Renders view_image output and forwards the image into model context when the host supports MCP Apps image context.',
-        mimeType: 'text/html;profile=mcp-app',
-      },
-      async () => ({
-        contents: [{
-          uri,
-          mimeType: 'text/html;profile=mcp-app',
-          text: VIEW_IMAGE_UI_HTML,
-          _meta: { ui: { prefersBorder: false } },
-        }],
-      }),
-    );
-  }
 
   for (const tool of toolRegistry.listDirect()) {
     server.registerTool(tool.name, {

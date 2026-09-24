@@ -674,7 +674,7 @@ test('OAuth sidecar refreshes an invalid downstream session with that client ini
   }
 });
 
-test('OAuth sidecar declines legacy GET SSE instead of sharing one upstream stream', async () => {
+test('OAuth sidecar declines session-multiplexed GET SSE instead of sharing one upstream stream', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-oauth-get-'));
   const config = createConfig({
     rootDir: root,

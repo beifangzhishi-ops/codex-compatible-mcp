@@ -35,9 +35,7 @@ export class RemoteWorkerClient {
     runtime,
     workerId,
     takeoverToken = process.env.CCM_WORKER_TAKEOVER_TOKEN || null,
-    host = process.env.CCM_WORKER_HUB_CONNECT_HOST ||
-      process.env.CCM_WORKER_HUB_HOST ||
-      '127.0.0.1',
+    host = process.env.CCM_WORKER_HUB_CONNECT_HOST || '127.0.0.1',
     port = Number(process.env.CCM_WORKER_HUB_PORT || 18301),
     handshakeTimeoutMs = Number(
       process.env.CCM_WORKER_HANDSHAKE_TIMEOUT_MS || 10_000,

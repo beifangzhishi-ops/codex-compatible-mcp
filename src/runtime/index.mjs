@@ -15,7 +15,7 @@ export function createWorkerRuntime(options = {}) {
     environmentRegistry,
     stateFile: options.workspaceStateFile,
     projectlessRoot: options.projectlessRoot,
-    seedLegacyWorkspace: options.seedLegacyWorkspace !== false,
+    seedBootstrapWorkspace: options.seedBootstrapWorkspace !== false,
   });
 
   const executorRegistry = options.executorRegistry || new ExecutorRegistry();

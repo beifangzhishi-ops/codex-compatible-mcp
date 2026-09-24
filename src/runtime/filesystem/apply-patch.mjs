@@ -7,7 +7,6 @@ const ADD = '*** Add File: ';
 const DELETE = '*** Delete File: ';
 const UPDATE = '*** Update File: ';
 const MOVE = '*** Move to: ';
-const ENVIRONMENT = '*** Environment ID: ';
 const EOF = '*** End of File';
 
 function patchError(message, line = null) {
@@ -44,14 +43,7 @@ export function parsePatch(patchText) {
   }
 
   let index = 1;
-  let environmentId = null;
   const hunks = [];
-
-  if (marker(lines[index]).startsWith(ENVIRONMENT)) {
-    environmentId = marker(lines[index]).slice(ENVIRONMENT.length).trim();
-    if (!environmentId) throw patchError('environment_id cannot be empty', index + 1);
-    index += 1;
-  }
   while (index < lines.length - 1) {
     const control = marker(lines[index]);
 
@@ -172,7 +164,7 @@ export function parsePatch(patchText) {
     throw patchError('unknown patch marker: ' + control, index + 1);
   }
 
-  return { environmentId, hunks };
+  return { hunks };
 }
 
 function splitText(text) {
@@ -300,9 +292,6 @@ export function applySingleFilePatchToText({
     throw patchError("single-file patch mode must be 'add' or 'update'");
   }
   const parsed = parsePatch(patchText);
-  if (parsed.environmentId) {
-    throw patchError('single-file text patches do not accept Environment ID');
-  }
   if (parsed.hunks.length !== 1) {
     throw patchError('single-file text patches require exactly one file hunk');
   }
@@ -448,25 +437,9 @@ export async function applyPatchToEnvironment({
   environment,
   patch: patchText,
   workdir: requestedWorkdir,
-  environmentId,
 }) {
   if (!environment) throw patchError('environment is required');
   const parsed = parsePatch(patchText);
-
-  if (parsed.environmentId &&
-      environmentId &&
-      parsed.environmentId !== environmentId) {
-    throw patchError(
-      'patch environment_id ' + parsed.environmentId +
-      ' does not match selected environment ' + environmentId,
-    );
-  }
-  if (parsed.environmentId && parsed.environmentId !== environment.id) {
-    throw patchError(
-      'patch targets environment ' + parsed.environmentId +
-      ' but Worker environment is ' + environment.id,
-    );
-  }
 
   const workdir = resolveWorkdir(environment, requestedWorkdir);
   const resolved = parsed.hunks.map((hunk) => ({

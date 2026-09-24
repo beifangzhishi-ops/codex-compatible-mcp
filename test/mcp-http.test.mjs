@@ -99,8 +99,9 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(approvalTool?._meta?.ui?.resourceUri, APPROVAL_UI_URI);
     assert.equal(listed.tools.some((tool) => tool.name === 'select_workspace'), false);
     assert.equal(listed.tools.some((tool) => tool.name === 'register_workspace'), false);
-    assert.equal(listed.tools.some((tool) => tool.name === 'request_escalated_exec'), false);
-    assert.equal(listed.tools.some((tool) => tool.name === 'respond_to_escalation'), false);
+    const sendFileTool = listed.tools.find((tool) => tool.name === 'send_file');
+    assert.ok(sendFileTool);
+    assert.equal(sendFileTool._meta, undefined);
     const approvalResource = await client.readResource({ uri: APPROVAL_UI_URI });
     assert.equal(approvalResource.contents[0].text, APPROVAL_UI_HTML);
     assert.equal(approvalResource.contents[0]._meta.ui.prefersBorder, true);
@@ -313,16 +314,25 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       },
     });
     assert.equal(sendFileResult.isError, undefined);
-    assert.equal(
-      sendFileResult.content.some((item) => item.type === 'resource_link'),
-      false,
+    const resourceLink = sendFileResult.content.find(
+      (item) => item.type === 'resource_link',
     );
+    assert.ok(resourceLink);
     assert.equal(
       sendFileResult.structuredContent.mime_type,
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     );
     assert.equal(sendFileResult.structuredContent.byte_length, docBytes.length);
-    const resourceUri = sendFileResult.structuredContent.resource_uri;
+    assert.equal(resourceLink.name, 'preview.docx');
+    assert.equal(resourceLink.mimeType, sendFileResult.structuredContent.mime_type);
+    assert.equal(resourceLink.size, docBytes.length);
+    assert.equal(resourceLink._meta.sha256, sendFileResult.structuredContent.sha256);
+    assert.equal(
+      resourceLink._meta.source_environment_id,
+      sendFileResult.structuredContent.environment_id,
+    );
+    const resourceUri = resourceLink.uri;
+    assert.equal(resourceUri, sendFileResult.structuredContent.resource_uri);
     assert.match(resourceUri, /^ccm-file:\/\/\//);
     const readFileResult = await client.readResource({ uri: resourceUri });
     assert.equal(readFileResult.contents.length, 1);

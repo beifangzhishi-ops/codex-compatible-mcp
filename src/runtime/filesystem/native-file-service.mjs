@@ -53,7 +53,6 @@ export class NativeFileService {
       environment,
       patch: args.patch,
       workdir,
-      environmentId: args.environment_id || environment.id,
     });
   }
 

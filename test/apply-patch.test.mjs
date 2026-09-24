@@ -54,7 +54,6 @@ test('apply_patch supports add, delete, update, and move', async () => {
 
     const result = await applyPatchToEnvironment({
       environment: fixture.environment,
-      environmentId: fixture.environment.id,
       patch,
     });
 
@@ -153,19 +152,6 @@ test('workspace-write rejects targets outside workspace roots', async () => {
     await cleanup(fixture.root);
   }
 });
-
-test('patch environment preamble is parsed and enforced', () => {
-  const parsed = parsePatch([
-    '*** Begin Patch',
-    '*** Environment ID: remote-a',
-    '*** Add File: hello.txt',
-    '+hello',
-    '*** End Patch',
-  ].join('\n'));
-  assert.equal(parsed.environmentId, 'remote-a');
-  assert.equal(parsed.hunks.length, 1);
-});
-
 
 test('workspace-write rejects symlink or junction escapes', async () => {
   const fixture = await tempEnvironment();

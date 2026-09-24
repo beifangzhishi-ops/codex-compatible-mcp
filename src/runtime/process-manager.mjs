@@ -42,7 +42,7 @@ function generateChunkId() {
   return crypto.randomBytes(3).toString('hex');
 }
 
-function resolveLegacyWorkdir(environment, requested) {
+function resolveEnvironmentWorkdir(environment, requested) {
   if (!requested) return environment.cwd;
   if (path.isAbsolute(requested)) return path.normalize(requested);
   return path.resolve(environment.cwd, requested);
@@ -103,7 +103,7 @@ export class ProcessManager {
     const executor = this.executorRegistry.resolve(environment);
     const cwd = args.workspace_id
       ? resolveWorkspaceRelativePath(environment.cwd, args.workdir, 'workdir')
-      : resolveLegacyWorkdir(environment, args.workdir);
+      : resolveEnvironmentWorkdir(environment, args.workdir);
     const basePermissionProfile = resolvePermissionProfile(
       environment,
       args.sandbox_permissions,

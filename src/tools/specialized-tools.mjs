@@ -1,6 +1,4 @@
 ﻿import * as z from 'zod/v4';
-import { SEND_FILE_UI_URI } from '../ui/send-file-app.mjs';
-
 function toolError(error) {
   return {
     content: [{ type: 'text', text: String(error?.message || error) }],
@@ -40,11 +38,25 @@ function fileResourceResult(value, environmentId, fileTransferStore) {
   }
   const transfer = fileTransferStore.put(value, { environmentId });
   return {
-    content: [{
-      type: 'text',
-      text: 'Attached ' + value.filename + ' from ' + environmentId +
-        ' (' + value.byte_length + ' bytes, sha256 ' + value.sha256 + ').',
-    }],
+    content: [
+      {
+        type: 'text',
+        text: 'Attached ' + value.filename + ' from ' + environmentId +
+          ' (' + value.byte_length + ' bytes, sha256 ' + value.sha256 + ').',
+      },
+      {
+        type: 'resource_link',
+        uri: transfer.uri,
+        name: value.filename,
+        description: 'File transferred from CCM environment ' + environmentId,
+        mimeType: value.mime_type,
+        size: value.byte_length,
+        _meta: {
+          sha256: value.sha256,
+          source_environment_id: environmentId,
+        },
+      },
+    ],
     structuredContent: {
       capability: 'send_file',
       environment_id: environmentId,
@@ -147,22 +159,17 @@ export function registerSpecializedTools(registry, runtime) {
     provider: 'ccm-specialized',
     provenance: 'ccm-native-file-transfer',
     surfaces: { direct: true, codeMode: false },
-    tags: ['file', 'attachment', 'preview', 'transfer', 'gpt'],
+    tags: ['file', 'attachment', 'transfer', 'gpt'],
     environmentRequirements: {
       capabilities: ['sendFile'],
     },
-    mcpMeta: {
-      ui: { resourceUri: SEND_FILE_UI_URI },
-      'ui/resourceUri': SEND_FILE_UI_URI,
-      'openai/outputTemplate': SEND_FILE_UI_URI,
-    },
     supportsParallel: false,
     description: [
-      'Send exactly one file per call from a CCM environment to the GPT client through the direct ChatGPT file-card handoff. If the user needs multiple files, call send_file sequentially and wait for each call to return before starting the next. Never issue concurrent or parallel send_file calls.',
-      'Use send_file only when the user actually needs the file in chat for preview, download, upload to another tool, or handoff.',
+      'Send exactly one file per call from a CCM environment to the GPT client as a native MCP file attachment. If the user needs multiple files, call send_file sequentially and wait for each call to return before starting the next. Never issue concurrent or parallel send_file calls.',
+      'Use send_file only when the user actually needs the file in chat for download, opening, upload to another tool, or handoff.',
       'workspace_context is required and determines the Worker. Relative paths are resolved from that context root; absolute paths remain absolute on the selected Worker.',
       'If the user has not selected a project, automatically obtain a projectless context first through ccm.create_projectless_context; do not ask the user to choose or register a temporary directory.',
-      'Do NOT use send_file merely so the model can inspect, review, analyze, or verify a local file. If the file can be examined inside CCM, prefer local reading, view_image, command-line inspection, or a temporary local preview instead. This avoids unnecessary file materialization and user approval prompts.',
+      'Do NOT use send_file merely so the model can inspect, review, analyze, or verify a local file. If the file can be examined inside CCM, prefer local reading, view_image, command-line inspection, or a temporary local preview instead.',
       'Before calling send_file, make it clear to the user that the file needs to be transferred into chat. This preserves the original file bytes and does not use BMG or upload the file to ChatGPT Library.',
       'Use this for Word, PDF, Excel, PowerPoint, archives, images, and other local files only after locating the exact path and determining that an actual user-facing transfer is needed.',
     ].join('\n\n'),

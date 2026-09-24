@@ -78,7 +78,7 @@ export class WorkspaceRegistry {
     environmentRegistry,
     stateFile = defaultRegistryFile(),
     projectlessRoot = defaultProjectlessRoot(),
-    seedLegacyWorkspace = true,
+    seedBootstrapWorkspace = true,
   } = {}) {
     if (!environmentRegistry) {
       throw new Error('WorkspaceRegistry requires environmentRegistry.');
@@ -89,7 +89,7 @@ export class WorkspaceRegistry {
     this.registered = new Map();
     this.projectless = new Map();
     this.#load();
-    if (seedLegacyWorkspace) this.#seedLegacyWorkspace();
+    if (seedBootstrapWorkspace) this.#seedBootstrapWorkspace();
   }
 
   #load() {
@@ -139,7 +139,7 @@ export class WorkspaceRegistry {
     );
   }
 
-  #seedLegacyWorkspace() {
+  #seedBootstrapWorkspace() {
     const environment = this.environmentRegistry.resolve();
     let root;
     try {
@@ -153,7 +153,7 @@ export class WorkspaceRegistry {
     if (existing) return;
 
     let id = safeWorkspaceId(path.basename(root));
-    if (this.registered.has(id)) id = 'legacy-' + id;
+    if (this.registered.has(id)) id = 'bootstrap-' + id;
     this.registered.set(id, {
       id,
       kind: 'registered',

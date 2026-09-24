@@ -1031,8 +1031,8 @@ async function handleProtectedMcp(request, response, runtime, url) {
         sendUpstreamResponse(response, direct);
         return;
       }
-      // The legacy sidecar multiplexes POST requests onto one upstream MCP
-      // session. Proxying multiple downstream GET/SSE streams onto that same
+      // The session-multiplexed protocol path maps POST requests onto one
+      // upstream MCP session. Proxying multiple downstream GET/SSE streams onto that same
       // session makes the upstream SDK reject concurrent clients with 409
       // ("Only one SSE stream is allowed per session"). Streamable HTTP
       // explicitly permits 405 when a server does not offer a GET SSE stream,
