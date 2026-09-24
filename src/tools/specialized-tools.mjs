@@ -65,7 +65,6 @@ function fileResourceResult(value, environmentId, fileTransferStore) {
       mime_type: value.mime_type,
       byte_length: value.byte_length,
       sha256: value.sha256,
-      resource_uri: transfer.uri,
     },
   };
 }
@@ -173,6 +172,7 @@ export function registerSpecializedTools(registry, runtime) {
       'Before calling send_file, make it clear to the user that the file needs to be transferred into chat. This preserves the original file bytes and does not use BMG or upload the file to ChatGPT Library.',
       'After send_file succeeds, the final assistant response must explicitly present the host-provided file reference or attachment so it remains visible and downloadable after tool execution ends. Do not finish with only a filename or textual success message.',
       'Never invent or reconstruct a ChatGPT file ID, sandbox path, download URL, or attachment reference. Use only the file reference actually exposed by the host for this send_file result.',
+      'The ccm-file:/// URI carried by the MCP resource_link is an internal CCM resource address for the host. It is NEVER a ChatGPT file_id, NEVER starts with file_, and must NEVER be passed to a ChatGPT file-id field, rewritten into a file_ value, or used as the final user-facing attachment reference. Do not mention or expose the ccm-file URI to the user. Wait for and use only the host-materialized attachment/file reference.',
       'Treat 1 KiB (1024 bytes) as the operational minimum for reliable ChatGPT attachment downloads. Files smaller than 1 KiB may still be transferred byte-for-byte, but some ChatGPT clients can remain stuck connecting when downloading them. Never pad, rewrite, or otherwise alter the source file to reach this threshold; warn the user instead when a sub-1-KiB file is being handed off.',
       'Use this for Word, PDF, Excel, PowerPoint, archives, images, and other local files only after locating the exact path and determining that an actual user-facing transfer is needed.',
     ].join('\n\n'),

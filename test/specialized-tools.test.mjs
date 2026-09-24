@@ -111,6 +111,9 @@ test('send_file is Direct-only and returns one native resource link using worksp
   assert.match(sendFile.description, /do not finish with only a filename/i);
   assert.match(sendFile.description, /never invent or reconstruct a ChatGPT file ID/i);
   assert.match(sendFile.description, /host-provided file reference/i);
+  assert.match(sendFile.description, /ccm-file:\/\/\//i);
+  assert.match(sendFile.description, /NEVER a ChatGPT file_id/i);
+  assert.match(sendFile.description, /must NEVER be passed to a ChatGPT file-id field/i);
   assert.match(sendFile.description, /1 KiB \(1024 bytes\)/i);
   assert.match(sendFile.description, /never pad, rewrite, or otherwise alter/i);
   assert.match(sendFile.inputSchema.path.description, /exactly one file path/i);
@@ -139,12 +142,9 @@ test('send_file is Direct-only and returns one native resource link using worksp
     result.content.filter((item) => item.type === 'resource_link').length,
     1,
   );
-  assert.match(
-    result.structuredContent.resource_uri,
-    /^ccm-file:\/\/\/[0-9a-f-]+$/i,
-  );
-  assert.equal(resourceLink.uri, result.structuredContent.resource_uri);
-  const token = result.structuredContent.resource_uri.split('/').at(-1);
+  assert.equal(result.structuredContent.resource_uri, undefined);
+  assert.match(resourceLink.uri, /^ccm-file:\/\/\/[0-9a-f-]+$/i);
+  const token = resourceLink.uri.split('/').at(-1);
   const stored = runtime.fileTransferStore.get(token);
   assert.ok(stored);
   assert.equal(

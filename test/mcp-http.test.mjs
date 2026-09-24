@@ -335,9 +335,9 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     );
     assert.equal(sendFileResult.structuredContent.byte_length, docBytes.length);
-    const resourceUri = sendFileResult.structuredContent.resource_uri;
+    assert.equal(sendFileResult.structuredContent.resource_uri, undefined);
+    const resourceUri = resourceLink.uri;
     assert.match(resourceUri, /^ccm-file:\/\/\//);
-    assert.equal(resourceLink.uri, resourceUri);
     assert.equal(resourceLink.mimeType, sendFileResult.structuredContent.mime_type);
     const readFileResult = await client.readResource({ uri: resourceUri });
     assert.equal(readFileResult.contents.length, 1);
