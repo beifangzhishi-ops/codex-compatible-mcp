@@ -204,16 +204,40 @@ test('core tool surface keeps workspace lifecycle deferred and centralizes appro
     /absolute paths outside the projectless root/,
   );
   assert.match(
+    registry.get('create_projectless_context').description,
+    /awaiting approval.*wait.*instead of creating projectless context/i,
+  );
+  assert.match(
     registry.get('select_workspace').description,
     /Do not select a workspace merely to read or search/,
+  );
+  assert.match(
+    registry.get('select_workspace').description,
+    /do not switch to projectless context while waiting/i,
   );
   assert.match(
     registry.get('register_workspace').description,
     /Do not register a directory merely to gain read access/,
   );
   assert.match(
+    registry.get('register_workspace').description,
+    /do not switch to projectless context while waiting/i,
+  );
+  assert.match(
     registry.get('exec_command').description,
     /does not narrow filesystem reads below the environment's sandbox_read_scope/,
+  );
+  assert.match(
+    registry.get('exec_command').description,
+    /awaiting approval.*wait for that action to resolve/i,
+  );
+  assert.match(
+    registry.get('apply_patch').description,
+    /awaiting approval.*use its registered workspace_context instead/i,
+  );
+  assert.match(
+    registry.get('view_image').description,
+    /awaiting approval.*use its registered workspace_context instead/i,
   );
 
   for (const name of [
@@ -359,6 +383,14 @@ test('core tool surface keeps workspace lifecycle deferred and centralizes appro
   assert.equal(workspacePending.structuredContent.kind, 'workspace');
   assert.equal(workspacePending.structuredContent.operation, 'select_workspace');
   assert.equal(workspacePending.structuredContent.approval_required, true);
+  assert.match(
+    workspacePending.structuredContent.instruction,
+    /wait for this frozen workspace action to resolve/i,
+  );
+  assert.match(
+    workspacePending.structuredContent.instruction,
+    /do not create or switch to projectless context while waiting/i,
+  );
   assert.equal(workspacePending._meta, undefined);
 
   const { codeModeManager } = registerArchitectureTools(registry);
@@ -447,6 +479,14 @@ test('core tool surface keeps workspace lifecycle deferred and centralizes appro
     assert.equal(registerPending.approval_required, true);
     assert.equal(registerPending.create_if_missing, true);
     assert.match(registerPending.justification, /create, register, and enter/i);
+    assert.match(
+      registerPending.instruction,
+      /wait for this frozen workspace action to resolve/i,
+    );
+    assert.match(
+      registerPending.instruction,
+      /do not create or switch to projectless context while waiting/i,
+    );
   } finally {
     codeModeManager.close();
   }

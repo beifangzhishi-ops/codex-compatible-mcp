@@ -102,6 +102,14 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
 
   try {
     await client.connect(transport);
+    assert.match(
+      client.getInstructions(),
+      /Do not use projectless as a fallback while select_workspace or register_workspace is awaiting approval/i,
+    );
+    assert.match(
+      client.getInstructions(),
+      /wait for that frozen workspace action to resolve.*do not create or switch to a projectless context/i,
+    );
     const listed = await client.listTools();
     const names = listed.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, [
