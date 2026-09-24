@@ -4,6 +4,8 @@ CCM is a Codex-inspired execution harness for MCP clients. It focuses on a small
 
 CCM does **not** attempt to reproduce Codex's model loop or own the host application's conversation history. The MCP client remains the orchestrator; CCM owns the execution world.
 
+Before modifying this repository, read and follow [AGENTS.md](AGENTS.md) for repository-specific agent instructions.
+
 ## Status
 
 CCM is currently targeting **v0.1** as its first public release.
