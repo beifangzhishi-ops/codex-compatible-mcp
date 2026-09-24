@@ -281,7 +281,14 @@ ChatGPT-side CCM/plugin/connector rebuilds are **user-operated**. The assistant 
 When a Direct-tool schema change means the ChatGPT registration needs to be rebuilt, the assistant should stop at the handoff boundary and provide only the information the user needs to rebuild it:
 
 1. Resolve the current public MCP resource from `CCM_RESOURCE` (normally from ignored `config/ccm.env`) and give that MCP address to the user.
-2. Do **not** print or copy the local approval secret or its complete path into chat. The assistant does not transfer that secret through a CCM tool. The user retrieves the local approval secret on the Controller machine (or through another user-controlled secure channel) and enters it in the ChatGPT UI themselves.
+2. If the host cache needs to be refreshed or the tools need to be rebuilt, give the user the following absolute-path PowerShell command so they can print the current CCM key and URL in their own terminal. Do not copy the printed key into chat:
+
+   ```powershell
+   $ccmKey = (Get-Content -LiteralPath 'C:\Users\Songjx\Documents\ChatGPT\codex-compatible-mcp\.state\ccm-approval-secret.txt' -Raw).Trim()
+   $ccmUrl = ((Get-Content -LiteralPath 'C:\Users\Songjx\Documents\ChatGPT\codex-compatible-mcp\config\ccm.env' | Where-Object { $_ -match '^CCM_RESOURCE=' } | Select-Object -First 1) -replace '^CCM_RESOURCE=', '').Trim().Trim('"')
+   Write-Output ("CCM key: " + $ccmKey)
+   Write-Output ("CCM URL: " + $ccmUrl)
+   ```
 3. Do not use BMG to operate ChatGPT settings, rename the existing connector, create a replacement connector/plugin, or complete OAuth/consent for the user.
 4. Do not run `tools/chatgpt-schema-refresh/refresh.ps1` by default. It is a manual/debugging utility; normal assistant behavior is to provide the current MCP address and leave local approval-secret entry to the user.
 5. If the current ChatGPT UI requires an archive upload, do not proactively build or upload a plugin archive as part of rebuild. Only build/provide one when the user explicitly asks for the archive.
