@@ -16,6 +16,10 @@ import {
   APPROVAL_UI_HTML,
   APPROVAL_UI_URI,
 } from '../src/ui/approval-app.mjs';
+import {
+  SEND_FILE_HANDOFF_UI_HTML,
+  SEND_FILE_HANDOFF_UI_URI,
+} from '../src/ui/send-file-handoff-app.mjs';
 
 test('MCP lists and calls tools through a Remote Worker', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-mcp-'));
@@ -101,10 +105,16 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(listed.tools.some((tool) => tool.name === 'register_workspace'), false);
     const sendFileTool = listed.tools.find((tool) => tool.name === 'send_file');
     assert.ok(sendFileTool);
-    assert.equal(sendFileTool._meta, undefined);
+    assert.equal(sendFileTool._meta?.ui?.resourceUri, SEND_FILE_HANDOFF_UI_URI);
+    assert.deepEqual(Object.keys(sendFileTool._meta || {}), ['ui']);
     const approvalResource = await client.readResource({ uri: APPROVAL_UI_URI });
     assert.equal(approvalResource.contents[0].text, APPROVAL_UI_HTML);
     assert.equal(approvalResource.contents[0]._meta.ui.prefersBorder, true);
+    const handoffResource = await client.readResource({
+      uri: SEND_FILE_HANDOFF_UI_URI,
+    });
+    assert.equal(handoffResource.contents[0].text, SEND_FILE_HANDOFF_UI_HTML);
+    assert.equal(handoffResource.contents[0]._meta.ui.prefersBorder, false);
 
     const projectless = await client.callTool({
       name: 'exec',
@@ -314,25 +324,16 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       },
     });
     assert.equal(sendFileResult.isError, undefined);
-    const resourceLink = sendFileResult.content.find(
-      (item) => item.type === 'resource_link',
+    assert.equal(
+      sendFileResult.content.some((item) => item.type === 'resource_link'),
+      false,
     );
-    assert.ok(resourceLink);
     assert.equal(
       sendFileResult.structuredContent.mime_type,
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     );
     assert.equal(sendFileResult.structuredContent.byte_length, docBytes.length);
-    assert.equal(resourceLink.name, 'preview.docx');
-    assert.equal(resourceLink.mimeType, sendFileResult.structuredContent.mime_type);
-    assert.equal(resourceLink.size, docBytes.length);
-    assert.equal(resourceLink._meta.sha256, sendFileResult.structuredContent.sha256);
-    assert.equal(
-      resourceLink._meta.source_environment_id,
-      sendFileResult.structuredContent.environment_id,
-    );
-    const resourceUri = resourceLink.uri;
-    assert.equal(resourceUri, sendFileResult.structuredContent.resource_uri);
+    const resourceUri = sendFileResult.structuredContent.resource_uri;
     assert.match(resourceUri, /^ccm-file:\/\/\//);
     const readFileResult = await client.readResource({ uri: resourceUri });
     assert.equal(readFileResult.contents.length, 1);

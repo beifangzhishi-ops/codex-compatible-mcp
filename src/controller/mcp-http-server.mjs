@@ -15,6 +15,10 @@ import {
   APPROVAL_UI_HTML,
   APPROVAL_UI_URI,
 } from '../ui/approval-app.mjs';
+import {
+  SEND_FILE_HANDOFF_UI_HTML,
+  SEND_FILE_HANDOFF_UI_URI,
+} from '../ui/send-file-handoff-app.mjs';
 
 const SERVER_INFO = { name: 'ccm', version: '0.1.0' };
 
@@ -34,7 +38,7 @@ function createProtocolServer(
       'When the user explicitly asks to plan, discuss before implementation, or re-plan and a durable multi-turn Plan is useful, discover ccm.plan_patch / ccm.plan_read through tool_search. plan_patch carries Codex-style planning discipline: inspect discoverable facts without tracked-state mutation, resolve user intent/tradeoffs, then resolve implementation/test details until the Plan is decision-complete; keep the Plan current by removing or rewriting stale, completed, invalidated, or superseded content. Unless the user clearly and explicitly instructs execution/implementation, remain in planning. Imperative task wording, Plan updates, completed inspection, workspace approval, registration approval, or sandbox escalation approval is not execution authorization. CCM does not maintain a Plan-Mode state machine. Once the user explicitly asks to execute/implement, continue implementation; plan_read is a neutral reference lookup and never switches the workflow back to planning.',
       'If an operational tool requires workspace_context and the user did not explicitly select a project or directory, automatically discover ccm.create_projectless_context with tool_search and invoke it through exec. Specify environment_id there when a particular Worker is required; omit it to use the primary environment. workspace_context supplies Worker routing, cwd/session ownership, and the restricted-write root; it is not the filesystem read boundary. Do not ask the user to choose a directory and do not register/select an arbitrary temporary directory merely to obtain context.',
       'An environment has no GPT-visible default workspace or project directory. Do not infer project location from Worker bootstrap cwd, CCM_WORKSPACE, Documents, Temp, a drive root, or any other internal path. CCM does not define a Projects Root; new-project placement comes from the user or upper-layer orchestrator.',
-      'Use direct apply_patch, view_image, send_file, and receive_file for common file operations. They require workspace_context. send_file and receive_file are strictly single-file: for multiple files, invoke the relevant tool sequentially and wait for each call to return before starting the next; never issue concurrent or parallel file-transfer calls. Relative send_file paths are resolved from the selected workspace/projectless root; absolute send_file paths remain absolute on the selected Worker. receive_file writes only inside the selected context root and accepts only relative destination paths.',
+      'Use direct apply_patch, view_image, send_file, and receive_file for common file operations. They require workspace_context. send_file and receive_file are strictly single-file: for multiple files, invoke the relevant tool sequentially and wait for each call to return before starting the next; never issue concurrent or parallel file-transfer calls. send_file hands one exact Worker file into the current ChatGPT conversation through the internal persistent CCM file bridge and a conversation-scoped ChatGPT upload with library=false; its bridge URI is not a user-facing download entry. Relative send_file paths are resolved from the selected workspace/projectless root; absolute send_file paths remain absolute on the selected Worker. receive_file writes only inside the selected context root and accepts only relative destination paths.',
       'For bulk image inspection, view_image is also available through exec; batch independent image calls with parallel=true when useful.',
       'Use exec/wait for structured nested capability dispatch; host Code Mode remains responsible for JavaScript/control flow.',
       'For multi-step CCM work, prefer exec for deferred/Code Mode capabilities and specialized ccm-extra tools. Workspace lifecycle tools such as select_workspace/register_workspace are deferred: discover them with tool_search and invoke them through exec. If they return approval_required=true, use the top-level request_approval tool with the returned approval_id. Direct operational tools may also support nested exec calls when their surface allows it. Use parallel=true only for independent calls.',
@@ -92,6 +96,24 @@ function createProtocolServer(
         mimeType: 'text/html;profile=mcp-app',
         text: APPROVAL_UI_HTML,
         _meta: { ui: { prefersBorder: true } },
+      }],
+    }),
+  );
+
+  server.registerResource(
+    'ccm-send-file-handoff',
+    SEND_FILE_HANDOFF_UI_URI,
+    {
+      title: 'CCM file handoff',
+      description: 'Transfers a CCM bridge resource into the current ChatGPT conversation file.',
+      mimeType: 'text/html;profile=mcp-app',
+    },
+    async () => ({
+      contents: [{
+        uri: SEND_FILE_HANDOFF_UI_URI,
+        mimeType: 'text/html;profile=mcp-app',
+        text: SEND_FILE_HANDOFF_UI_HTML,
+        _meta: { ui: { prefersBorder: false } },
       }],
     }),
   );

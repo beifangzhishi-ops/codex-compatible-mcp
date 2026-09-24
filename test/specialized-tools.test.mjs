@@ -5,6 +5,7 @@ import { registerSpecializedTools } from '../src/tools/specialized-tools.mjs';
 import { ToolRegistry } from '../src/tools/tool-registry.mjs';
 import { FileTransferStore } from '../src/controller/file-transfer-store.mjs';
 import { registerArchitectureTools } from '../src/tools/architecture-tools.mjs';
+import { SEND_FILE_HANDOFF_UI_URI } from '../src/ui/send-file-handoff-app.mjs';
 
 function fakeRuntime() {
   const calls = [];
@@ -91,7 +92,7 @@ function fakeRuntime() {
   };
 }
 
-test('send_file is Direct-only and returns one native resource link using workspace_context', async () => {
+test('send_file is Direct-only and returns a hidden bridge handoff using workspace_context', async () => {
   const runtime = fakeRuntime();
   runtime.environmentRegistry.resolve = (environmentId) => ({
     id: environmentId || 'windows-worker',
@@ -109,33 +110,27 @@ test('send_file is Direct-only and returns one native resource link using worksp
   assert.match(sendFile.description, /never issue concurrent or parallel/i);
   assert.match(sendFile.inputSchema.path.description, /exactly one file path/i);
   assert.match(sendFile.inputSchema.path.description, /do not call send_file in parallel/i);
-  assert.equal(sendFile.mcpMeta, undefined);
+  assert.deepEqual(sendFile.mcpMeta, {
+    ui: { resourceUri: SEND_FILE_HANDOFF_UI_URI },
+  });
+  assert.deepEqual(Object.keys(sendFile.mcpMeta), ['ui']);
 
   const result = await registry.get('ccm-extra.send_file').handler({
     workspace_context: '00000000-0000-4000-8000-000000000001',
     path: 'C:\\docs\\report.docx',
   });
   assert.equal(result.isError, undefined);
-  assert.equal(result.content.length, 2);
+  assert.equal(result.content.length, 1);
   assert.equal(result.content[0].type, 'text');
-  const resourceLink = result.content.find(
-    (item) => item.type === 'resource_link',
-  );
-  assert.ok(resourceLink);
-  assert.equal(resourceLink.name, 'report.docx');
   assert.equal(
-    resourceLink.mimeType,
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    result.content.some((item) => item.type === 'resource_link'),
+    false,
   );
-  assert.equal(resourceLink.size, 4);
-  assert.equal(resourceLink._meta.sha256, 'test-sha256');
-  assert.equal(resourceLink._meta.source_environment_id, 'worker-a');
   assert.match(
-    resourceLink.uri,
+    result.structuredContent.resource_uri,
     /^ccm-file:\/\/\/[0-9a-f-]+$/i,
   );
-  assert.equal(result.structuredContent.resource_uri, resourceLink.uri);
-  const token = resourceLink.uri.split('/').at(-1);
+  const token = result.structuredContent.resource_uri.split('/').at(-1);
   const stored = runtime.fileTransferStore.get(token);
   assert.ok(stored);
   assert.equal(
