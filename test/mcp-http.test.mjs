@@ -117,28 +117,26 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       'exec',
       'exec_command',
       'list_projects',
-      'receive_file',
       'request_approval',
       'resolve_pending_action',
-      'send_file',
       'tool_search',
       'view_image',
       'wait',
       'write_stdin',
     ]);
-    const receiveFileTool = listed.tools.find((tool) => tool.name === 'receive_file');
-    assert.ok(receiveFileTool);
-    assert.deepEqual(receiveFileTool._meta?.['openai/fileParams'], ['file']);
+    const execTool = listed.tools.find((tool) => tool.name === 'exec');
+    assert.ok(execTool);
+    assert.deepEqual(execTool._meta?.['openai/fileParams'], ['file']);
     assert.deepEqual(
-      receiveFileTool.inputSchema.properties.file.required,
+      execTool.inputSchema.properties.file.required,
       ['download_url', 'file_id'],
     );
     assert.equal(
-      receiveFileTool.inputSchema.properties.file.additionalProperties,
+      execTool.inputSchema.properties.file.additionalProperties,
       false,
     );
     assert.deepEqual(
-      Object.keys(receiveFileTool.inputSchema.properties.file.properties).sort(),
+      Object.keys(execTool.inputSchema.properties.file.properties).sort(),
       ['download_url', 'file_id', 'file_name', 'mime_type'],
     );
     assert.deepEqual(
@@ -152,9 +150,40 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(approvalTool?._meta?.ui?.resourceUri, APPROVAL_UI_URI);
     assert.equal(listed.tools.some((tool) => tool.name === 'select_workspace'), false);
     assert.equal(listed.tools.some((tool) => tool.name === 'register_workspace'), false);
-    const sendFileTool = listed.tools.find((tool) => tool.name === 'send_file');
+    assert.equal(listed.tools.some((tool) => tool.name === 'send_file'), false);
+    assert.equal(listed.tools.some((tool) => tool.name === 'receive_file'), false);
+
+    const receiveSearch = await client.callTool({
+      name: 'tool_search',
+      arguments: { query: 'receive_file', limit: 5 },
+    });
+    const receiveFileTool = receiveSearch.structuredContent.tools.find(
+      (tool) => tool.qualified_name === 'ccm-extra.receive_file',
+    );
+    assert.ok(receiveFileTool);
+    assert.deepEqual(receiveFileTool.surfaces, ['deferred', 'code_mode']);
+    assert.deepEqual(
+      receiveFileTool.input_schema.properties.file.required,
+      ['download_url', 'file_id'],
+    );
+    assert.equal(
+      receiveFileTool.input_schema.properties.file.additionalProperties,
+      false,
+    );
+    assert.deepEqual(
+      Object.keys(receiveFileTool.input_schema.properties.file.properties).sort(),
+      ['download_url', 'file_id', 'file_name', 'mime_type'],
+    );
+
+    const sendSearch = await client.callTool({
+      name: 'tool_search',
+      arguments: { query: 'send_file', limit: 5 },
+    });
+    const sendFileTool = sendSearch.structuredContent.tools.find(
+      (tool) => tool.qualified_name === 'ccm-extra.send_file',
+    );
     assert.ok(sendFileTool);
-    assert.equal(sendFileTool._meta, undefined);
+    assert.deepEqual(sendFileTool.surfaces, ['deferred', 'code_mode']);
     assert.match(
       sendFileTool.description,
       /include the host-generated native ChatGPT file attachment object in the final response, not its file ID as text/i,
@@ -399,10 +428,16 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const docBytes = Buffer.alloc(3 * 1024 * 1024, 0x61);
     await fs.writeFile(path.join(workspaceRoot, 'preview.docx'), docBytes);
     const sendFileResult = await client.callTool({
-      name: 'send_file',
+      name: 'exec',
       arguments: {
-        workspace_context: workspaceContext,
-        path: 'preview.docx',
+        calls: [{
+          tool: 'ccm-extra.send_file',
+          arguments: {
+            workspace_context: workspaceContext,
+            path: 'preview.docx',
+          },
+        }],
+        yield_time_ms: 1000,
       },
     });
     assert.equal(sendFileResult.isError, undefined);
@@ -412,20 +447,22 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.ok(resourceLink);
     assert.equal(resourceLink.name, 'preview.docx');
     assert.equal(resourceLink.size, docBytes.length);
+    const nestedSendFile = sendFileResult.structuredContent
+      .calls[0].result.structured_content;
     assert.equal(
-      sendFileResult.structuredContent.mime_type,
+      nestedSendFile.mime_type,
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     );
-    assert.equal(sendFileResult.structuredContent.byte_length, docBytes.length);
-    assert.equal(sendFileResult.structuredContent.resource_uri, undefined);
+    assert.equal(nestedSendFile.byte_length, docBytes.length);
+    assert.equal(nestedSendFile.resource_uri, undefined);
     const resourceUri = resourceLink.uri;
     assert.match(resourceUri, /^ccm-file:\/\/\//);
-    assert.equal(resourceLink.mimeType, sendFileResult.structuredContent.mime_type);
+    assert.equal(resourceLink.mimeType, nestedSendFile.mime_type);
     const readFileResult = await client.readResource({ uri: resourceUri });
     assert.equal(readFileResult.contents.length, 1);
     assert.equal(
       readFileResult.contents[0].mimeType,
-      sendFileResult.structuredContent.mime_type,
+      nestedSendFile.mime_type,
     );
     assert.deepEqual(
       Buffer.from(readFileResult.contents[0].blob, 'base64'),

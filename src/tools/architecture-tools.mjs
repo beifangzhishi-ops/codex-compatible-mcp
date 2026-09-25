@@ -30,6 +30,13 @@ const nestedCallSchema = z.object({
   ),
 });
 
+const nativeFileSchema = z.object({
+  download_url: z.string().url(),
+  file_id: z.string().min(1),
+  mime_type: z.string().optional(),
+  file_name: z.string().optional(),
+}).strict();
+
 export function registerArchitectureTools(
   registry,
   { codeModeManager = new CodeModeManager({ registry }) } = {},
@@ -76,9 +83,13 @@ export function registerArchitectureTools(
     provenance: 'ccm-runtime',
     surfaces: { direct: true },
     tags: ['tools', 'code-mode', 'orchestration', 'batch'],
+    mcpMeta: {
+      'openai/fileParams': ['file'],
+    },
     description: [
       'Execute one or more ToolRegistry capabilities through CCM nested dispatch.',
       'Prefer one exec call for multi-step CCM work when the required tools are available on the Code Mode surface. Core tools such as list_projects, exec_command, write_stdin, and apply_patch can be nested here alongside deferred ccm-extra tools. This avoids repeated host MCP connection/initialization round trips.',
+      'For a real ChatGPT attachment consumed by one nested capability such as ccm-extra.receive_file, pass that attachment through the optional top-level file parameter. ChatGPT resolves it to the native file object and CCM injects it into that single nested call as arguments.file. Do not also provide arguments.file in the nested call.',
       'This is a structured dispatcher, not a JavaScript interpreter. Use the host Code Mode for loops, branching, and data processing.',
       'Set parallel=true only for independent calls; CCM rejects parallel execution for tools that do not declare parallel-call support.',
       'For bulk local image review, search for ccm.view_image once and batch independent image calls in this exec dispatcher with parallel=true; image content is passed through natively without widget cards.',
@@ -87,6 +98,9 @@ export function registerArchitectureTools(
     inputSchema: {
       calls: z.array(nestedCallSchema).min(1).max(32).describe(
         'Nested capability calls to execute. These may include Code Mode-enabled core tools (for example list_projects, exec_command, write_stdin, apply_patch) and discovered deferred capabilities.',
+      ),
+      file: nativeFileSchema.optional().describe(
+        'Optional single ChatGPT file binding for exactly one nested call. ChatGPT supplies download_url and file_id plus optional mime_type/file_name; CCM injects this object as that call\'s arguments.file before normal nested-tool validation.',
       ),
       parallel: z.boolean().optional().describe(
         'Run independent calls concurrently. Defaults to false.',
@@ -103,7 +117,32 @@ export function registerArchitectureTools(
     },
     handler: async (args) => {
       try {
-        const result = await codeModeManager.exec(args);
+        let dispatchArgs = args;
+        if (args.file !== undefined) {
+          if (args.calls.length !== 1) {
+            throw new Error(
+              'exec.file requires exactly one nested tool call.',
+            );
+          }
+          const [call] = args.calls;
+          if (Object.prototype.hasOwnProperty.call(call.arguments || {}, 'file')) {
+            throw new Error(
+              'exec.file cannot be combined with calls[0].arguments.file.',
+            );
+          }
+          const { file, ...rest } = args;
+          dispatchArgs = {
+            ...rest,
+            calls: [{
+              ...call,
+              arguments: {
+                ...(call.arguments || {}),
+                file,
+              },
+            }],
+          };
+        }
+        const result = await codeModeManager.exec(dispatchArgs);
         return jsonResult(result.payload, result.text, result.content);
       } catch (error) {
         return toolError(error);

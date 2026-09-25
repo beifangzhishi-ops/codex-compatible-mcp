@@ -308,6 +308,71 @@ test('exec passes resource links through without embedding file bytes', async ()
   }
 });
 
+test('exec binds one top-level native file into one nested call', async () => {
+  const registry = new ToolRegistry();
+  registry.register(textTool({
+    name: 'consume_file',
+    namespace: 'demo',
+    surfaces: { deferred: true, codeMode: true },
+    supportsParallel: false,
+    inputSchema: {
+      file: z.object({
+        download_url: z.string().url(),
+        file_id: z.string().min(1),
+        mime_type: z.string().optional(),
+        file_name: z.string().optional(),
+      }).strict(),
+    },
+    handler: async ({ file }) => ({
+      content: [{ type: 'text', text: file.file_id }],
+      structuredContent: { file },
+    }),
+  }));
+
+  const { codeModeManager } = registerArchitectureTools(registry);
+  const exec = registry.get('exec');
+  const file = {
+    download_url: 'https://files.example.test/download',
+    file_id: 'file_bound',
+    mime_type: 'text/plain',
+    file_name: 'bound.txt',
+  };
+  try {
+    assert.deepEqual(exec.mcpMeta['openai/fileParams'], ['file']);
+    const result = await exec.handler({
+      file,
+      calls: [{ tool: 'demo.consume_file', arguments: {} }],
+    });
+    assert.equal(result.isError, undefined);
+    assert.deepEqual(
+      result.structuredContent.calls[0].result.structured_content.file,
+      file,
+    );
+
+    const duplicate = await exec.handler({
+      file,
+      calls: [{
+        tool: 'demo.consume_file',
+        arguments: { file },
+      }],
+    });
+    assert.equal(duplicate.isError, true);
+    assert.match(duplicate.content[0].text, /cannot be combined/i);
+
+    const ambiguous = await exec.handler({
+      file,
+      calls: [
+        { tool: 'demo.consume_file', arguments: {} },
+        { tool: 'demo.consume_file', arguments: {} },
+      ],
+    });
+    assert.equal(ambiguous.isError, true);
+    assert.match(ambiguous.content[0].text, /exactly one nested tool call/i);
+  } finally {
+    codeModeManager.close();
+  }
+});
+
 test('exec passes image content through while compacting nested image bytes', async () => {
   const registry = new ToolRegistry();
   const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2F+QAAAAASUVORK5CYII=';

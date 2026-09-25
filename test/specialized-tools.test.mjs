@@ -91,7 +91,7 @@ function fakeRuntime() {
   };
 }
 
-test('send_file is Direct-only and returns one native resource link using workspace_context', async () => {
+test('send_file is Deferred + Code Mode and returns one native resource link using workspace_context', async () => {
   const runtime = fakeRuntime();
   runtime.environmentRegistry.resolve = (environmentId) => ({
     id: environmentId || 'windows-worker',
@@ -101,8 +101,9 @@ test('send_file is Direct-only and returns one native resource link using worksp
   const registry = new ToolRegistry();
   registerSpecializedTools(registry, runtime);
   const sendFile = registry.get('ccm-extra.send_file');
-  assert.equal(sendFile.surfaces.direct, true);
-  assert.equal(sendFile.surfaces.codeMode, false);
+  assert.equal(sendFile.surfaces.direct, false);
+  assert.equal(sendFile.surfaces.deferred, true);
+  assert.equal(sendFile.surfaces.codeMode, true);
   assert.equal(sendFile.supportsParallel, false);
   assert.match(sendFile.description, /exactly one file per call/i);
   assert.match(sendFile.description, /sequentially/i);
@@ -151,6 +152,32 @@ test('send_file is Direct-only and returns one native resource link using worksp
   assert.equal(result.structuredContent.filename, 'report.docx');
 
   registerArchitectureTools(registry);
+  const sequential = await registry.get('exec').handler({
+    calls: [{
+      tool: 'ccm-extra.send_file',
+      arguments: {
+        workspace_context: '00000000-0000-4000-8000-000000000001',
+        path: 'C:\\docs\\second.docx',
+      },
+    }],
+  });
+  assert.equal(sequential.isError, undefined);
+  assert.equal(sequential.structuredContent.state, 'completed');
+  const nestedResourceLink = sequential.content.find(
+    (item) => item.type === 'resource_link',
+  );
+  assert.ok(nestedResourceLink);
+  assert.equal(nestedResourceLink.name, 'report.docx');
+  assert.equal(nestedResourceLink.size, 4);
+  assert.equal(nestedResourceLink._meta.sha256, 'test-sha256');
+  assert.equal(nestedResourceLink._meta.source_environment_id, 'worker-a');
+  assert.deepEqual(runtime.calls.at(-1), {
+    sendFile: {
+      workspace_context: '00000000-0000-4000-8000-000000000001',
+      path: 'C:\\docs\\second.docx',
+    },
+  });
+
   const rejected = await registry.get('exec').handler({
     calls: [{
       tool: 'ccm-extra.send_file',
@@ -162,19 +189,20 @@ test('send_file is Direct-only and returns one native resource link using worksp
     parallel: true,
   });
   assert.equal(rejected.isError, true);
-  assert.match(rejected.content[0].text, /not available on the Code Mode surface/i);
+  assert.match(rejected.content[0].text, /parallel-call support/i);
 });
 
-test('receive_file is Direct + Code Mode and preserves the native ChatGPT file object', async () => {
+test('receive_file is Deferred + Code Mode and preserves native file objects through exec', async () => {
   const runtime = fakeRuntime();
   const registry = new ToolRegistry();
   registerSpecializedTools(registry, runtime);
   const receiveFile = registry.get('ccm-extra.receive_file');
   assert.ok(receiveFile);
-  assert.equal(receiveFile.surfaces.direct, true);
+  assert.equal(receiveFile.surfaces.direct, false);
+  assert.equal(receiveFile.surfaces.deferred, true);
   assert.equal(receiveFile.surfaces.codeMode, true);
   assert.equal(receiveFile.supportsParallel, false);
-  assert.deepEqual(receiveFile.mcpMeta['openai/fileParams'], ['file']);
+  assert.equal(receiveFile.mcpMeta, undefined);
   assert.match(receiveFile.description, /exactly one ChatGPT file per call/i);
   assert.match(receiveFile.description, /sequentially/i);
   assert.match(receiveFile.description, /Never issue concurrent or parallel/i);
@@ -203,6 +231,8 @@ test('receive_file is Direct + Code Mode and preserves the native ChatGPT file o
   });
 
   registerArchitectureTools(registry);
+  const execTool = registry.get('exec');
+  assert.deepEqual(execTool.mcpMeta['openai/fileParams'], ['file']);
   const nested = await registry.get('exec').handler({
     calls: [{
       tool: 'ccm-extra.receive_file',
@@ -223,6 +253,40 @@ test('receive_file is Direct + Code Mode and preserves the native ChatGPT file o
       overwrite: false,
     },
   });
+
+  const bridged = await registry.get('exec').handler({
+    file: input,
+    calls: [{
+      tool: 'ccm-extra.receive_file',
+      arguments: {
+        workspace_context: '00000000-0000-4000-8000-000000000001',
+        destination: 'bridged-incoming.txt',
+      },
+    }],
+  });
+  assert.equal(bridged.isError, undefined);
+  assert.equal(bridged.structuredContent.state, 'completed');
+  assert.deepEqual(runtime.calls.at(-1), {
+    receiveFile: {
+      workspace_context: '00000000-0000-4000-8000-000000000001',
+      file: input,
+      destination: 'bridged-incoming.txt',
+      overwrite: false,
+    },
+  });
+
+  const duplicateFile = await registry.get('exec').handler({
+    file: input,
+    calls: [{
+      tool: 'ccm-extra.receive_file',
+      arguments: {
+        workspace_context: '00000000-0000-4000-8000-000000000001',
+        file: input,
+      },
+    }],
+  });
+  assert.equal(duplicateFile.isError, true);
+  assert.match(duplicateFile.content[0].text, /cannot be combined/i);
 
   const rejectedParallel = await registry.get('exec').handler({
     calls: [{
