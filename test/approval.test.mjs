@@ -41,8 +41,8 @@ class FakeWorkerHub extends EventEmitter {
   }
 }
 
-test('ApprovalManager defaults to a 15-minute approval lifetime', () => {
-  assert.equal(DEFAULT_APPROVAL_TTL_MS, 15 * 60 * 1000);
+test('ApprovalManager defaults to a 3-day approval lifetime', () => {
+  assert.equal(DEFAULT_APPROVAL_TTL_MS, 3 * 24 * 60 * 60 * 1000);
   assert.equal(DEFAULT_TERMINAL_RETENTION_MS, 5 * 60 * 1000);
 
   const now = Date.UTC(2026, 8, 23, 12, 0, 0);
