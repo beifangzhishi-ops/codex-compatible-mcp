@@ -283,7 +283,9 @@ The public MCP resource is `https://<host>/ccm/mcp`. Runtime OAuth configuration
 
 ChatGPT-side CCM/plugin/connector rebuilds are **user-operated**. The assistant must not rename, delete, recreate, reconnect, or otherwise rebuild the ChatGPT CCM registration on the user's behalf unless the user explicitly overrides this rule for that rebuild.
 
-When a Direct-tool schema change means the ChatGPT registration needs to be rebuilt, **restart CCM first, then rebuild/refresh the ChatGPT-side registration**. Rebuilding ChatGPT before the Controller/Worker has restarted can cache the old running tool schema or implementation even when the repository already contains newer code. The required order is:
+Changes to a Direct tool's model-visible definition include not only parameter/input/output schema changes but also its `description` text. ChatGPT may cache that full top-level Direct tool definition across conversations. After CCM has restarted, first check a fresh ChatGPT conversation. If that fresh conversation still exposes the old Direct tool description/schema while live CCM `tool_search` already exposes the new deferred definitions, treat the ChatGPT-side registration as stale and refresh/rebuild it. Do not assume that opening a new conversation alone will refresh a cached Direct tool definition.
+
+When a Direct-tool definition change means the ChatGPT registration needs to be rebuilt, **restart CCM first, then rebuild/refresh the ChatGPT-side registration**. Rebuilding ChatGPT before the Controller/Worker has restarted can cache the old running tool definition or implementation even when the repository already contains newer code. The required order is:
 
 1. Restart the CCM Controller/Worker service group so the current checkout is the code actually serving MCP requests. Confirm the Controller is healthy/listening again before proceeding.
 2. Only after that restart, resolve the current public MCP resource from `CCM_RESOURCE` (normally from ignored `config/ccm.env`) and give that MCP address to the user.
