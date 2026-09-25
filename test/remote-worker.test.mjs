@@ -235,6 +235,84 @@ test('Controller rejects a duplicate worker id without replacing the active work
   }
 });
 
+test('Fresh Worker replaces a quarantined duplicate identity without a takeover token', async () => {
+  const quarantinePolicy = {
+    start() {},
+    close() {},
+    has(code) {
+      return code === 'unknown_method';
+    },
+  };
+  const controller = createControllerRuntime({
+    workerPort: 0,
+    workerQuarantinePolicy: quarantinePolicy,
+  });
+  const staleRuntime = workerRuntime('worker-quarantine-reconnect');
+  const freshRuntime = workerRuntime('worker-quarantine-reconnect');
+  let staleClient = null;
+  let freshClient = null;
+
+  await controller.start();
+  try {
+    staleClient = new RemoteWorkerClient({
+      runtime: staleRuntime,
+      workerId: 'worker-quarantine-reconnect',
+      port: controller.workerHub.address.port,
+    });
+    await staleClient.connect();
+
+    const workspace = staleRuntime.workspaceRegistry.listRegistered()[0];
+    const context = controller.workspaceContextManager.createRegistered(
+      'worker-quarantine-reconnect',
+      workspace,
+    );
+
+    await assert.rejects(
+      controller.workerHub.call(
+        'worker-quarantine-reconnect',
+        'not_a_real_method',
+      ),
+      (error) => error?.code === 'unknown_method',
+    );
+    assert.equal(
+      controller.workerHub.environmentStatus('worker-quarantine-reconnect').state,
+      'abnormal',
+    );
+
+    freshClient = new RemoteWorkerClient({
+      runtime: freshRuntime,
+      workerId: 'worker-quarantine-reconnect',
+      port: controller.workerHub.address.port,
+    });
+    await freshClient.connect();
+
+    for (let index = 0; index < 50 && staleClient.connected; index += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(staleClient.connected, false);
+    assert.equal(freshClient.connected, true);
+    assert.deepEqual(
+      controller.workerHub.environmentStatus('worker-quarantine-reconnect'),
+      { state: 'normal' },
+    );
+    assert.deepEqual(
+      await controller.workerHub.call('worker-quarantine-reconnect', 'ping'),
+      { ok: true, worker_id: 'worker-quarantine-reconnect' },
+    );
+    assert.equal(
+      controller.workspaceContextManager.resolve(context.workspace_context)
+        .workspace_context,
+      context.workspace_context,
+    );
+  } finally {
+    await staleClient?.close().catch(() => {});
+    await freshClient?.close().catch(() => {});
+    staleRuntime.close();
+    freshRuntime.close();
+    await controller.close();
+  }
+});
+
 test('Controller-owned worker can take over a stale duplicate identity', async () => {
   const takeoverToken = 'test-controller-takeover-token';
   const controller = createControllerRuntime({

@@ -228,12 +228,13 @@ export class WorkerHub extends EventEmitter {
     const workerId = String(message.worker_id);
     const previous = this.connections.get(workerId);
     if (previous && previous !== connection) {
+      const quarantinedReplacement = Boolean(previous.quarantine);
       const authorizedTakeover = Boolean(
         this.takeoverToken &&
         message.takeover_token &&
         String(message.takeover_token) === this.takeoverToken,
       );
-      if (!authorizedTakeover) {
+      if (!authorizedTakeover && !quarantinedReplacement) {
         send(connection.socket, {
           type: 'hello_error',
           code: 'duplicate_worker_id',
@@ -245,7 +246,11 @@ export class WorkerHub extends EventEmitter {
 
       this.#removeConnection(
         previous,
-        new Error('Remote Worker connection superseded by controller-owned worker.'),
+        new Error(
+          quarantinedReplacement
+            ? 'Quarantined Remote Worker connection superseded by fresh worker.'
+            : 'Remote Worker connection superseded by controller-owned worker.',
+        ),
       );
       previous.socket.destroy();
     }

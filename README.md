@@ -44,7 +44,7 @@ CCM Controller
 
 Every execution environment uses the same Remote Worker protocol. The machine hosting the Controller is not a special execution backend: by default, `npm start` launches a normal Remote Worker locally and connects it through loopback.
 
-Worker feature churn does not require monotonically bumping the transport protocol version. A Worker that proves incompatible with the running Controller at RPC time is quarantined in memory rather than disconnected: all environments owned by that Worker remain visible as `state=abnormal`, later RPC dispatch to them fails fast, and healthy Workers continue normally. A fresh Worker connection clears the quarantine. Ordinary command/tool failures do not quarantine a Worker.
+Worker feature churn does not require monotonically bumping the transport protocol version. A Worker that proves incompatible with the running Controller at RPC time is quarantined in memory rather than disconnected: all environments owned by that Worker remain visible as `state=abnormal`, later RPC dispatch to them fails fast, and healthy Workers continue normally. A fresh connection using the same `worker_id` may replace an already-quarantined connection without a takeover token and clears the quarantine; a healthy duplicate identity is still rejected. Ordinary command/tool failures do not quarantine a Worker.
 
 The contract-error codes that trigger quarantine are configured in the tracked, non-secret `config/worker-quarantine-errors.json` file. CCM hot-reloads valid edits to this file with no Controller restart. Invalid live edits are logged and ignored while the last known-good policy remains active; invalid configuration at Controller startup is fatal.
 
