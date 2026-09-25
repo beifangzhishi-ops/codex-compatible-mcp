@@ -165,14 +165,14 @@ test('send_file is Direct-only and returns one native resource link using worksp
   assert.match(rejected.content[0].text, /not available on the Code Mode surface/i);
 });
 
-test('receive_file is Direct-only and advertises a native ChatGPT file parameter', async () => {
+test('receive_file is Direct + Code Mode and preserves the native ChatGPT file object', async () => {
   const runtime = fakeRuntime();
   const registry = new ToolRegistry();
   registerSpecializedTools(registry, runtime);
   const receiveFile = registry.get('ccm-extra.receive_file');
   assert.ok(receiveFile);
   assert.equal(receiveFile.surfaces.direct, true);
-  assert.equal(receiveFile.surfaces.codeMode, false);
+  assert.equal(receiveFile.surfaces.codeMode, true);
   assert.equal(receiveFile.supportsParallel, false);
   assert.deepEqual(receiveFile.mcpMeta['openai/fileParams'], ['file']);
   assert.match(receiveFile.description, /exactly one ChatGPT file per call/i);
@@ -201,6 +201,41 @@ test('receive_file is Direct-only and advertises a native ChatGPT file parameter
       overwrite: false,
     },
   });
+
+  registerArchitectureTools(registry);
+  const nested = await registry.get('exec').handler({
+    calls: [{
+      tool: 'ccm-extra.receive_file',
+      arguments: {
+        workspace_context: '00000000-0000-4000-8000-000000000001',
+        file: input,
+        destination: 'nested-incoming.txt',
+      },
+    }],
+  });
+  assert.equal(nested.isError, undefined);
+  assert.equal(nested.structuredContent.state, 'completed');
+  assert.deepEqual(runtime.calls.at(-1), {
+    receiveFile: {
+      workspace_context: '00000000-0000-4000-8000-000000000001',
+      file: input,
+      destination: 'nested-incoming.txt',
+      overwrite: false,
+    },
+  });
+
+  const rejectedParallel = await registry.get('exec').handler({
+    calls: [{
+      tool: 'ccm-extra.receive_file',
+      arguments: {
+        workspace_context: '00000000-0000-4000-8000-000000000001',
+        file: input,
+      },
+    }],
+    parallel: true,
+  });
+  assert.equal(rejectedParallel.isError, true);
+  assert.match(rejectedParallel.content[0].text, /parallel-call support/i);
 });
 
 
