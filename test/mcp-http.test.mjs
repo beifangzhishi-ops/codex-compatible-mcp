@@ -120,11 +120,14 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const names = listed.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, [
       'apply_patch',
+      'chatgpt_share_export',
       'exec',
       'exec_command',
       'list_projects',
+      'quark_upload',
       'request_approval',
       'resolve_pending_action',
+      'send_file',
       'tool_search',
       'view_image',
       'wait',
@@ -156,7 +159,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(approvalTool?._meta?.ui?.resourceUri, APPROVAL_UI_URI);
     assert.equal(listed.tools.some((tool) => tool.name === 'select_workspace'), false);
     assert.equal(listed.tools.some((tool) => tool.name === 'register_workspace'), false);
-    assert.equal(listed.tools.some((tool) => tool.name === 'send_file'), false);
+    assert.equal(listed.tools.some((tool) => tool.name === 'send_file'), true);
     assert.equal(listed.tools.some((tool) => tool.name === 'receive_file'), false);
 
     const receiveSearch = await client.callTool({
@@ -181,21 +184,28 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       ['download_url', 'file_id', 'file_name', 'mime_type'],
     );
 
-    const sendSearch = await client.callTool({
-      name: 'tool_search',
-      arguments: { query: 'send_file', limit: 5 },
-    });
-    const sendFileTool = sendSearch.structuredContent.tools.find(
-      (tool) => tool.qualified_name === 'ccm-extra.send_file',
-    );
+    const sendFileTool = listed.tools.find((tool) => tool.name === 'send_file');
     assert.ok(sendFileTool);
-    assert.deepEqual(sendFileTool.surfaces, ['deferred', 'code_mode']);
     assert.match(
       sendFileTool.description,
       /include the host-generated native ChatGPT file attachment object in the final response, not its file ID as text/i,
     );
     assert.match(sendFileTool.description, /1 KiB \(1024 bytes\)/i);
     assert.match(sendFileTool.description, /never pad, rewrite, or otherwise alter/i);
+
+    for (const directName of ['send_file', 'chatgpt_share_export', 'quark_upload']) {
+      const search = await client.callTool({
+        name: 'tool_search',
+        arguments: { query: directName, limit: 10 },
+      });
+      assert.equal(
+        search.structuredContent.tools.some(
+          (tool) => tool.qualified_name === 'ccm-extra.' + directName,
+        ),
+        false,
+        directName + ' should no longer be deferred',
+      );
+    }
 
     const projectDiscovery = await client.callTool({
       name: 'list_projects',

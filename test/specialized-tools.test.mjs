@@ -91,7 +91,7 @@ function fakeRuntime() {
   };
 }
 
-test('send_file is Deferred + Code Mode and returns one native resource link using workspace_context', async () => {
+test('send_file is Direct + Code Mode and returns one native resource link using workspace_context', async () => {
   const runtime = fakeRuntime();
   runtime.environmentRegistry.resolve = (environmentId) => ({
     id: environmentId || 'windows-worker',
@@ -101,13 +101,14 @@ test('send_file is Deferred + Code Mode and returns one native resource link usi
   const registry = new ToolRegistry();
   registerSpecializedTools(registry, runtime);
   const sendFile = registry.get('ccm-extra.send_file');
-  assert.equal(sendFile.surfaces.direct, false);
-  assert.equal(sendFile.surfaces.deferred, true);
+  assert.equal(sendFile.surfaces.direct, true);
+  assert.equal(sendFile.surfaces.deferred, false);
   assert.equal(sendFile.surfaces.codeMode, true);
   assert.equal(sendFile.supportsParallel, false);
   assert.match(sendFile.description, /exactly one file per call/i);
   assert.match(sendFile.description, /sequentially/i);
   assert.match(sendFile.description, /never issue concurrent or parallel/i);
+  assert.match(sendFile.description, /no separate transfer confirmation is required/i);
   assert.match(
     sendFile.description,
     /include the host-generated native ChatGPT file attachment object in the final response, not its file ID as text/i,
@@ -310,6 +311,11 @@ test('ChatGPT Share export dispatches through CCM exec without BMG', async () =>
   });
   const registry = new ToolRegistry();
   registerSpecializedTools(registry, runtime);
+  const shareExport = registry.get('ccm-extra.chatgpt_share_export');
+  assert.equal(shareExport.surfaces.direct, true);
+  assert.equal(shareExport.surfaces.deferred, false);
+  assert.equal(shareExport.surfaces.codeMode, true);
+  assert.match(shareExport.description, /use this tool directly rather than BMG or browser automation/i);
   const result = await registry.get('ccm-extra.chatgpt_share_export').handler({
     environment_id: 'worker-a',
     share_url: 'https://chatgpt.com/share/test-id',
@@ -321,6 +327,17 @@ test('ChatGPT Share export dispatches through CCM exec without BMG', async () =>
   assert.match(runtime.calls[0].cmd, /chatgpt-share-export/);
   assert.match(runtime.calls[0].cmd, /127\.0\.0\.1:7890/);
   assert.equal(runtime.calls[0].cmd.includes('bmgctl'), false);
+});
+
+test('quark_upload is Direct + Code Mode and advertises direct routing', () => {
+  const registry = new ToolRegistry();
+  registerSpecializedTools(registry, fakeRuntime());
+  const quarkUpload = registry.get('ccm-extra.quark_upload');
+  assert.ok(quarkUpload);
+  assert.equal(quarkUpload.surfaces.direct, true);
+  assert.equal(quarkUpload.surfaces.deferred, false);
+  assert.equal(quarkUpload.surfaces.codeMode, true);
+  assert.match(quarkUpload.description, /use this tool directly/i);
 });
 
 test('ChatGPT Share export can use the default Git-ignored cache output', async () => {
