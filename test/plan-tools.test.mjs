@@ -23,6 +23,14 @@ test('Plan tools stay deferred, carry ids explicitly, and keep reads lifecycle-n
     assert.equal(readTool.surfaces.deferred, true);
     assert.equal(readTool.surfaces.codeMode, true);
     assert.match(patchTool.description, /Planning guidance/);
+    assert.match(patchTool.description, /explore first, ask second/i);
+    assert.match(patchTool.description, /Do not ask the user for information.*reasonably be discovered/i);
+    assert.match(patchTool.description, /Bias toward questions over guessing/i);
+    assert.match(patchTool.description, /2-4 mutually exclusive options/i);
+    assert.match(patchTool.description, /Planning mutation boundary/i);
+    assert.match(patchTool.description, /do not edit tracked project files/i);
+    assert.match(patchTool.description, /Decision-complete Plan/i);
+    assert.match(patchTool.description, /without inventing new product or design decisions/i);
     assert.match(patchTool.description, /Keep the durable Plan current/);
     assert.match(patchTool.description, /Execution gate/);
     assert.match(patchTool.description, /workspace approval/);

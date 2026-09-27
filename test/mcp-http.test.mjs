@@ -110,6 +110,12 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       client.getInstructions(),
       /wait for that frozen workspace action to resolve.*do not create or switch to a projectless context/i,
     );
+    assert.match(client.getInstructions(), /explore discoverable facts first/i);
+    assert.match(client.getInstructions(), /ask rather than guess/i);
+    assert.match(client.getInstructions(), /2-4 mutually exclusive options/i);
+    assert.match(client.getInstructions(), /tracked implementation edits.*remain gated/i);
+    assert.match(client.getInstructions(), /decision-complete for another executor/i);
+    assert.match(client.getInstructions(), /does not maintain a Plan-Mode state machine/i);
     const listed = await client.listTools();
     const names = listed.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, [
