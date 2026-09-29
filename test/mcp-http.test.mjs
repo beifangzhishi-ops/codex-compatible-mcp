@@ -104,11 +104,19 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     await client.connect(transport);
     assert.match(
       client.getInstructions(),
-      /Do not use projectless as a fallback while select_workspace or register_workspace is awaiting approval/i,
+      /Do not use projectless as a fallback to bypass select_workspace or register_workspace.*current intended real project/i,
     );
     assert.match(
       client.getInstructions(),
-      /wait for that frozen workspace action to resolve.*do not create or switch to a projectless context/i,
+      /changes to a different real project.*older pending workspace approval does not need to be denied or resolved first/i,
+    );
+    assert.match(
+      client.getInstructions(),
+      /user's intended target.*wait for the frozen action.*do not use projectless context/i,
+    );
+    assert.match(
+      client.getInstructions(),
+      /independent pending workspace approvals may coexist/i,
     );
     assert.match(client.getInstructions(), /explore discoverable facts first/i);
     assert.match(client.getInstructions(), /ask rather than guess/i);

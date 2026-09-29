@@ -179,6 +179,49 @@ test('ApprovalManager applies the configured TTL to workspace approvals', () => 
   );
 });
 
+test('ApprovalManager allows independent pending workspace approvals to coexist', () => {
+  const approvals = new ApprovalManager();
+  const first = approvals.requestWorkspaceAction(
+    'select_workspace',
+    {
+      environment_id: 'approval-worker',
+      workspace_id: 'project-a',
+      workspace_root: 'C:\\projects\\project-a',
+      create_if_missing: false,
+    },
+    'Enter project A?',
+  );
+  const second = approvals.requestWorkspaceAction(
+    'select_workspace',
+    {
+      environment_id: 'approval-worker',
+      workspace_id: 'project-b',
+      workspace_root: 'C:\\projects\\project-b',
+      create_if_missing: false,
+    },
+    'Enter project B?',
+  );
+
+  assert.notEqual(first.approval_id, second.approval_id);
+  const firstPrepared = approvals.prepareAppApproval(
+    first.approval_id,
+    { hostSession: 'chat-a' },
+  );
+  const secondPrepared = approvals.prepareAppApproval(
+    second.approval_id,
+    { hostSession: 'chat-a' },
+  );
+
+  assert.equal(firstPrepared.request.workspace_id, 'project-a');
+  assert.equal(secondPrepared.request.workspace_id, 'project-b');
+  assert.equal(approvals.getRequest(first.approval_id).state, 'pending');
+  assert.equal(approvals.getRequest(second.approval_id).state, 'pending');
+  assert.throws(
+    () => approvals.prepareAppApproval(first.approval_id, { hostSession: 'chat-a' }),
+    /already bound/i,
+  );
+});
+
 test('ApprovalManager app approvals require the card nonce and resume one frozen action', () => {
   const approvals = new ApprovalManager();
   const workspace = {

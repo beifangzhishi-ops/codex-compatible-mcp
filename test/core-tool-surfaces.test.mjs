@@ -204,7 +204,11 @@ test('core tool surface keeps workspace lifecycle deferred and centralizes appro
   );
   assert.match(
     registry.get('create_projectless_context').description,
-    /awaiting approval.*wait.*instead of creating projectless context/i,
+    /current intended real project.*wait.*instead of creating projectless context/i,
+  );
+  assert.match(
+    registry.get('create_projectless_context').description,
+    /changes to a different real project.*older pending workspace action does not block/i,
   );
   assert.match(
     registry.get('select_workspace').description,
@@ -212,7 +216,11 @@ test('core tool surface keeps workspace lifecycle deferred and centralizes appro
   );
   assert.match(
     registry.get('select_workspace').description,
-    /do not switch to projectless context while waiting/i,
+    /user's intended target.*do not retry the same target.*projectless context/i,
+  );
+  assert.match(
+    registry.get('select_workspace').description,
+    /changes to a different real project.*without requiring the older pending approval/i,
   );
   assert.match(
     registry.get('register_workspace').description,
@@ -220,7 +228,11 @@ test('core tool surface keeps workspace lifecycle deferred and centralizes appro
   );
   assert.match(
     registry.get('register_workspace').description,
-    /do not switch to projectless context while waiting/i,
+    /user's intended target.*do not retry the same target.*projectless context/i,
+  );
+  assert.match(
+    registry.get('register_workspace').description,
+    /changes to a different real project.*without requiring the older pending approval/i,
   );
   assert.match(
     registry.get('exec_command').description,
@@ -228,7 +240,11 @@ test('core tool surface keeps workspace lifecycle deferred and centralizes appro
   );
   assert.match(
     registry.get('exec_command').description,
-    /awaiting approval.*wait for that action to resolve/i,
+    /current intended real project.*wait for that action.*instead of bypassing it with projectless context/i,
+  );
+  assert.match(
+    registry.get('exec_command').description,
+    /changes to a different real project.*older pending approval does not block/i,
   );
   assert.match(
     registry.get('apply_patch').description,
@@ -385,11 +401,15 @@ test('core tool surface keeps workspace lifecycle deferred and centralizes appro
   assert.equal(workspacePending.structuredContent.approval_required, true);
   assert.match(
     workspacePending.structuredContent.instruction,
-    /wait for this frozen workspace action to resolve/i,
+    /remains the user's intended target.*wait for this frozen action to resolve/i,
   );
   assert.match(
     workspacePending.structuredContent.instruction,
-    /do not create or switch to projectless context while waiting/i,
+    /do not retry the same target.*projectless context to bypass it/i,
+  );
+  assert.match(
+    workspacePending.structuredContent.instruction,
+    /changes to a different real project.*older pending approval does not need to be denied or resolved first/i,
   );
   assert.equal(workspacePending._meta, undefined);
 
@@ -490,11 +510,15 @@ test('core tool surface keeps workspace lifecycle deferred and centralizes appro
     assert.match(registerPending.justification, /create, register, and enter/i);
     assert.match(
       registerPending.instruction,
-      /wait for this frozen workspace action to resolve/i,
+      /remains the user's intended target.*wait for this frozen action to resolve/i,
     );
     assert.match(
       registerPending.instruction,
-      /do not create or switch to projectless context while waiting/i,
+      /do not retry the same target.*projectless context to bypass it/i,
+    );
+    assert.match(
+      registerPending.instruction,
+      /changes to a different real project.*older pending approval does not need to be denied or resolved first/i,
     );
   } finally {
     codeModeManager.close();
