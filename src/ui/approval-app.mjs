@@ -101,6 +101,8 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
       let approvalNonce = null;
       let busy = false;
       let retryDecision = null;
+      let hostCapabilities = {};
+      let continuationStarted = false;
 
       const title = document.getElementById("title");
       const justification = document.getElementById("justification");
@@ -218,6 +220,14 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         updateHeight();
       }
 
+      function appendContinuationWarning(text) {
+        const current = status.textContent.trim();
+        setStatus(
+          (current ? current + "\n" : "") + text,
+          true
+        );
+      }
+
       function setBusy(value) {
         busy = value;
         approve.disabled = value || !approvalNonce;
@@ -253,6 +263,8 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
       }
 
       async function notifyModel(decision, structured) {
+        if (continuationStarted) return;
+        continuationStarted = true;
         const summary = {
           ...resultSummary(structured),
           decision
@@ -280,10 +292,13 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
             }],
             structuredContent: summary
           }, 10000);
-        } catch {}
+        } catch {
+          appendContinuationWarning(
+            "The CCM action result is final, but ChatGPT context handoff failed. Send a message to continue."
+          );
+          return;
+        }
 
-        const openai = window.openai;
-        if (!openai || typeof openai.sendFollowUpMessage !== "function") return;
         const prompt = workspaceAction
           ? "Continue from the CCM workspace approval result already placed in model context. Do not recreate or rerun the workspace action."
           : decision === "deny"
@@ -291,9 +306,34 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
             : decision === "approve_workspace"
               ? "Continue from the CCM approval result already placed in model context. CCM handled the action and saved the workspace policy; do not recreate or rerun that command."
               : "Continue from the CCM approval result already placed in model context. CCM already handled the frozen approved action; do not recreate or rerun that command.";
-        try {
-          await openai.sendFollowUpMessage({ prompt, scrollToBottom: false });
-        } catch {}
+        const supportsTextMessage = Boolean(hostCapabilities?.message?.text);
+        if (supportsTextMessage) {
+          try {
+            const messageResult = await request("ui/message", {
+              role: "user",
+              content: [{
+                type: "text",
+                text: prompt
+              }]
+            }, 10000);
+            if (messageResult?.isError !== true) return;
+          } catch {}
+        }
+
+        const openai = window.openai;
+        if (openai && typeof openai.sendFollowUpMessage === "function") {
+          try {
+            await openai.sendFollowUpMessage({
+              prompt,
+              scrollToBottom: false
+            });
+            return;
+          } catch {}
+        }
+
+        appendContinuationWarning(
+          "The CCM action result is final, but ChatGPT did not continue automatically. Send a message to continue."
+        );
       }
 
       async function resolve(decision) {
@@ -374,7 +414,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
           approve.disabled = true;
           approveAlways.disabled = true;
           deny.disabled = true;
-          void notifyModel(decision, structured);
+          await notifyModel(decision, structured);
         } catch (error) {
           setStatus(
             "Approval action failed: " +
@@ -422,7 +462,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
 
       async function initialize() {
         try {
-          await request("ui/initialize", {
+          const initialized = await request("ui/initialize", {
             protocolVersion: PROTOCOL_VERSION,
             appInfo: {
               name: "ccm-approval",
@@ -431,6 +471,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
             },
             appCapabilities: {}
           }, 5000);
+          hostCapabilities = initialized?.hostCapabilities || {};
           post({ jsonrpc: "2.0", method: "ui/notifications/initialized" });
           if (!readInitialResult()) {
             setStatus("Waiting for approval details…");
