@@ -349,11 +349,12 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'list_projects',
     provider: 'ccm-core',
-    surfaces: { direct: true, codeMode: true },
+    surfaces: { deferred: true, codeMode: true },
     tags: ['project', 'environment', 'worker', 'capabilities'],
     supportsParallel: true,
     description: [
       'List connected CCM environments and their registered projects without entering a project.',
+      'Discover this capability through tool_search and invoke it through exec.',
       'With no environment_id, returns every connected environment. Pass environment_id to restrict discovery to one environment.',
       'Registered projects are returned by default. Set all=true only when existing projectless contexts also need to be inspected.',
       'Discovery is isolated per environment: an abnormal or stale Worker is reported on that environment without blocking healthy Workers. Explicit environment_id calls remain strict.',

@@ -182,7 +182,6 @@ test('core tool surface keeps workspace lifecycle deferred and centralizes appro
   assert.deepEqual(direct, [
     'apply_patch',
     'exec_command',
-    'list_projects',
     'request_approval',
     'resolve_pending_action',
     'view_image',
@@ -196,8 +195,8 @@ test('core tool surface keeps workspace lifecycle deferred and centralizes appro
     registry.get('list_projects').description,
     /sandbox_read_scope.*sandbox_write_scope/,
   );
-  assert.equal(registry.get('list_projects').surfaces.direct, true);
-  assert.equal(registry.get('list_projects').surfaces.deferred, false);
+  assert.equal(registry.get('list_projects').surfaces.direct, false);
+  assert.equal(registry.get('list_projects').surfaces.deferred, true);
   assert.equal(registry.get('list_projects').surfaces.codeMode, true);
   assert.match(
     registry.get('create_projectless_context').description,
@@ -241,6 +240,7 @@ test('core tool surface keeps workspace lifecycle deferred and centralizes appro
   );
 
   for (const name of [
+    'list_projects',
     'create_projectless_context',
     'select_workspace',
     'register_workspace',
@@ -401,7 +401,6 @@ test('core tool surface keeps workspace lifecycle deferred and centralizes appro
         'apply_patch',
         'exec',
         'exec_command',
-        'list_projects',
         'request_approval',
         'resolve_pending_action',
         'tool_search',
@@ -418,6 +417,16 @@ test('core tool surface keeps workspace lifecycle deferred and centralizes appro
     assert.ok(
       search.structuredContent.tools.some(
         (tool) => tool.qualified_name === 'ccm.create_projectless_context',
+      ),
+    );
+
+    const projectSearch = await registry.get('tool_search').handler({
+      query: 'list projects',
+      limit: 5,
+    });
+    assert.ok(
+      projectSearch.structuredContent.tools.some(
+        (tool) => tool.qualified_name === 'ccm.list_projects',
       ),
     );
 

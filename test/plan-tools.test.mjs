@@ -26,7 +26,10 @@ test('Plan tools stay deferred, carry ids explicitly, and keep reads lifecycle-n
     assert.match(patchTool.description, /explore first, ask second/i);
     assert.match(patchTool.description, /Do not ask the user for information.*reasonably be discovered/i);
     assert.match(patchTool.description, /Bias toward questions over guessing/i);
-    assert.match(patchTool.description, /2-4 mutually exclusive options/i);
+    assert.match(patchTool.description, /2-4 mutually exclusive choices/i);
+    assert.match(patchTool.description, /user-visible question/i);
+    assert.match(patchTool.description, /recommended default.*same user-visible question/i);
+    assert.match(patchTool.description, /another answer outside the listed choices/i);
     assert.match(patchTool.description, /Planning mutation boundary/i);
     assert.match(patchTool.description, /do not edit tracked project files/i);
     assert.match(patchTool.description, /Decision-complete Plan/i);

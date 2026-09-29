@@ -112,7 +112,9 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     );
     assert.match(client.getInstructions(), /explore discoverable facts first/i);
     assert.match(client.getInstructions(), /ask rather than guess/i);
-    assert.match(client.getInstructions(), /2-4 mutually exclusive options/i);
+    assert.match(client.getInstructions(), /2-4 mutually exclusive choices/i);
+    assert.match(client.getInstructions(), /user-visible question/i);
+    assert.match(client.getInstructions(), /recommended default there when useful/i);
     assert.match(client.getInstructions(), /tracked implementation edits.*remain gated/i);
     assert.match(client.getInstructions(), /decision-complete for another executor/i);
     assert.match(client.getInstructions(), /does not maintain a Plan-Mode state machine/i);
@@ -120,14 +122,10 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const names = listed.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, [
       'apply_patch',
-      'chatgpt_share_export',
       'exec',
       'exec_command',
-      'list_projects',
-      'quark_upload',
       'request_approval',
       'resolve_pending_action',
-      'send_file',
       'tool_search',
       'view_image',
       'wait',
@@ -159,7 +157,8 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(approvalTool?._meta?.ui?.resourceUri, APPROVAL_UI_URI);
     assert.equal(listed.tools.some((tool) => tool.name === 'select_workspace'), false);
     assert.equal(listed.tools.some((tool) => tool.name === 'register_workspace'), false);
-    assert.equal(listed.tools.some((tool) => tool.name === 'send_file'), true);
+    assert.equal(listed.tools.some((tool) => tool.name === 'list_projects'), false);
+    assert.equal(listed.tools.some((tool) => tool.name === 'send_file'), false);
     assert.equal(listed.tools.some((tool) => tool.name === 'receive_file'), false);
 
     const receiveSearch = await client.callTool({
@@ -184,8 +183,15 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       ['download_url', 'file_id', 'file_name', 'mime_type'],
     );
 
-    const sendFileTool = listed.tools.find((tool) => tool.name === 'send_file');
+    const sendSearch = await client.callTool({
+      name: 'tool_search',
+      arguments: { query: 'send_file', limit: 5 },
+    });
+    const sendFileTool = sendSearch.structuredContent.tools.find(
+      (tool) => tool.qualified_name === 'ccm-extra.send_file',
+    );
     assert.ok(sendFileTool);
+    assert.deepEqual(sendFileTool.surfaces, ['deferred', 'code_mode']);
     assert.match(
       sendFileTool.description,
       /include the host-generated native ChatGPT file attachment object in the final response, not its file ID as text/i,
@@ -193,36 +199,49 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(sendFileTool.description, /1 KiB \(1024 bytes\)/i);
     assert.match(sendFileTool.description, /never pad, rewrite, or otherwise alter/i);
 
-    for (const directName of ['send_file', 'chatgpt_share_export', 'quark_upload']) {
+    for (const deferredName of ['send_file', 'chatgpt_share_export', 'quark_upload']) {
       const search = await client.callTool({
         name: 'tool_search',
-        arguments: { query: directName, limit: 10 },
+        arguments: { query: deferredName, limit: 10 },
       });
       assert.equal(
         search.structuredContent.tools.some(
-          (tool) => tool.qualified_name === 'ccm-extra.' + directName,
+          (tool) => tool.qualified_name === 'ccm-extra.' + deferredName,
         ),
-        false,
-        directName + ' should no longer be deferred',
+        true,
+        deferredName + ' should be deferred',
       );
     }
 
+    const listProjectsSearch = await client.callTool({
+      name: 'tool_search',
+      arguments: { query: 'list projects', limit: 5 },
+    });
+    assert.ok(
+      listProjectsSearch.structuredContent.tools.some(
+        (tool) => tool.qualified_name === 'ccm.list_projects',
+      ),
+    );
     const projectDiscovery = await client.callTool({
-      name: 'list_projects',
-      arguments: {},
+      name: 'exec',
+      arguments: {
+        calls: [{ tool: 'ccm.list_projects', arguments: {} }],
+      },
     });
     assert.equal(projectDiscovery.isError, undefined);
-    assert.equal(projectDiscovery.structuredContent.default_environment_id, 'mcp-worker');
-    assert.equal(projectDiscovery.structuredContent.environments.length, 1);
-    assert.equal(projectDiscovery.structuredContent.environments[0].id, 'mcp-worker');
-    assert.equal(projectDiscovery.structuredContent.environments[0].projects.length, 1);
+    const nestedProjectDiscovery =
+      projectDiscovery.structuredContent.calls[0].result.structured_content;
+    assert.equal(nestedProjectDiscovery.default_environment_id, 'mcp-worker');
+    assert.equal(nestedProjectDiscovery.environments.length, 1);
+    assert.equal(nestedProjectDiscovery.environments[0].id, 'mcp-worker');
+    assert.equal(nestedProjectDiscovery.environments[0].projects.length, 1);
     assert.equal(
-      projectDiscovery.structuredContent.environments[0].projects[0].project_id,
+      nestedProjectDiscovery.environments[0].projects[0].project_id,
       workerRuntime.workspaceRegistry.listRegistered()[0].workspace_id,
     );
     assert.equal(
       Object.hasOwn(
-        projectDiscovery.structuredContent.environments[0],
+        nestedProjectDiscovery.environments[0],
         'projectless_contexts',
       ),
       false,
@@ -251,12 +270,16 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(projectlessResult.workspace_kind, 'projectless');
 
     const completeProjectDiscovery = await client.callTool({
-      name: 'list_projects',
-      arguments: { all: true },
+      name: 'exec',
+      arguments: {
+        calls: [{ tool: 'ccm.list_projects', arguments: { all: true } }],
+      },
     });
     assert.equal(completeProjectDiscovery.isError, undefined);
+    const nestedCompleteProjectDiscovery =
+      completeProjectDiscovery.structuredContent.calls[0].result.structured_content;
     assert.equal(
-      completeProjectDiscovery.structuredContent.environments[0]
+      nestedCompleteProjectDiscovery.environments[0]
         .projectless_contexts[0].projectless_id,
       projectlessResult.workspace_id,
     );
