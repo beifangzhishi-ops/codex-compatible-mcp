@@ -215,6 +215,8 @@ The `preworker` script builds the native helper for the current platform first.
 
 CCM includes public Task Scheduler helpers for both Controller hosts and standalone Remote Workers. They run hidden under the current Windows user, start at logon, use `IgnoreNew` to avoid duplicate instances, and configure Task Scheduler restart-on-failure behavior. Each supervisor also restarts its own child process if that child exits unexpectedly.
 
+For an assistant-operated restart of the Controller service group, prefer the existing supervisor recovery path rather than reinstalling or modifying the scheduled task: read the current gateway PID from `.state/ccm-public.pid`, terminate that gateway process tree from the normal CCM sandbox when permitted, and let `scripts/ccm-supervisor.ps1` rebuild and relaunch the Controller, local Worker, and OAuth sidecar. A restart does **not** require user approval merely because it is a restart; request `require_escalated` only when the concrete restart operation is actually blocked by the current sandbox. After the supervisor relaunches the group, verify Controller health, local/remote Worker state, and sidecar health before reporting success. Do not change Task Scheduler configuration just to perform an ordinary restart.
+
 For a Controller machine that should run the Controller, its local Worker, and the OAuth sidecar as one service group:
 
 ```powershell
