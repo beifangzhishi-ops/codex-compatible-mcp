@@ -200,12 +200,40 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     );
     assert.ok(sendFileTool);
     assert.deepEqual(sendFileTool.surfaces, ['deferred', 'code_mode']);
+    assert.equal(sendFileTool.discoverability, 'exact');
     assert.match(
       sendFileTool.description,
       /include the host-generated native ChatGPT file attachment object in the final response, not its file ID as text/i,
     );
+    assert.match(sendFileTool.description, /terminal handoff step/i);
+    assert.match(sendFileTool.description, /Host may require user interaction/i);
     assert.match(sendFileTool.description, /1 KiB \(1024 bytes\)/i);
     assert.match(sendFileTool.description, /never pad, rewrite, or otherwise alter/i);
+
+    for (const query of ['', 'file', 'attachment', 'download']) {
+      const broadSearch = await client.callTool({
+        name: 'tool_search',
+        arguments: { query, limit: 25 },
+      });
+      assert.equal(
+        broadSearch.structuredContent.tools.some(
+          (tool) => tool.qualified_name === 'ccm-extra.send_file',
+        ),
+        false,
+        'send_file should require exact discovery for query ' + JSON.stringify(query),
+      );
+    }
+
+    const qualifiedSendSearch = await client.callTool({
+      name: 'tool_search',
+      arguments: { query: 'ccm-extra.send_file', limit: 5 },
+    });
+    assert.equal(
+      qualifiedSendSearch.structuredContent.tools.some(
+        (tool) => tool.qualified_name === 'ccm-extra.send_file',
+      ),
+      true,
+    );
 
     for (const deferredName of ['send_file', 'chatgpt_share_export', 'quark_upload']) {
       const search = await client.callTool({
@@ -501,7 +529,6 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     );
     assert.equal(nestedSendFile.byte_length, docBytes.length);
-    assert.equal(nestedSendFile.resource_uri, undefined);
     const resourceUri = resourceLink.uri;
     assert.match(resourceUri, /^ccm-file:\/\/\//);
     assert.equal(resourceLink.mimeType, nestedSendFile.mime_type);

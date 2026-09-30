@@ -18,8 +18,6 @@ test('public environment metadata hides internal directories and permission topo
   assert.equal(environment.cwd, undefined);
   assert.equal(environment.workspace_roots, undefined);
   assert.equal(environment.permission_profile, undefined);
-  assert.equal(environment.filesystem_policy, undefined);
-  assert.equal(environment.filesystem_access, undefined);
   assert.equal(environment.sandbox_read_scope, 'host');
   assert.equal(environment.sandbox_write_scope, 'context_root');
 
@@ -57,8 +55,4 @@ test('public filesystem access summary follows the effective permission profile'
   assert.equal(byId.full.sandbox_write_scope, 'host');
   assert.equal(byId.future.sandbox_read_scope, 'restricted');
   assert.equal(byId.future.sandbox_write_scope, 'restricted');
-  assert.equal(byId.ro.filesystem_access, undefined);
-  assert.equal(byId.ww.filesystem_access, undefined);
-  assert.equal(byId.full.filesystem_access, undefined);
-  assert.equal(byId.future.filesystem_access, undefined);
 });

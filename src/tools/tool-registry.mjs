@@ -18,6 +18,16 @@ function normalizedSurfaces(value = {}) {
   return Object.freeze(surfaces);
 }
 
+function normalizedDiscoverability(value = 'search') {
+  const discoverability = String(value);
+  if (!['search', 'exact'].includes(discoverability)) {
+    throw new Error(
+      'Tool discoverability must be "search" or "exact".',
+    );
+  }
+  return discoverability;
+}
+
 export function toolExposureLabel(surfaces) {
   const { direct, deferred, codeMode } = surfaces;
   if (direct && codeMode) return 'Direct';
@@ -98,6 +108,7 @@ export class ToolRegistry {
     const surfaces = normalizedSurfaces(
       tool.surfaces || { direct: true, codeMode: true },
     );
+    const discoverability = normalizedDiscoverability(tool.discoverability);
 
     if (surfaces.direct) {
       const conflict = [...this.tools.values()].find(
@@ -120,6 +131,7 @@ export class ToolRegistry {
       provenance: String(tool.provenance || tool.provider || 'ccm-core'),
       surfaces,
       exposure: toolExposureLabel(surfaces),
+      discoverability,
       tags: Object.freeze([...(tool.tags || [])].map(String)),
       environmentRequirements: Object.freeze({
         ...(tool.environmentRequirements || {}),
@@ -201,6 +213,7 @@ export class ToolRegistry {
       provenance: tool.provenance,
       description: tool.description || '',
       exposure: tool.exposure,
+      discoverability: tool.discoverability,
       surfaces: [
         ...(tool.surfaces.direct ? [ToolSurface.DIRECT] : []),
         ...(tool.surfaces.deferred ? [ToolSurface.DEFERRED] : []),
@@ -215,8 +228,18 @@ export class ToolRegistry {
 
   searchDeferred(query, { limit = 8 } = {}) {
     const capped = Math.max(1, Math.min(25, Number(limit) || 8));
+    const rawQuery = String(query || '');
+    const normalizedQuery = rawQuery.trim().toLowerCase();
     return this.listDeferred()
-      .map((tool) => ({ tool, score: scoreTool(tool, String(query || '')) }))
+      .map((tool) => ({
+        tool,
+        score: tool.discoverability === 'exact'
+          ? (
+              normalizedQuery === tool.name.toLowerCase() ||
+              normalizedQuery === tool.qualifiedName.toLowerCase()
+            ) ? 1000 : 0
+          : scoreTool(tool, rawQuery),
+      }))
       .filter(({ score }) => score > 0)
       .sort((left, right) =>
         right.score - left.score ||

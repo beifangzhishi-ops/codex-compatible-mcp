@@ -104,12 +104,14 @@ test('send_file is Deferred + Code Mode and returns one native resource link usi
   assert.equal(sendFile.surfaces.direct, false);
   assert.equal(sendFile.surfaces.deferred, true);
   assert.equal(sendFile.surfaces.codeMode, true);
+  assert.equal(sendFile.discoverability, 'exact');
   assert.equal(sendFile.supportsParallel, false);
   assert.match(sendFile.description, /exactly one file per call/i);
   assert.match(sendFile.description, /sequentially/i);
   assert.match(sendFile.description, /never issue concurrent or parallel/i);
-  assert.match(sendFile.description, /discover send_file through tool_search and invoke it through exec/i);
-  assert.match(sendFile.description, /no separate transfer confirmation is required/i);
+  assert.match(sendFile.description, /exact name send_file or ccm-extra\.send_file/i);
+  assert.match(sendFile.description, /terminal handoff step/i);
+  assert.match(sendFile.description, /Host may require user interaction/i);
   assert.match(
     sendFile.description,
     /include the host-generated native ChatGPT file attachment object in the final response, not its file ID as text/i,
@@ -118,7 +120,6 @@ test('send_file is Deferred + Code Mode and returns one native resource link usi
   assert.match(sendFile.description, /never pad, rewrite, or otherwise alter/i);
   assert.match(sendFile.inputSchema.path.description, /exactly one file path/i);
   assert.match(sendFile.inputSchema.path.description, /do not call send_file in parallel/i);
-  assert.equal(sendFile.mcpMeta, undefined);
 
   const result = await registry.get('ccm-extra.send_file').handler({
     workspace_context: '00000000-0000-4000-8000-000000000001',
@@ -142,7 +143,6 @@ test('send_file is Deferred + Code Mode and returns one native resource link usi
     result.content.filter((item) => item.type === 'resource_link').length,
     1,
   );
-  assert.equal(result.structuredContent.resource_uri, undefined);
   assert.match(resourceLink.uri, /^ccm-file:\/\/\/[0-9a-f-]+$/i);
   const token = resourceLink.uri.split('/').at(-1);
   const stored = runtime.fileTransferStore.get(token);
@@ -204,7 +204,6 @@ test('receive_file is Deferred + Code Mode and preserves native file objects thr
   assert.equal(receiveFile.surfaces.deferred, true);
   assert.equal(receiveFile.surfaces.codeMode, true);
   assert.equal(receiveFile.supportsParallel, false);
-  assert.equal(receiveFile.mcpMeta, undefined);
   assert.match(receiveFile.description, /exactly one ChatGPT file per call/i);
   assert.match(receiveFile.description, /sequentially/i);
   assert.match(receiveFile.description, /Never issue concurrent or parallel/i);

@@ -158,6 +158,7 @@ export function registerSpecializedTools(registry, runtime) {
     provider: 'ccm-specialized',
     provenance: 'ccm-native-file-transfer',
     surfaces: { deferred: true, codeMode: true },
+    discoverability: 'exact',
     tags: ['file', 'attachment', 'transfer', 'gpt'],
     environmentRequirements: {
       capabilities: ['sendFile'],
@@ -165,10 +166,12 @@ export function registerSpecializedTools(registry, runtime) {
     supportsParallel: false,
     description: [
       'Send exactly one file per call from a CCM environment to the GPT client as a native MCP resource link. If the user needs multiple files, call send_file sequentially and wait for each call to return before starting the next. Never issue concurrent or parallel send_file calls.',
-      'Discover send_file through tool_search and invoke it through exec when the user asks to receive, download, open, upload onward, or otherwise hand off a known local Worker file in chat. Once the exact path and intended file are clear, no separate transfer confirmation is required.',
+      'Use this only when the user explicitly asks for a known local Worker file to be delivered as a native ChatGPT attachment. Discover it through tool_search only by the exact name send_file or ccm-extra.send_file, then invoke it through exec.',
+      'Treat send_file as a terminal handoff step: run it only after all required analysis, verification, editing, testing, and other tool work is complete. Do not call it as an intermediate step when the model still needs to continue working afterward.',
       'workspace_context is required and determines the Worker. Relative paths are resolved from that context root; absolute paths remain absolute on the selected Worker.',
       'For a genuinely projectless task, automatically obtain a projectless context first through ccm.create_projectless_context; do not ask the user to choose or register a temporary directory. If select_workspace or register_workspace is awaiting approval for the intended real project, wait for that action to resolve and use its registered workspace_context instead.',
-      'Do NOT use send_file merely so the model can inspect, review, analyze, or verify a local file. If the file can be examined inside CCM, prefer local reading, view_image, command-line inspection, or a temporary local preview instead.',
+      'Do NOT use send_file for model-side inspection, review, analysis, verification, stage previews, or cross-tool transfer. If the file can be examined inside CCM, prefer local reading, view_image, command-line inspection, or a temporary local preview instead.',
+      'The ChatGPT Host may require user interaction before materializing the native attachment. That confirmation is Host-owned, not a CCM approval, and CCM does not provide a way to bypass it.',
       'The transfer preserves the original file bytes and does not use BMG or upload the file to ChatGPT Library.',
       'After send_file succeeds, include the host-generated native ChatGPT file attachment object in the final response, not its file ID as text.',
       'Treat 1 KiB (1024 bytes) as the operational minimum for reliable ChatGPT attachment downloads. Files smaller than 1 KiB may still be transferred byte-for-byte, but some ChatGPT clients can remain stuck connecting when downloading them. Never pad, rewrite, or otherwise alter the source file to reach this threshold; warn the user instead when a sub-1-KiB file is being handed off.',

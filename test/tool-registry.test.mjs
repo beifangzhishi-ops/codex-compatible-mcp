@@ -13,6 +13,7 @@ function textTool({
   namespace = 'test',
   surfaces,
   supportsParallel = false,
+  discoverability,
   description = '',
   inputSchema = {},
   handler,
@@ -26,6 +27,7 @@ function textTool({
     namespace,
     surfaces,
     supportsParallel,
+    discoverability,
     description,
     inputSchema,
     provider,
@@ -135,6 +137,62 @@ test('ToolRegistry enforces namespace and direct wire collisions', () => {
     })),
     /Tool collision/,
   );
+
+  assert.throws(
+    () => registry.register(textTool({
+      name: 'bad_discovery',
+      surfaces: { deferred: true },
+      discoverability: 'sometimes',
+    })),
+    /discoverability must be "search" or "exact"/i,
+  );
+  assert.throws(
+    () => registry.register(textTool({
+      name: 'empty_discovery',
+      surfaces: { deferred: true },
+      discoverability: '',
+    })),
+    /discoverability must be "search" or "exact"/i,
+  );
+});
+
+test('tool_search supports exact-only deferred discovery', () => {
+  const registry = new ToolRegistry();
+  registry.register(textTool({
+    name: 'normal_file_tool',
+    namespace: 'files',
+    surfaces: { deferred: true, codeMode: true },
+    description: 'Download and transfer files.',
+    tags: ['file', 'download'],
+  }));
+  registry.register(textTool({
+    name: 'send_file',
+    namespace: 'ccm-extra',
+    surfaces: { deferred: true, codeMode: true },
+    discoverability: 'exact',
+    description: 'Native attachment transfer.',
+    tags: ['file', 'attachment', 'download'],
+  }));
+
+  assert.equal(registry.get('ccm-extra.send_file').discoverability, 'exact');
+  assert.equal(registry.get('files.normal_file_tool').discoverability, 'search');
+  assert.equal(registry.searchDeferred('').some(
+    (tool) => tool.qualified_name === 'ccm-extra.send_file'), false);
+  assert.equal(registry.searchDeferred('file').some(
+    (tool) => tool.qualified_name === 'ccm-extra.send_file'), false);
+  assert.equal(registry.searchDeferred('attachment').some(
+    (tool) => tool.qualified_name === 'ccm-extra.send_file'), false);
+  assert.equal(registry.searchDeferred('send').some(
+    (tool) => tool.qualified_name === 'ccm-extra.send_file'), false);
+
+  const byName = registry.searchDeferred('send_file');
+  assert.equal(byName.length, 1);
+  assert.equal(byName[0].qualified_name, 'ccm-extra.send_file');
+  assert.equal(byName[0].discoverability, 'exact');
+
+  const byQualifiedName = registry.searchDeferred('ccm-extra.send_file');
+  assert.equal(byQualifiedName.length, 1);
+  assert.equal(byQualifiedName[0].qualified_name, 'ccm-extra.send_file');
 });
 
 test('tool_search metadata includes schema, provenance, and requirements', async () => {
