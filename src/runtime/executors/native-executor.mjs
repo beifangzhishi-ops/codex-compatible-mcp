@@ -58,9 +58,20 @@ function wirePipeChild(child, onData, onExit) {
 }
 
 export class NativeEnvironmentExecutor {
-  constructor({ sandboxBackend, ptyProxyPath = DEFAULT_PTY_PROXY_PATH }) {
+  constructor({
+    sandboxBackend,
+    childProxyPolicy,
+    ptyProxyPath = DEFAULT_PTY_PROXY_PATH,
+    baseEnv = process.env,
+    spawnProcess = spawnChild,
+    fileExists = fs.existsSync,
+  }) {
     this.sandboxBackend = sandboxBackend;
+    this.childProxyPolicy = childProxyPolicy;
     this.ptyProxyPath = ptyProxyPath;
+    this.baseEnv = baseEnv;
+    this.spawnProcess = spawnProcess;
+    this.fileExists = fileExists;
   }
 
   startProcess({
@@ -73,7 +84,9 @@ export class NativeEnvironmentExecutor {
     onData,
     onExit,
   }) {
-    const childEnv = buildProxyEnvironment(process.env);
+    const childEnv = buildProxyEnvironment(this.baseEnv, {
+      mode: this.childProxyPolicy?.getMode?.() || 'proxy',
+    });
     const invocation = this.sandboxBackend.buildInvocation({
       environment,
       command,
@@ -83,13 +96,13 @@ export class NativeEnvironmentExecutor {
     });
 
     if (tty) {
-      if (!fs.existsSync(this.ptyProxyPath)) {
+      if (!this.fileExists(this.ptyProxyPath)) {
         throw new Error(
           'CCM PTY proxy is missing. Run "npm run build:native" before using tty=true.',
         );
       }
 
-      const child = spawnChild(
+      const child = this.spawnProcess(
         this.ptyProxyPath,
         [
           '--cwd',
@@ -116,7 +129,7 @@ export class NativeEnvironmentExecutor {
       };
     }
 
-    const child = spawnChild(invocation.file, invocation.args, {
+    const child = this.spawnProcess(invocation.file, invocation.args, {
       cwd,
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],

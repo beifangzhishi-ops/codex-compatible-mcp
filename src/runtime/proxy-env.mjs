@@ -4,11 +4,6 @@ const WINDOWS_INTERNET_SETTINGS =
   'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings';
 const DEFAULT_NO_PROXY = 'localhost,127.0.0.1,::1';
 
-function enabled(value) {
-  if (value == null || value === '') return true;
-  return !['0', 'false', 'no', 'off'].includes(String(value).trim().toLowerCase());
-}
-
 function normalizeProxyUrl(value) {
   const raw = String(value || '').trim();
   if (!raw) return null;
@@ -66,8 +61,6 @@ function queryWindowsProxy(env = process.env, spawn = spawnSync) {
 }
 
 export function discoverProxyUrl(env = process.env, spawn = spawnSync) {
-  if (!enabled(env.CCM_PROXY_AUTO)) return null;
-
   const explicit =
     env.CCM_PROXY ||
     env.HTTPS_PROXY ||
@@ -81,7 +74,25 @@ export function discoverProxyUrl(env = process.env, spawn = spawnSync) {
   return queryWindowsProxy(env, spawn);
 }
 
-export function buildProxyEnvironment(env = process.env, spawn = spawnSync) {
+export function buildProxyEnvironment(
+  env = process.env,
+  { mode = 'proxy', spawn = spawnSync } = {},
+) {
+  if (mode === 'direct') {
+    const directEnv = { ...env };
+    for (const name of [
+      'CCM_PROXY',
+      'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY',
+      'http_proxy', 'https_proxy', 'all_proxy',
+    ]) {
+      delete directEnv[name];
+    }
+    return directEnv;
+  }
+  if (mode !== 'proxy') {
+    throw new Error('Unknown child proxy mode: ' + mode);
+  }
+
   const proxy = discoverProxyUrl(env, spawn);
   if (!proxy) return { ...env };
 

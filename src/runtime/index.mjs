@@ -5,6 +5,7 @@ import { ProcessManager } from './process-manager.mjs';
 import { NativeSandboxBackend } from './sandbox/native-sandbox.mjs';
 import { NativeFileService } from './filesystem/native-file-service.mjs';
 import { WorkspaceRegistry } from './workspace-registry.mjs';
+import { ChildProxyPolicy } from './child-proxy-policy.mjs';
 
 export function createWorkerRuntime(options = {}) {
   const environmentRegistry = options.environmentRegistry ||
@@ -17,12 +18,16 @@ export function createWorkerRuntime(options = {}) {
     projectlessRoot: options.projectlessRoot,
     seedBootstrapWorkspace: options.seedBootstrapWorkspace !== false,
   });
+  const childProxyPolicy = options.childProxyPolicy || new ChildProxyPolicy({
+    file: options.childProxyStateFile,
+    log: options.log,
+  });
 
   const executorRegistry = options.executorRegistry || new ExecutorRegistry();
   if (!options.executorRegistry) {
     executorRegistry.register(
       'native',
-      new NativeEnvironmentExecutor({ sandboxBackend }),
+      new NativeEnvironmentExecutor({ sandboxBackend, childProxyPolicy }),
     );
   }
 
@@ -44,6 +49,7 @@ export function createWorkerRuntime(options = {}) {
     workspaceRegistry,
     executorRegistry,
     sandboxBackend,
+    childProxyPolicy,
     processManager,
     fileService,
     close() {

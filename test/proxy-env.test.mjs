@@ -59,15 +59,27 @@ test('Windows enabled user proxy is discovered when no proxy env is present', ()
   assert.equal(calls.length, 2);
 });
 
-test('CCM_PROXY_AUTO=0 disables automatic injection', () => {
+test('direct mode removes inherited child-process proxy variables', () => {
   const env = buildProxyEnvironment({
-    CCM_PROXY_AUTO: '0',
     CCM_PROXY: 'http://127.0.0.1:7890',
+    HTTP_PROXY: 'http://127.0.0.1:7891',
+    HTTPS_PROXY: 'http://127.0.0.1:7892',
+    ALL_PROXY: 'http://127.0.0.1:7893',
+    http_proxy: 'http://127.0.0.1:7894',
+    https_proxy: 'http://127.0.0.1:7895',
+    all_proxy: 'http://127.0.0.1:7896',
+    NO_PROXY: 'localhost',
     PATH: 'test-path',
-  });
+  }, { mode: 'direct' });
   assert.deepEqual(env, {
-    CCM_PROXY_AUTO: '0',
-    CCM_PROXY: 'http://127.0.0.1:7890',
+    NO_PROXY: 'localhost',
     PATH: 'test-path',
   });
+});
+
+test('unknown child proxy mode is rejected', () => {
+  assert.throws(
+    () => buildProxyEnvironment({}, { mode: 'backup' }),
+    /Unknown child proxy mode/,
+  );
 });

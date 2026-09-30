@@ -293,6 +293,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\configure-ccm-
 
 The public MCP resource is `https://<host>/ccm/mcp`. Runtime OAuth configuration is stored in ignored `config/ccm.env`; OAuth tokens/state and the local approval secret remain under ignored `.state/`.
 
+Funnel is CCM's public **ingress/control path** only. It lets a remote MCP client continue reaching the OAuth sidecar and Controller even when a Worker's ordinary outbound proxy is unhealthy, but it is not a SOCKS proxy, HTTP CONNECT proxy, NAT gateway, or general egress service. A Worker child process such as `git`, `curl`, `npm`, or `pip` creates its own outbound connection and cannot route that new connection "back through" Funnel. Child-process egress is controlled independently by the proxy/direct mode described below.
+
 ### ChatGPT rebuild handoff rule
 
 ChatGPT-side CCM/plugin/connector rebuilds are **user-operated**. The assistant must not rename, delete, recreate, reconnect, or otherwise rebuild the ChatGPT CCM registration on the user's behalf unless the user explicitly overrides this rule for that rebuild.
@@ -357,6 +359,7 @@ npm run worker
 | `CCM_CONTROLLER_STATE_DIR` | Windows: `%LOCALAPPDATA%\CCM`; XDG: `$XDG_STATE_HOME/ccm`; fallback: `~/.ccm` | Protected Controller security state, including execution policies and trusted package-script rules. Keep this outside workspace-write roots. |
 | `CCM_APPROVAL_TTL_MS` | 259200000 ms (3 days) | Lifetime of pending execution and workspace approvals before they expire. Invalid or non-positive values fall back to the default. |
 | `CCM_PERMISSION_PROFILE` | `workspace-write` | `read-only`, `workspace-write`, or `full-access`. `full-access` uses normal Worker host permissions and skips CCM user-approval prompts for workspace lifecycle and execution actions. |
+| `CCM_PROXY` | unset | Optional explicit HTTP(S) proxy URL used in child-process `proxy` mode before standard proxy environment variables or the enabled Windows user proxy. |
 | `CCM_MAX_MCP_TOOL_RESULT_BYTES` | 2 MiB | Serialized MCP tool-result limit for ordinary results. |
 | `CCM_MAX_MCP_FILE_RESULT_BYTES` | 24 MiB | Serialized MCP result limit when returning an embedded file resource. |
 | `CCM_MAX_VIEW_IMAGE_BYTES` | 1 MiB | Maximum raw image size returned by `view_image`. |
@@ -365,6 +368,25 @@ npm run worker
 | `CCM_FILE_TRANSFER_TTL_MS` | 0 (disabled) | Optional positive TTL for persisted `send_file` bridge resources. |
 | `CCM_FILE_TRANSFER_CACHE_BYTES` | 64 MiB | Maximum total raw bytes retained in the persisted file-transfer bridge cache; oldest entries are evicted first. |
 | `CCM_WORKER_RECONNECT_MS` | 1000 ms | Worker reconnect delay. |
+
+### Worker child-process proxy/direct mode
+
+Worker-launched commands have a local hot-switchable network mode. The mode is stored in ignored Worker state at `<install>/.state/child-proxy.json`, persists across Worker restarts, and is re-read for every newly spawned process. Existing shell or PTY sessions keep the environment they were started with.
+
+- `proxy` is the default when the state file does not exist. CCM discovers the child proxy in this order: `CCM_PROXY`, standard uppercase/lowercase HTTP(S)/ALL proxy environment variables, then the enabled Windows user proxy. The discovered URL is injected into the common uppercase and lowercase proxy variables for the new child process.
+- `direct` explicitly removes `CCM_PROXY`, `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `http_proxy`, `https_proxy`, and `all_proxy` from the new child environment. `NO_PROXY` / `no_proxy` may remain because they do not create a proxy route by themselves.
+
+Manage the mode on a Worker without restarting it:
+
+```powershell
+node scripts/manage-child-proxy.mjs status
+node scripts/manage-child-proxy.mjs proxy
+node scripts/manage-child-proxy.mjs direct
+```
+
+`status` reports the current mode and, in `proxy` mode, the proxy URL that would currently be discovered. The state writer uses a same-directory temporary file plus rename, so normal mode changes are atomic. If the state file is manually corrupted, a running Worker keeps the last known-good mode and logs the invalid update until valid state is restored.
+
+This switch applies only to commands spawned by the Worker, including normal pipe, PTY, sandboxed, trusted, and full-access execution paths. It does not change the WorkerHub connection, Controller/OAuth sidecar networking, Tailscale Funnel ingress, or `receive_file`'s own HTTP(S) transfer proxy selection.
 
 ## Sandbox and platform support
 
