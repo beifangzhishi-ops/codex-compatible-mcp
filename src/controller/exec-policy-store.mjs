@@ -191,4 +191,4 @@ export class ExecPolicyStore {
   close() {
     this.#persist();
   }
-}\n
+}
