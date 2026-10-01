@@ -4,7 +4,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   ExecPolicyStore,
-  EXEC_POLICY_STATE_VERSION,
 } from '../src/controller/exec-policy-store.mjs';
 import {
   hashPackageScript,
@@ -146,14 +145,14 @@ test('rules bind the effective shell, including environment defaults', () => {
   }), null);
 });
 
-test('version 1 exact-command state is reset rather than migrated', async () => {
+test('unsupported exec-policy state versions fail closed without migration', async () => {
   const tempBase = path.join(process.cwd(), '.cache', 'test-tmp');
   await fs.promises.mkdir(tempBase, { recursive: true });
   const root = await fs.promises.mkdtemp(path.join(tempBase, 'ccm-exec-policy-'));
   const stateFile = path.join(root, 'exec-policy.json');
   try {
     await fs.promises.writeFile(stateFile, JSON.stringify({
-      version: 1,
+      version: 999,
       rules: [{
         rule_id: 'old-rule',
         decision: 'allow',
@@ -166,8 +165,8 @@ test('version 1 exact-command state is reset rather than migrated', async () => 
     const store = new ExecPolicyStore({ stateFile });
     assert.deepEqual(store.list(), []);
     const parsed = JSON.parse(await fs.promises.readFile(stateFile, 'utf8'));
-    assert.equal(parsed.version, EXEC_POLICY_STATE_VERSION);
-    assert.deepEqual(parsed.rules, []);
+    assert.equal(parsed.version, 999);
+    assert.equal(parsed.rules[0].rule_id, 'old-rule');
   } finally {
     await fs.promises.rm(root, { recursive: true, force: true });
   }

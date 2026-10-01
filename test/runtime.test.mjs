@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRuntime } from '../src/runtime/index.mjs';
+import { ProcessManager } from '../src/runtime/process-manager.mjs';
 import { killChildProcessTree } from '../src/runtime/executors/native-executor.mjs';
 
 const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -17,6 +18,40 @@ function runtimeFor(permissionProfile = 'workspace-write') {
       cwd: root,
       permissionProfile,
     },
+  });
+}
+
+function fakeProcessManager(processResultTtlMs, exitDelayMs = 300) {
+  const environment = {
+    id: 'fake-process-worker',
+    cwd: root,
+    platform: 'linux',
+    permissionProfile: 'full-access',
+    shell: { path: 'fake-shell' },
+  };
+  return new ProcessManager({
+    environmentRegistry: { resolve: () => environment },
+    executorRegistry: {
+      resolve() {
+        return {
+          startProcess({ onData, onExit }) {
+            const timer = setTimeout(() => {
+              onData('final output\n');
+              onExit(0, null);
+            }, exitDelayMs);
+            return {
+              sandboxed: false,
+              stdinWritable: false,
+              kill() {
+                clearTimeout(timer);
+                onExit(null, 'SIGTERM');
+              },
+            };
+          },
+        };
+      },
+    },
+    processResultTtlMs,
   });
 }
 
@@ -134,6 +169,61 @@ test('long commands yield an integer session id and resume with write_stdin', as
     assert.match(first.output + second.output, /after/);
   } finally {
     runtime.close();
+  }
+});
+
+test('exited yielded sessions retain final output briefly and then expire', async () => {
+  const manager = fakeProcessManager(80);
+  try {
+    const first = await manager.execCommand({
+      cmd: 'fake retained command',
+      yield_time_ms: 250,
+    });
+    assert.equal(typeof first.session_id, 'number');
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await assert.rejects(
+      manager.writeStdin({
+        session_id: first.session_id,
+        chars: '',
+      }),
+      /Unknown or expired session_id/i,
+    );
+  } finally {
+    manager.terminateAll();
+  }
+});
+
+test('exited retained sessions do not consume the live-process limit', async () => {
+  const manager = fakeProcessManager(10_000);
+  try {
+    const firstBatch = await Promise.all(
+      Array.from({ length: 64 }, (_, index) =>
+        manager.execCommand({ cmd: 'fake command ' + index, yield_time_ms: 250 })),
+    );
+    assert.equal(firstBatch.every((result) => typeof result.session_id === 'number'), true);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const next = await manager.execCommand({
+      cmd: 'fake command after retained exits',
+      yield_time_ms: 250,
+    });
+    assert.equal(typeof next.session_id, 'number');
+  } finally {
+    manager.terminateAll();
+  }
+});
+
+test('the process limit still counts genuinely live sessions', async () => {
+  const manager = fakeProcessManager(10_000, 1_000);
+  try {
+    const attempts = await Promise.allSettled(
+      Array.from({ length: 65 }, (_, index) =>
+        manager.execCommand({ cmd: 'live fake command ' + index, yield_time_ms: 250 })),
+    );
+    assert.equal(attempts.filter((result) => result.status === 'fulfilled').length, 64);
+    const rejected = attempts.find((result) => result.status === 'rejected');
+    assert.match(String(rejected?.reason?.message || rejected?.reason), /limit is 64/i);
+  } finally {
+    manager.terminateAll();
   }
 });
 

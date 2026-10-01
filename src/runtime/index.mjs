@@ -35,6 +35,7 @@ export function createWorkerRuntime(options = {}) {
     environmentRegistry,
     executorRegistry,
     workspaceRegistry,
+    processResultTtlMs: options.processResultTtlMs,
   });
   const fileService = options.fileService || new NativeFileService({
     environmentRegistry,

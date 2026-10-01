@@ -25,7 +25,6 @@ function publicRule(rule) {
     created_at: rule.created_at,
   };
 }
-
 function sameScope(rule, { workspaceContext, environment, args }) {
   return rule.environment_id === String(environment.id) &&
     rule.workspace_id === String(workspaceContext.workspace_id) &&
@@ -56,10 +55,7 @@ export class ExecPolicyStore {
         fs.readFileSync(this.stateFile, 'utf8').replace(/^\uFEFF/, ''),
       );
       if (parsed?.version !== STATE_VERSION) {
-        this.rules = [];
-        this.#emit('legacy_state_reset', { previous_version: parsed?.version });
-        this.#persist();
-        return;
+        throw new Error('Unsupported exec-policy state version.');
       }
       this.rules = Array.isArray(parsed.rules)
         ? parsed.rules.filter((rule) => (
@@ -195,6 +191,4 @@ export class ExecPolicyStore {
   close() {
     this.#persist();
   }
-}
-
-export { STATE_VERSION as EXEC_POLICY_STATE_VERSION };
+}\n

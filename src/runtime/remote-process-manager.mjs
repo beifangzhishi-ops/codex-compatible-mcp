@@ -888,12 +888,23 @@ export class RemoteProcessManager {
     const timeoutMs = Math.max(15_000, requestedYield + 10_000);
     const forwardedArgs = { ...args, session_id: session.remoteSessionId };
     delete forwardedArgs.workspace_context;
-    const result = await this.workerHub.call(
-      session.environmentId,
-      'write_stdin',
-      forwardedArgs,
-      { timeoutMs },
-    );
+    let result;
+    try {
+      result = await this.workerHub.call(
+        session.environmentId,
+        'write_stdin',
+        forwardedArgs,
+        { timeoutMs },
+      );
+    } catch (error) {
+      if (
+        this.sessions.get(args.session_id) === session &&
+        /Unknown or expired session_id/i.test(String(error?.message || error))
+      ) {
+        this.sessions.delete(args.session_id);
+      }
+      throw error;
+    }
     if (this.sessions.get(args.session_id) !== session) {
       throw new Error(
         'Session identity changed while write_stdin was in flight: ' +

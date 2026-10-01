@@ -529,6 +529,59 @@ test('Controller rejects cross-workspace write_stdin before contacting Worker', 
   }
 });
 
+test('Controller drops a public session when the Worker reports it expired', async () => {
+  const registry = new EnvironmentRegistry({ resolvePaths: false });
+  registry.register({
+    id: 'worker-expired-session',
+    platform: 'windows',
+    cwd: 'C:\\workspace',
+    workspaceRoots: ['C:\\workspace'],
+    permissionProfile: 'full-access',
+    backend: 'remote-worker',
+  });
+  const context = {
+    workspace_context: '00000000-0000-4000-8000-000000000019',
+    environment_id: 'worker-expired-session',
+    workspace_id: 'workspace-expired',
+    workspace_kind: 'registered',
+    workspace_root: 'C:\\workspace',
+  };
+  class FakeWorkerHub extends EventEmitter {
+    async call(_environmentId, method) {
+      if (method === 'exec_command') {
+        return { chunk_id: 'start', wall_time_seconds: 0, output: '', session_id: 19 };
+      }
+      if (method === 'write_stdin') {
+        throw new Error('Unknown or expired session_id: 19');
+      }
+      if (method === 'terminate_session') return { terminated: true };
+      throw new Error('Unexpected method: ' + method);
+    }
+  }
+  const manager = new RemoteProcessManager({
+    environmentRegistry: registry,
+    workerHub: new FakeWorkerHub(),
+    workspaceContextManager: { resolve: () => context },
+  });
+  try {
+    const started = await manager.execCommand({
+      workspace_context: context.workspace_context,
+      cmd: 'long-running command',
+    });
+    await assert.rejects(
+      manager.writeStdin({
+        session_id: started.session_id,
+        workspace_context: context.workspace_context,
+        chars: '',
+      }),
+      /Unknown or expired session_id/i,
+    );
+    assert.equal(manager.sessions.has(started.session_id), false);
+  } finally {
+    await manager.close();
+  }
+});
+
 test('Controller caps initial Remote Worker exec waits at five seconds', async () => {
   const registry = new EnvironmentRegistry({ resolvePaths: false });
   registry.register({

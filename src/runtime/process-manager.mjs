@@ -18,6 +18,14 @@ const DEFAULT_EMPTY_YIELD_TIME_MS = 1_000;
 const MIN_EMPTY_YIELD_TIME_MS = 250;
 const MAX_EMPTY_YIELD_TIME_MS = 30_000;
 const MAX_PROCESSES = 64;
+export const DEFAULT_PROCESS_RESULT_TTL_MS = 10 * 60_000;
+
+function normalizeProcessResultTtl(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : DEFAULT_PROCESS_RESULT_TTL_MS;
+}
 
 function clampExecYield(milliseconds, platform) {
   const value = Number(milliseconds ?? DEFAULT_EXEC_YIELD_TIME_MS);
@@ -71,16 +79,26 @@ function appendOutput(record, chunk) {
 }
 
 export class ProcessManager {
-  constructor({ environmentRegistry, executorRegistry, workspaceRegistry = null }) {
+  constructor({
+    environmentRegistry,
+    executorRegistry,
+    workspaceRegistry = null,
+    processResultTtlMs = process.env.CCM_PROCESS_RESULT_TTL_MS,
+  }) {
     this.environmentRegistry = environmentRegistry;
     this.executorRegistry = executorRegistry;
     this.workspaceRegistry = workspaceRegistry;
     this.sessions = new Map();
     this.nextProcessId = 1000;
+    this.processResultTtlMs = normalizeProcessResultTtl(processResultTtlMs);
   }
 
   #allocateProcessId() {
-    if (this.sessions.size >= MAX_PROCESSES) {
+    let liveProcesses = 0;
+    for (const record of this.sessions.values()) {
+      if (!record.exited) liveProcesses += 1;
+    }
+    if (liveProcesses >= MAX_PROCESSES) {
       throw new Error('Too many active exec sessions; limit is ' + MAX_PROCESSES + '.');
     }
     do {
@@ -136,6 +154,7 @@ export class ProcessManager {
       exitWaiters: new Set(),
       tty: Boolean(args.tty),
       child: null,
+      expiryTimer: null,
     };
 
     record.child = executor.startProcess({
@@ -183,6 +202,20 @@ export class ProcessManager {
     record.signal = signal ?? null;
     for (const waiter of record.exitWaiters) waiter();
     record.exitWaiters.clear();
+    record.expiryTimer = setTimeout(() => {
+      if (this.sessions.get(record.processId) === record && record.exited) {
+        this.sessions.delete(record.processId);
+      }
+    }, this.processResultTtlMs);
+    record.expiryTimer.unref?.();
+  }
+
+  #deleteRecord(record) {
+    if (record.expiryTimer) {
+      clearTimeout(record.expiryTimer);
+      record.expiryTimer = null;
+    }
+    this.sessions.delete(record.processId);
   }
 
   #resultFor(
@@ -213,7 +246,7 @@ export class ProcessManager {
     }
 
     if (record.exited) {
-      this.sessions.delete(record.processId);
+      this.#deleteRecord(record);
     }
     return result;
   }
@@ -221,7 +254,7 @@ export class ProcessManager {
   terminateSession(sessionId) {
     const record = this.sessions.get(sessionId);
     if (!record) return false;
-    this.sessions.delete(sessionId);
+    this.#deleteRecord(record);
     if (!record.exited) {
       try {
         record.child.kill();
