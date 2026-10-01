@@ -89,7 +89,7 @@ export function registerArchitectureTools(
     description: [
       'Execute one or more ToolRegistry capabilities through CCM nested dispatch.',
       'Prefer one exec call for multi-step CCM work when the required tools are available on the Code Mode surface. Core tools such as list_projects, exec_command, write_stdin, and apply_patch can be nested here alongside deferred ccm-extra tools. This avoids repeated host MCP connection/initialization round trips.',
-      'For a real ChatGPT attachment consumed by one nested capability such as ccm-extra.receive_file, pass that attachment through the optional top-level file parameter. ChatGPT resolves it to the native file object and CCM injects it into that single nested call as arguments.file. Do not also provide arguments.file in the nested call.',
+      'For an ordinary ChatGPT attachment consumed by one nested capability such as ccm-extra.receive_file, pass it through the optional top-level file parameter. For a Library file, first materialize the exact Library object as raw_file with ChatGPT Files, then bind that materialized file here. CCM injects the resolved native object into the single nested call as arguments.file; do not also provide arguments.file there.',
       'This is a structured dispatcher, not a JavaScript interpreter. Use the host Code Mode for loops, branching, and data processing.',
       'Set parallel=true only for independent calls; CCM rejects parallel execution for tools that do not declare parallel-call support.',
       'For bulk local image review, search for ccm.view_image once and batch independent image calls in this exec dispatcher with parallel=true; image content is passed through natively without widget cards.',

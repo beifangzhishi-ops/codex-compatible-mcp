@@ -215,8 +215,9 @@ export function registerSpecializedTools(registry, runtime) {
     supportsParallel: false,
     description: [
       'Receive exactly one ChatGPT file per call and save it to the Worker selected by workspace_context. For multiple files, call receive_file sequentially and wait for each call to return before starting the next. Never issue concurrent or parallel receive_file calls.',
-      'The file field is the already-resolved native ChatGPT file object with download_url and file_id. For a real conversation or Library attachment, bind that file through exec\'s top-level file parameter so ChatGPT resolves it before CCM injects it into this nested call.',
-      'Do not substitute a file ID, URI, placeholder, sandbox path, or JSON string for the file object.',
+      'For an ordinary conversation attachment, bind it through exec\'s top-level file parameter, then call ccm-extra.receive_file once; exec injects the resolved native file object into this nested call.',
+      'For a ChatGPT Library file, first materialize the exact Library object as raw_file with ChatGPT Files, then bind that materialized file through top-level exec.file and call ccm-extra.receive_file once.',
+      'Do not pass a Library/file ID, ref, or URI as nested arguments.file.',
       'workspace_context is required and determines the Worker and context root. receive_file writes only inside that context root. destination must be relative; absolute paths and workspace escapes are rejected.',
       'If destination is omitted, the sanitized ChatGPT file_name is used at the context root. Existing files are not replaced unless overwrite=true.',
       'The Worker downloads the temporary ChatGPT URL directly; CCM does not route the file bytes through BMG or the Controller file-transfer cache.',

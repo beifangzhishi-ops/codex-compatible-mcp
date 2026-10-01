@@ -207,6 +207,8 @@ test('receive_file is Deferred + Code Mode and preserves native file objects thr
   assert.match(receiveFile.description, /exactly one ChatGPT file per call/i);
   assert.match(receiveFile.description, /sequentially/i);
   assert.match(receiveFile.description, /Never issue concurrent or parallel/i);
+  assert.match(receiveFile.description, /ordinary conversation attachment.*top-level file/i);
+  assert.match(receiveFile.description, /Library file.*materialize.*raw_file.*top-level exec\.file/i);
 
   const input = {
     download_url: 'https://files.example.test/download',

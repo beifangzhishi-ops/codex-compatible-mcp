@@ -190,6 +190,8 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       Object.keys(receiveFileTool.input_schema.properties.file.properties).sort(),
       ['download_url', 'file_id', 'file_name', 'mime_type'],
     );
+    assert.match(receiveFileTool.description, /ordinary conversation attachment.*top-level file/i);
+    assert.match(receiveFileTool.description, /Library file.*materialize.*raw_file.*top-level exec\.file/i);
 
     const sendSearch = await client.callTool({
       name: 'tool_search',
