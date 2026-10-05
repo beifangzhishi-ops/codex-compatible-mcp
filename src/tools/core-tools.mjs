@@ -758,8 +758,20 @@ export function registerCoreTools(registry, runtime) {
       max_output_tokens: z.number().int().positive().optional().describe('Output token budget. Defaults to 10000 tokens.'),
     },
     outputSchema: UNIFIED_EXEC_OUTPUT_SCHEMA,
-    handler: async (args) => {
+    handler: async (args, context) => {
       try {
+        const nestedCodeMode =
+          context?.source === 'code_mode' && context?.nested === true;
+        const emptyPoll = (args.chars ?? '').length === 0;
+        if (emptyPoll && !nestedCodeMode) {
+          return toolError(new Error([
+            'Direct empty write_stdin polling is disabled.',
+            'CCM did not poll or modify this session.',
+            'Poll the existing session through exec with a nested ccm.write_stdin call, reusing the exact workspace_context and session_id.',
+            'Do not create a replacement session or retry the empty poll through top-level write_stdin.',
+            'Top-level write_stdin remains available for real non-empty interactive/TTY stdin writes.',
+          ].join(' ')));
+        }
         return execResult(await runtime.processManager.writeStdin(args));
       } catch (error) {
         return toolError(error);

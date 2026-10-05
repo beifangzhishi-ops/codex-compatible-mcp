@@ -181,6 +181,24 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(listed.tools.some((tool) => tool.name === 'send_file'), false);
     assert.equal(listed.tools.some((tool) => tool.name === 'receive_file'), false);
 
+    const rejectedDirectPoll = await client.callTool({
+      name: 'write_stdin',
+      arguments: {
+        session_id: 999999,
+        workspace_context: '00000000-0000-4000-8000-000000000099',
+        chars: '',
+      },
+    });
+    assert.equal(rejectedDirectPoll.isError, true);
+    assert.match(
+      rejectedDirectPoll.content[0].text,
+      /Direct empty write_stdin polling is disabled/i,
+    );
+    assert.match(
+      rejectedDirectPoll.content[0].text,
+      /through exec with a nested ccm\.write_stdin call/i,
+    );
+
     const receiveSearch = await client.callTool({
       name: 'tool_search',
       arguments: { query: 'receive_file', limit: 5 },

@@ -524,3 +524,65 @@ test('core tool surface keeps workspace lifecycle deferred and centralizes appro
     codeModeManager.close();
   }
 });
+
+test('write_stdin hard-rejects Direct empty polls while preserving nested polling and Direct input', async () => {
+  const runtime = runtimeStub();
+  const writeCalls = [];
+  runtime.processManager.writeStdin = async (args) => {
+    writeCalls.push(structuredClone(args));
+    return { wall_time_seconds: 0, output: 'continued', exit_code: 0 };
+  };
+
+  const registry = registerCoreTools(new ToolRegistry(), runtime);
+  const directWriteStdin = registry.get('write_stdin');
+  const workspaceContext = '00000000-0000-4000-8000-000000000001';
+
+  const omittedChars = await directWriteStdin.handler({
+    session_id: 41,
+    workspace_context: workspaceContext,
+  }, { extra: {} });
+  assert.equal(omittedChars.isError, true);
+  assert.match(omittedChars.content[0].text, /Direct empty write_stdin polling is disabled/);
+  assert.match(omittedChars.content[0].text, /CCM did not poll or modify this session/);
+  assert.match(omittedChars.content[0].text, /through exec with a nested ccm\.write_stdin call/);
+  assert.equal(writeCalls.length, 0);
+
+  const explicitEmpty = await directWriteStdin.handler({
+    session_id: 41,
+    workspace_context: workspaceContext,
+    chars: '',
+  }, { extra: {} });
+  assert.equal(explicitEmpty.isError, true);
+  assert.equal(writeCalls.length, 0);
+
+  const directInput = await directWriteStdin.handler({
+    session_id: 41,
+    workspace_context: workspaceContext,
+    chars: 'y\n',
+  }, { extra: {} });
+  assert.equal(directInput.isError, undefined);
+  assert.equal(directInput.structuredContent.exit_code, 0);
+  assert.equal(writeCalls.length, 1);
+  assert.equal(writeCalls[0].chars, 'y\n');
+
+  const { codeModeManager } = registerArchitectureTools(registry);
+  try {
+    const nestedPoll = await registry.get('exec').handler({
+      calls: [{
+        tool: 'ccm.write_stdin',
+        arguments: {
+          session_id: 41,
+          workspace_context: workspaceContext,
+          chars: '',
+        },
+      }],
+      yield_time_ms: 1000,
+    });
+    assert.equal(nestedPoll.isError, undefined);
+    assert.equal(nestedPoll.structuredContent.has_errors, false);
+    assert.equal(writeCalls.length, 2);
+    assert.equal(writeCalls[1].chars, '');
+  } finally {
+    codeModeManager.close();
+  }
+});
