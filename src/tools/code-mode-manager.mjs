@@ -248,7 +248,7 @@ export class CodeModeManager {
       message: running
         ? 'Nested execution is still running. Resume it with wait.'
         : liveSessions.length > 0
-          ? 'Nested execution finished, but one or more process sessions are still running. Continue those sessions with write_stdin.'
+          ? 'Nested execution finished, but one or more process sessions are still running. Poll those sessions by invoking ccm.write_stdin through exec with the same workspace_context and session_id; reserve top-level write_stdin for real non-empty interactive stdin writes.'
           : job.hasErrors
             ? 'Nested execution completed with one or more tool errors.'
             : 'Nested execution completed.',

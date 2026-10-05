@@ -376,7 +376,7 @@ export function registerSpecializedTools(registry, runtime) {
       'Upload one or more files through the logged-in Quark Cloud Drive desktop client on the selected Windows Remote Worker.',
       'When the user asks to upload known local files to Quark Cloud Drive, discover this capability through tool_search and invoke it through exec after resolving the intended local paths.',
       'The bundled WCM-derived helper uses Quark Desktop local APIs and its in-memory WSG/account mapping. It does not print or persist account secrets.',
-      'By default it waits until every upload reports completion, 100% progress, and matching local/remote sizes. Long uploads may return a live session; continue that session with the top-level write_stdin tool.',
+      'By default it waits until every upload reports completion, 100% progress, and matching local/remote sizes. Long uploads may return a live session; poll that session through exec with nested ccm.write_stdin, reusing the returned workspace_context and session_id.',
       'Current implementation accepts files only, not directories.',
     ].join('\n\n'),
     inputSchema: {
@@ -450,7 +450,7 @@ export function registerSpecializedTools(registry, runtime) {
     description: [
       'Download signed Bilibili DASH video and audio URLs on a Windows Remote Worker and remux them losslessly with ffmpeg.',
       'Use an authenticated browser/BMG session to obtain the Bilibili playurl response and select the desired permitted video/audio representations first. Then pass those short-lived signed URLs here. CCM does not export browser cookies or bypass Bilibili account/quality permissions.',
-      'The resulting media is remuxed with ffmpeg -c copy. Long downloads may return a live session; continue it with the top-level write_stdin tool.',
+      'The resulting media is remuxed with ffmpeg -c copy. Long downloads may return a live session; poll that session through exec with nested ccm.write_stdin, reusing the returned workspace_context and session_id.',
     ].join('\n\n'),
     inputSchema: {
       video_url: z.string().url().describe(

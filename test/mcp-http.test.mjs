@@ -126,6 +126,18 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(client.getInstructions(), /tracked implementation edits.*remain gated/i);
     assert.match(client.getInstructions(), /decision-complete for another executor/i);
     assert.match(client.getInstructions(), /does not maintain a Plan-Mode state machine/i);
+    assert.match(
+      client.getInstructions(),
+      /live process only needs polling.*invoke ccm\.write_stdin through exec from the first poll/i,
+    );
+    assert.match(
+      client.getInstructions(),
+      /top-level Direct write_stdin.*real non-empty interactive\/TTY stdin writes/i,
+    );
+    assert.match(
+      client.getInstructions(),
+      /retry the same exec -> ccm\.write_stdin route at most twice.*do not fall back to Direct empty polling/i,
+    );
     const listed = await client.listTools();
     const names = listed.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, [

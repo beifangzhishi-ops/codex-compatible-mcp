@@ -524,9 +524,14 @@ test('exec rejects unsafe parallelization and reports live nested sessions clear
     'operation-live',
   );
   assert.equal(live.structuredContent.next_operation, 'write_stdin');
-  assert.match(live.structuredContent.message, /still running/);
-
-  assert.notEqual(live.structuredContent.state, 'completed');
+  assert.match(
+    live.structuredContent.message,
+    /Poll those sessions by invoking ccm\.write_stdin through exec/i,
+  );
+  assert.match(
+    live.structuredContent.message,
+    /reserve top-level write_stdin for real non-empty interactive stdin writes/i,
+  );
 });
 
 test('exec does not report a process session that already ended before formatting', async () => {
