@@ -235,6 +235,95 @@ test('Controller rejects a duplicate worker id without replacing the active work
   }
 });
 
+test('Fresh Worker replaces an unresponsive duplicate identity', async () => {
+  const controller = createControllerRuntime({ workerPort: 0 });
+  const staleRuntime = workerRuntime('worker-stale-duplicate');
+  const freshRuntime = workerRuntime('worker-stale-duplicate');
+  let staleClient = null;
+  let freshClient = null;
+
+  await controller.start();
+  try {
+    staleClient = new RemoteWorkerClient({
+      runtime: staleRuntime,
+      workerId: 'worker-stale-duplicate',
+      port: controller.workerHub.address.port,
+    });
+    await staleClient.connect();
+    staleClient.socket.pause();
+
+    freshClient = new RemoteWorkerClient({
+      runtime: freshRuntime,
+      workerId: 'worker-stale-duplicate',
+      port: controller.workerHub.address.port,
+    });
+    await freshClient.connect();
+
+    assert.equal(freshClient.connected, true);
+    assert.deepEqual(
+      await controller.workerHub.call('worker-stale-duplicate', 'ping'),
+      { ok: true, worker_id: 'worker-stale-duplicate' },
+    );
+  } finally {
+    staleClient?.socket?.resume();
+    await staleClient?.close().catch(() => {});
+    await freshClient?.close().catch(() => {});
+    staleRuntime.close();
+    freshRuntime.close();
+    await controller.close();
+  }
+});
+
+test('Disconnected newcomer does not evict an unresponsive duplicate identity', async () => {
+  const controller = createControllerRuntime({ workerPort: 0 });
+  const staleRuntime = workerRuntime('worker-stale-newcomer');
+  const newcomerRuntime = workerRuntime('worker-stale-newcomer');
+  let staleClient = null;
+  let newcomerClient = null;
+
+  await controller.start();
+  try {
+    staleClient = new RemoteWorkerClient({
+      runtime: staleRuntime,
+      workerId: 'worker-stale-newcomer',
+      port: controller.workerHub.address.port,
+    });
+    await staleClient.connect();
+    staleClient.socket.pause();
+
+    newcomerClient = new RemoteWorkerClient({
+      runtime: newcomerRuntime,
+      workerId: 'worker-stale-newcomer',
+      port: controller.workerHub.address.port,
+    });
+    const connectPromise = newcomerClient.connect();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await newcomerClient.close();
+    await assert.rejects(connectPromise);
+
+    await new Promise((resolve) => setTimeout(resolve, 2_100));
+    staleClient.socket.resume();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    assert.deepEqual(
+      await controller.workerHub.call(
+        'worker-stale-newcomer',
+        'ping',
+        {},
+        { timeoutMs: 1_000 },
+      ),
+      { ok: true, worker_id: 'worker-stale-newcomer' },
+    );
+  } finally {
+    staleClient?.socket?.resume();
+    await staleClient?.close().catch(() => {});
+    await newcomerClient?.close().catch(() => {});
+    staleRuntime.close();
+    newcomerRuntime.close();
+    await controller.close();
+  }
+});
+
 test('Fresh Worker replaces a quarantined duplicate identity without a takeover token', async () => {
   const quarantinePolicy = {
     start() {},
@@ -313,7 +402,7 @@ test('Fresh Worker replaces a quarantined duplicate identity without a takeover 
   }
 });
 
-test('Controller-owned worker can take over a stale duplicate identity', async () => {
+test('Controller-owned worker takeover token replaces a duplicate identity', async () => {
   const takeoverToken = 'test-controller-takeover-token';
   const controller = createControllerRuntime({
     workerPort: 0,

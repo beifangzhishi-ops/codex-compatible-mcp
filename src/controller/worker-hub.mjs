@@ -10,6 +10,8 @@ function send(socket, message) {
   socket.write(JSON.stringify(message) + '\n');
 }
 
+const DUPLICATE_WORKER_PROBE_TIMEOUT_MS = 2_000;
+
 export class WorkerHub extends EventEmitter {
   constructor({
     environmentRegistry,
@@ -107,6 +109,9 @@ export class WorkerHub extends EventEmitter {
       throw error;
     }
 
+    return this.#requestConnection(connection, method, params, timeoutMs);
+  }
+  #requestConnection(connection, method, params = {}, timeoutMs = null) {
     const id = randomUUID();
     const waitMs = Number(timeoutMs || this.requestTimeoutMs);
     return new Promise((resolve, reject) => {
@@ -115,7 +120,13 @@ export class WorkerHub extends EventEmitter {
         reject(new Error('Remote Worker request timed out: ' + method));
       }, waitMs);
       connection.pending.set(id, { resolve, reject, timer });
-      send(connection.socket, { type: 'request', id, method, params });
+      try {
+        send(connection.socket, { type: 'request', id, method, params });
+      } catch (error) {
+        clearTimeout(timer);
+        connection.pending.delete(id);
+        reject(error);
+      }
     });
   }
   async close() {
@@ -182,7 +193,9 @@ export class WorkerHub extends EventEmitter {
 
   #onMessage(connection, message) {
     if (message?.type === 'hello') {
-      this.#registerHello(connection, message);
+      this.#registerHello(connection, message).catch((error) => {
+        if (!connection.socket.destroyed) connection.socket.destroy(error);
+      });
       return;
     }
     if (message?.type !== 'response' || !message.id) return;
@@ -203,7 +216,7 @@ export class WorkerHub extends EventEmitter {
     }
   }
 
-  #registerHello(connection, message) {
+  async #registerHello(connection, message) {
     if (message.protocol !== WORKER_PROTOCOL || !message.worker_id) {
       send(connection.socket, {
         type: 'hello_error',
@@ -235,24 +248,64 @@ export class WorkerHub extends EventEmitter {
         String(message.takeover_token) === this.takeoverToken,
       );
       if (!authorizedTakeover && !quarantinedReplacement) {
-        send(connection.socket, {
-          type: 'hello_error',
-          code: 'duplicate_worker_id',
-          message: 'Remote Worker id is already connected: ' + workerId + '.',
-        });
-        connection.socket.destroy();
-        return;
-      }
+        let previousHealthy = false;
+        try {
+          await this.#requestConnection(
+            previous,
+            'ping',
+            {},
+            DUPLICATE_WORKER_PROBE_TIMEOUT_MS,
+          );
+          previousHealthy = true;
+        } catch {
+          previousHealthy = false;
+        }
 
-      this.#removeConnection(
-        previous,
-        new Error(
-          quarantinedReplacement
-            ? 'Quarantined Remote Worker connection superseded by fresh worker.'
-            : 'Remote Worker connection superseded by controller-owned worker.',
-        ),
-      );
-      previous.socket.destroy();
+        if (connection.socket.destroyed) return;
+
+        const current = this.connections.get(workerId);
+        if (current && current !== previous) {
+          send(connection.socket, {
+            type: 'hello_error',
+            code: 'duplicate_worker_id',
+            message: 'Remote Worker id is already connected: ' + workerId + '.',
+          });
+          connection.socket.destroy();
+          return;
+        }
+
+        if (current === previous && previousHealthy && !previous.quarantine) {
+          send(connection.socket, {
+            type: 'hello_error',
+            code: 'duplicate_worker_id',
+            message: 'Remote Worker id is already connected: ' + workerId + '.',
+          });
+          connection.socket.destroy();
+          return;
+        }
+
+        if (current === previous) {
+          this.#removeConnection(
+            previous,
+            new Error(
+              previous.quarantine
+                ? 'Quarantined Remote Worker connection superseded by fresh worker.'
+                : 'Stale Remote Worker connection superseded by fresh worker.',
+            ),
+          );
+          previous.socket.destroy();
+        }
+      } else {
+        this.#removeConnection(
+          previous,
+          new Error(
+            quarantinedReplacement
+              ? 'Quarantined Remote Worker connection superseded by fresh worker.'
+              : 'Remote Worker connection superseded by controller-owned worker.',
+          ),
+        );
+        previous.socket.destroy();
+      }
     }
 
     for (const environment of environments) {
