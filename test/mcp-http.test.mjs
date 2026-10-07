@@ -125,6 +125,9 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(client.getInstructions(), /recommended default there when useful/i);
     assert.match(client.getInstructions(), /tracked implementation edits.*remain gated/i);
     assert.match(client.getInstructions(), /decision-complete for another executor/i);
+    assert.match(client.getInstructions(), /complete latest text.*same user-visible reply/i);
+    assert.match(client.getInstructions(), /truncated.*next_start_line.*ordered range reads/i);
+    assert.match(client.getInstructions(), /later plan_read calls used during implementation remain lifecycle-neutral/i);
     assert.match(client.getInstructions(), /does not maintain a Plan-Mode state machine/i);
     assert.match(
       client.getInstructions(),
