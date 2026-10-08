@@ -304,7 +304,7 @@ The public MCP resource is `https://<host>/ccm/mcp`. Runtime OAuth configuration
 
 Funnel is CCM's public **ingress/control path** only. It lets a remote MCP client continue reaching the OAuth sidecar and Controller even when a Worker's ordinary outbound proxy is unhealthy, but it is not a SOCKS proxy, HTTP CONNECT proxy, NAT gateway, or general egress service. A Worker child process such as `git`, `curl`, `npm`, or `pip` creates its own outbound connection and cannot route that new connection "back through" Funnel. Child-process egress is controlled independently by the proxy/direct mode described below.
 
-遇到 CCM 本地服务正常、Host 无法连接且网关没有收到对应请求的故障时，可尝试重启 Windows Tailscale 服务。
+仅在 Controller `/ccm/health`、OAuth 网关 `/health`、本地 MCP 调用及 Worker 状态均正常，但 Host 调用 CCM 持续报连接失败或 `-32603 Internal error`，且 OAuth 网关没有对应请求日志时，可尝试在 CCM 入口所在的 Windows 机器上以管理员身份打开 PowerShell，执行 `Restart-Service -Name Tailscale` 重启 Tailscale 系统服务；仅退出并重开任务栏程序不足以重启该服务，恢复以真实 Host 工具调用成功且网关出现对应成功请求日志为准。
 
 ### ChatGPT rebuild handoff rule
 
