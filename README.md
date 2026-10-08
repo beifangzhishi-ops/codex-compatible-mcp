@@ -165,6 +165,8 @@ Supported features:
 
 The exporter only recovers information present in the public Share payload. Information removed upstream by ChatGPT is not recoverable.
 
+兼容限制（2026-10-08 实测）：`ccm-extra.chatgpt_share_export` 目前不支持 Codex 共享会话链接 `https://chatgpt.com/s/cx_...`。在已部署 CCM 上调用该工具，传入 `https://chatgpt.com/s/cx_6ac70b9d73788191b7707fe9e8a2191e`，进程以退出码 1 返回 `share_url must be an https://chatgpt.com/share/... URL`；Python 获取函数在联网前只允许 `/share/` 路径。受影响的是共享会话的读取和导出能力，不代表 Codex 无法调用 CCM。现有解析器还依赖 ChatGPT Share 的 React Router 索引数据和 `mapping` 消息树，因此仅放宽 URL 校验不能证明兼容 Codex 会话。当前需在浏览器打开 Codex 共享页查看，或手动复制所需内容供分析；不要把 `/s/cx_...` 改写成 `/share/...`。自动导出支持需另行验证 Codex 共享页的数据结构并增加相应解析和测试。
+
 ### Bundled specialized capabilities
 
 CCM ships optional specialized workflows as Deferred + Code Mode capabilities invoked through `exec`. Most are discovered through ordinary `tool_search`; exact-only capabilities are returned only for an exact tool-name query:
