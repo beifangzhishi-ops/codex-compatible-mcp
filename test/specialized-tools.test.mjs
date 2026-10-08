@@ -342,6 +342,23 @@ test('quark_upload is Deferred + Code Mode and advertises deferred routing', () 
   assert.match(quarkUpload.description, /discover this capability through tool_search and invoke it through exec/i);
 });
 
+test('Codex 共享链接通过现有导出工具分派并可被发现', async () => {
+  const runtime = fakeRuntime();
+  runtime.environmentRegistry.resolve = () => ({ id: 'worker-a', capabilities: { exec: true } });
+  const registry = new ToolRegistry();
+  registerSpecializedTools(registry, runtime);
+  const tool = registry.get('ccm-extra.chatgpt_share_export');
+  assert.ok(tool.tags.includes('codex'));
+  assert.match(tool.description, /https:\/\/chatgpt\.com\/s\/cx_/);
+  assert.match(tool.inputSchema.share_url.description, /Codex/);
+  const url = 'https://chatgpt.com/s/cx_' + 'a'.repeat(32);
+  const result = await tool.handler({ share_url: url, mode: 'full', format: 'json' });
+  assert.equal(result.isError, undefined);
+  assert.ok(runtime.calls[0].cmd.includes(url));
+  assert.match(runtime.calls[0].cmd, /--mode 'full'/);
+  assert.equal(runtime.calls[0].cmd.includes('bmgctl'), false);
+});
+
 test('ChatGPT Share export can use the default Git-ignored cache output', async () => {
   const runtime = fakeRuntime();
   runtime.environmentRegistry.resolve = (environmentId) => ({

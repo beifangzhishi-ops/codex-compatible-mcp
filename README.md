@@ -151,7 +151,7 @@ CCM deliberately does not embed a second JavaScript interpreter for Code Mode. T
 
 ### ChatGPT Share conversation export
 
-`ccm-extra.chatgpt_share_export` is Deferred + Code Mode and exports public ChatGPT Share conversations without BMG or browser automation. Discover it through `tool_search` and invoke it through `exec`.
+`ccm-extra.chatgpt_share_export` 使用 Deferred + Code Mode，可读取并导出公开 ChatGPT 与 Codex 共享会话，无需 BMG 或浏览器自动化。通过 `tool_search` 发现工具，再通过 `exec` 调用。
 
 Supported features:
 
@@ -165,7 +165,11 @@ Supported features:
 
 The exporter only recovers information present in the public Share payload. Information removed upstream by ChatGPT is not recoverable.
 
-兼容限制（2026-10-08 实测）：`ccm-extra.chatgpt_share_export` 目前不支持 Codex 共享会话链接 `https://chatgpt.com/s/cx_...`。在已部署 CCM 上调用该工具，传入 `https://chatgpt.com/s/cx_6ac70b9d73788191b7707fe9e8a2191e`，进程以退出码 1 返回 `share_url must be an https://chatgpt.com/share/... URL`；Python 获取函数在联网前只允许 `/share/` 路径。受影响的是共享会话的读取和导出能力，不代表 Codex 无法调用 CCM。现有解析器还依赖 ChatGPT Share 的 React Router 索引数据和 `mapping` 消息树，因此仅放宽 URL 校验不能证明兼容 Codex 会话。当前需在浏览器打开 Codex 共享页查看，或手动复制所需内容供分析；不要把 `/s/cx_...` 改写成 `/share/...`。自动导出支持需另行验证 Codex 共享页的数据结构并增加相应解析和测试。
+Codex 共享兼容（2026-10-08）：接受 `https://chatgpt.com/s/cx_<32位小写十六进制>`，直接读取公开接口 `/backend-api/wham/shared_threads/<共享ID>` 的 `version=1` JSON 快照，不改写成 ChatGPT `/share/` 链接，也不依赖页面 JavaScript。`mode=text` 保留用户消息、助手进度及最终回复，纯图片用户消息以图片地址占位；`mode=full` 额外保留推理摘要、文件修改、图片查看与生成项，JSON 输出中的 `snapshot` 保留全部原始轮次、消息项、耗时、资源元数据及上游省略计数。快照是线性 `turns/items`，`branch=active` 和 `branch=all` 均按原始顺序导出。Codex 的 `total_nodes` 表示快照消息项总数；`snapshot_turns` 是快照轮次数，`user_turns` 仍表示用户消息数。未知消息项仅在 full 模式保留；不支持的快照版本或错误结构明确报错。
+
+兼容边界：只能读取公开共享快照实际提供的数据，不能恢复上游未公开的完整推理、工具调用或被省略的文件修改，也不自动下载图片。快照接口属于查看器当前使用的接口，可能随上游版本变化；403/404/410 表示当前请求无法访问，工具会明确报错。运行环境需要 Python、有效 TLS 证书链及能访问 ChatGPT 的网络；必要时使用 `proxy` 参数或 Worker 的代理模式。该工具在 Codex 和 ChatGPT Host 中均通过 `tool_search` → `exec` 使用。
+
+部署与验证：Controller 重启后更新工具发现说明；各 Worker 执行自己 `CCM_INSTALL_ROOT` 下的 `tools/chatgpt-share-export/export.py`，远程 Worker 需同步该脚本，单独重启 Controller 不会更新另一台机器的工具文件。本次已通过本机 `DESKTOP-KFL6V1F` 的 CCM 实际调用验证，共享快照的 8 个轮次、41 个消息项成功完整导出，且逐项顺序及原始数据一致。
 
 ### Bundled specialized capabilities
 

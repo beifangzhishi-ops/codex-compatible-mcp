@@ -24,10 +24,18 @@ def ssl_context():
     bundle=ca_bundle_path()
     return ssl.create_default_context(cafile=bundle) if bundle else ssl.create_default_context()
 
-def fetch(url):
+def share_source(url):
     u=urlparse(url)
-    if u.scheme!='https' or u.hostname not in ('chatgpt.com','www.chatgpt.com') or not u.path.startswith('/share/'):
-        raise ValueError('share_url must be an https://chatgpt.com/share/... URL')
+    if u.scheme=='https' and u.hostname in ('chatgpt.com','www.chatgpt.com') and not u.username and not u.password and u.port in (None,443):
+        if re.fullmatch(r'/s/cx_[0-9a-f]{32}/?',u.path):return 'codex'
+        if re.fullmatch(r'/share/[^/]+/?',u.path):return 'chatgpt'
+    raise ValueError('share_url 必须是 https://chatgpt.com/share/... 或 https://chatgpt.com/s/cx_<32位小写十六进制> 链接')
+
+def fetch(url):
+    source=share_source(url)
+    if source=='codex':
+        share_id=urlparse(url).path.rstrip('/').split('/')[-1]
+        url='https://chatgpt.com/backend-api/wham/shared_threads/'+share_id
     opener=build_opener(HTTPSHandler(context=ssl_context()))
     request=Request(url,headers={'User-Agent':'ccm-chatgpt-share-export/1.0'})
     last_error=None
@@ -38,6 +46,8 @@ def fetch(url):
                 charset=response.headers.get_content_charset() or 'utf-8'
                 return body.decode(charset,'replace')
         except HTTPError as e:
+            if source=='codex' and e.code in (403,404,410):
+                raise RuntimeError(f'Codex 共享会话不可访问或已删除（HTTP {e.code}）') from e
             raise RuntimeError(f'ChatGPT Share request failed with HTTP {e.code}: {e.reason}') from e
         except (URLError,TimeoutError,OSError) as e:
             last_error=e
@@ -141,6 +151,39 @@ def message_record(mid,node):
     text='\n'.join(x for x in parts if isinstance(x,str)).strip() if isinstance(parts,list) else ''; nontext=[x for x in parts if isinstance(x,dict)] if isinstance(parts,list) else []; visible_text=text or ('[image]' if any(x.get('content_type')=='image_asset_pointer' for x in nontext) else ('[attachment]' if nontext else ''))
     return {'id':mid,'parent':node.get('parent'),'children':node.get('children') or [],'role':role,'author':a,'create_time':m.get('create_time'),'update_time':m.get('update_time'),'content':c,'text':text,'visible_text':visible_text,'status':m.get('status'),'end_turn':m.get('end_turn'),'weight':m.get('weight'),'metadata':m.get('metadata') or {},'recipient':m.get('recipient'),'channel':m.get('channel')}
 
+def codex_records(snapshot):
+    if not isinstance(snapshot,dict) or type(snapshot.get('version')) is not int or snapshot['version']!=1 or not isinstance(snapshot.get('turns'),list):
+        raise ValueError('不支持的 Codex 共享快照：需要 version=1 和 turns 数组')
+    recs=[]
+    for turn_index,turn in enumerate(snapshot['turns']):
+        if not isinstance(turn,dict) or not isinstance(turn.get('items'),list):
+            raise ValueError('Codex 共享快照的每个轮次必须包含 items 数组')
+        for item_index,item in enumerate(turn['items']):
+            if not isinstance(item,dict) or not isinstance(item.get('type'),str):
+                raise ValueError('Codex 共享快照包含无效消息项')
+            kind=item['type']; role='tool'; channel=None
+            if kind=='userMessage':
+                role='user'; content=item.get('content')
+                if not isinstance(content,list) or any(not isinstance(p,dict) for p in content):
+                    raise ValueError('Codex 用户消息的 content 必须是对象数组')
+                text='\n'.join(p.get('text','') for p in content if p.get('type')=='text')
+                visible='\n'.join(p.get('text','') if p.get('type')=='text' else '[图片：'+str(p.get('url','不可用'))+']' if p.get('type')=='image' else '[附件]' for p in content)
+            elif kind=='agentMessage':
+                role='assistant'; text=item.get('text',''); visible=text
+                channel='final' if item.get('phase')=='final_answer' else item.get('phase')
+            elif kind=='reasoning':
+                role='assistant'; channel='analysis'; text=item.get('summary',''); visible=text
+            elif kind=='fileChange':
+                text='\n\n'.join(str(change.get('path','文件修改'))+'\n'+str(change.get('diff','')) for change in item.get('changes',[])); visible=text or '[文件修改]'
+            elif kind in ('imageView','imageGeneration'):
+                text=''; visible='[图片：'+str(item.get('url',item.get('result','不可用')))+']'
+            else:
+                text=''; visible='[未识别的 Codex 消息项：'+kind+']'
+            if not isinstance(text,str) or not isinstance(visible,str):
+                raise ValueError('Codex 共享快照中的消息文本必须是字符串')
+            recs.append({'id':f'turn-{turn_index}-item-{item_index}','role':role,'channel':channel,'create_time':None,'text':text,'visible_text':visible,'type':kind,'turn_index':turn_index,'item_index':item_index,'duration_ms':turn.get('durationMs'),'content':item})
+    return recs
+
 def active_branch(nodes,current_node=None):
     if current_node in nodes:
         path=[]; seen=set(); cur=current_node
@@ -196,29 +239,42 @@ def resolve_output_path(share_url, requested, fmt, branch, mode, cwd=None):
 
 def markdown_role_heading(role):
     value=(role or 'unknown').strip()
-    known={'user':'User','assistant':'Assistant','system':'System','developer':'Developer','tool':'Tool'}
+    known={'user':'用户','assistant':'助手','system':'系统','developer':'开发者','tool':'工具'}
     return known.get(value.lower(), value.replace('_',' ').strip().title() or 'Unknown')
 
 def render_markdown(recs):
-    lines=["# ChatGPT Share export","","> exported conversation",""]
+    lines=["# 共享会话导出","","> 公开共享页中的会话内容",""]
     for r in recs:
         lines += [f"## {markdown_role_heading(r.get('role'))}", "", r.get('visible_text') or r.get('text') or '', ""]
     return '\n'.join(lines)
 
 def main():
     ap=argparse.ArgumentParser(); ap.add_argument('share_url'); ap.add_argument('--output'); ap.add_argument('--format',choices=['md','json'],default='md'); ap.add_argument('--branch',choices=['active','all'],default='active'); ap.add_argument('--mode',choices=['text','full'],default='text'); ap.add_argument('--json-summary',action='store_true'); a=ap.parse_args()
-    html=fetch(a.share_url); D=extract_payload(html); nodes=unpack(D); meta=conversation_meta(D); current_node=meta.get('current_node')
-    ids=active_branch(nodes,current_node) if a.branch=='active' else sorted(nodes,key=lambda k:(message_record(k,nodes[k]) or {}).get('create_time') or 0)
-    recs=[message_record(i,nodes[i]) for i in ids]; recs=[r for r in recs if r]
+    source=share_source(a.share_url); payload=fetch(a.share_url); snapshot=None
+    if source=='codex':
+        try:snapshot=json.loads(payload)
+        except json.JSONDecodeError as e:raise ValueError('Codex 共享接口未返回有效 JSON 快照') from e
+        recs=codex_records(snapshot); total_nodes=len(recs); title=snapshot.get('title') or 'Codex 共享会话'
+    else:
+        D=extract_payload(payload); nodes=unpack(D); meta=conversation_meta(D); current_node=meta.get('current_node')
+        ids=active_branch(nodes,current_node) if a.branch=='active' else sorted(nodes,key=lambda k:(message_record(k,nodes[k]) or {}).get('create_time') or 0)
+        recs=[message_record(i,nodes[i]) for i in ids]; recs=[r for r in recs if r]
+        total_nodes=len(nodes); title=meta.get('title') or meta.get('og_title') or title_from_html(payload)
     if a.mode=='text':
-        recs=[r for r in recs if r['role'] in ('user','assistant') and r['visible_text'] and r['text']!='Original custom instructions no longer available' and r['text']!='The output of this plugin was redacted.']
-    title=meta.get('title') or meta.get('og_title') or title_from_html(html); turns=sum(r['role']=='user' for r in recs)
+        recs=[r for r in recs if r['role'] in ('user','assistant') and r.get('type')!='reasoning' and r['visible_text'] and r['text']!='Original custom instructions no longer available' and r['text']!='The output of this plugin was redacted.']
+    turns=sum(r['role']=='user' for r in recs)
     out=resolve_output_path(a.share_url,a.output,a.format,a.branch,a.mode)
     out.parent.mkdir(parents=True,exist_ok=True)
-    if a.format=='json': out.write_text(json.dumps({'title':title,'share_url':a.share_url,'branch':a.branch,'mode':a.mode,'total_nodes':len(nodes),'messages':recs if a.mode=='full' else [{'id':r['id'],'role':r['role'],'create_time':r['create_time'],'text':r['visible_text']} for r in recs]},ensure_ascii=False,indent=2),encoding='utf-8')
+    if a.format=='json':
+        result={'title':title,'share_url':a.share_url,'branch':a.branch,'mode':a.mode,'total_nodes':total_nodes,'messages':recs if a.mode=='full' else [{'id':r['id'],'role':r['role'],'create_time':r['create_time'],'text':r['visible_text']} for r in recs]}
+        if source=='codex':
+            result['source']='codex'
+            if a.mode=='full':result['snapshot']=snapshot
+        out.write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')
     else:
         out.write_text(render_markdown(recs),encoding='utf-8')
-    summary={'status':'ok','title':title,'branch':a.branch,'total_nodes':len(nodes),'exported_messages':len(recs),'user_turns':turns,'assistant_messages':sum(r['role']=='assistant' for r in recs),'output_path':str(out.resolve()),'output_bytes':out.stat().st_size}
+    summary={'status':'ok','title':title,'branch':a.branch,'total_nodes':total_nodes,'exported_messages':len(recs),'user_turns':turns,'assistant_messages':sum(r['role']=='assistant' for r in recs),'output_path':str(out.resolve()),'output_bytes':out.stat().st_size}
+    if source=='codex':summary.update(source='codex',snapshot_turns=len(snapshot['turns']))
     print(json.dumps(summary,ensure_ascii=False))
 if __name__=='__main__':
     try:main()
