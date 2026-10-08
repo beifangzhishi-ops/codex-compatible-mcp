@@ -308,6 +308,8 @@ CCM 的连接入口走 Tailscale，不走 FlClash。诊断客户端请求时应�
 
 后续调查确认其他共用该域名的 Host 工具也无法连接。重新发布完全相同的 Funnel 配置、触发无改动网络映射同步，以及重连 DERP 后，公网 TLS 故障均未恢复；配置与操作前备份一致，noha 内网连接正常。临时指定新加坡 DERP 时，状态仍显示香港，因而该尝试不能证明已完成区域切换，随后已恢复自动选择。本机 1.102.3 不能直接套用已在 1.102.2 修复的 1.102.1 Funnel 回归问题。尝试重启 Windows Tailscale 服务被系统服务管理权限拒绝，服务实际未停止；需要管理员终端完成此项验证，再复测公网入口及 Host 工具调用。重启成功前不能宣称已排除本机守护进程状态异常，也不能把相似社区报告当作已确认根因。
 
+2026-10-08 11:13（北京时间），用户重新启动任务栏程序后，一次绕过代理的真实公网入口探测返回 `200`，Host 的 `tool_search` 也成功了一次；但后续两个公网 IPv4 地址的重复探测均再次发生 TLS 握手失败，Host 的 `exec` / `list_projects` 连续返回连接失败。任务栏进程已更换，而两个 `tailscaled` 进程的 PID 与此前一致。此时只能确认短暂可达，不能认定已稳定恢复，也不能将任务栏程序重启视为 Windows Tailscale 服务重启。
+
 ### ChatGPT rebuild handoff rule
 
 ChatGPT-side CCM/plugin/connector rebuilds are **user-operated**. The assistant must not rename, delete, recreate, reconnect, or otherwise rebuild the ChatGPT CCM registration on the user's behalf unless the user explicitly overrides this rule for that rebuild.
