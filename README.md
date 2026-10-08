@@ -298,6 +298,14 @@ The public MCP resource is `https://<host>/ccm/mcp`. Runtime OAuth configuration
 
 Funnel is CCM's public **ingress/control path** only. It lets a remote MCP client continue reaching the OAuth sidecar and Controller even when a Worker's ordinary outbound proxy is unhealthy, but it is not a SOCKS proxy, HTTP CONNECT proxy, NAT gateway, or general egress service. A Worker child process such as `git`, `curl`, `npm`, or `pip` creates its own outbound connection and cannot route that new connection "back through" Funnel. Child-process egress is controlled independently by the proxy/direct mode described below.
 
+### 公网入口故障定位
+
+CCM 的连接入口走 Tailscale，不走 FlClash。诊断客户端请求时应明确绕过 HTTP(S) 代理，例如使用 `curl.exe --noproxy "*"`；Worker 子进程的外网代理设置是另一条独立链路。`tailscale funnel status` 显示启用，只能确认本地配置，不能证明公网客户端已经能够连接。排查 Host 连接错误时，依次验证 Controller 的 `/ccm/health`、OAuth 网关的 `/health`、本地 MCP 初始化及实际 Worker 工具调用，再按实际 Tailscale 链路验证 HTTPS、OAuth 和 MCP。未携带令牌访问 `/ccm/mcp` 返回 `401` 是预期鉴权行为；TLS 握手失败则发生在 OAuth 鉴权之前。
+
+本机 MagicDNS 可能把公网域名解析为本机的 Tailscale 地址。通过该地址得到 HTTPS `200` 只证明内网 Serve 正常，不能替代公网 Funnel 验证。公网客户端需要另行测试公网 DNS 返回的真实入口地址，并可通过 `curl.exe --noproxy "*" --connect-to <域名>:443:<公网入口地址>:443` 保留原域名的 TLS 校验进行探测。同步检查 OAuth 网关请求日志、Tailscale 短时日志，以及 `tailscale debug metrics` 中 `peerapi_ingress` 的变化；若公网握手失败且这些入口观测没有对应请求，应继续排查公网到本机的入口链路，不能据此归因于 Worker、OAuth 令牌或 Host 工具定义。
+
+2026-10-08 在 6v1f 的调查中，绕过代理访问 Tailscale 内网 HTTPS 入口时，OAuth 注册、授权、令牌交换、刷新、撤销及 MCP 初始化、工具发现、两个 Worker 的 `list_projects` 调用均成功；但绕过代理直连公网 DNS 返回的两个 IPv4 入口地址仍在 TLS 握手阶段断开，入口观测未显示对应请求。Host 的 CCM 工具调用同时返回 `-32603 Internal error`，OAuth 网关没有收到对应请求。这组证据区分了正常的内网 Serve/OAuth/MCP 链路与异常的公网访问链路；尚未确认具体中继或 Tailscale 版本缺陷，不能把其他案例中的原因当作本机结论。
+
 ### ChatGPT rebuild handoff rule
 
 ChatGPT-side CCM/plugin/connector rebuilds are **user-operated**. The assistant must not rename, delete, recreate, reconnect, or otherwise rebuild the ChatGPT CCM registration on the user's behalf unless the user explicitly overrides this rule for that rebuild.
