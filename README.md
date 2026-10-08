@@ -304,19 +304,7 @@ The public MCP resource is `https://<host>/ccm/mcp`. Runtime OAuth configuration
 
 Funnel is CCM's public **ingress/control path** only. It lets a remote MCP client continue reaching the OAuth sidecar and Controller even when a Worker's ordinary outbound proxy is unhealthy, but it is not a SOCKS proxy, HTTP CONNECT proxy, NAT gateway, or general egress service. A Worker child process such as `git`, `curl`, `npm`, or `pip` creates its own outbound connection and cannot route that new connection "back through" Funnel. Child-process egress is controlled independently by the proxy/direct mode described below.
 
-### 公网入口故障定位
-
-CCM 的连接入口走 Tailscale，不走 FlClash。诊断客户端请求时应明确绕过 HTTP(S) 代理，例如使用 `curl.exe --noproxy "*"`；Worker 子进程的外网代理设置是另一条独立链路。`tailscale funnel status` 显示启用，只能确认本地配置，不能证明公网客户端已经能够连接。排查 Host 连接错误时，依次验证 Controller 的 `/ccm/health`、OAuth 网关的 `/health`、本地 MCP 初始化及实际 Worker 工具调用，再按实际 Tailscale 链路验证 HTTPS、OAuth 和 MCP。未携带令牌访问 `/ccm/mcp` 返回 `401` 是预期鉴权行为；TLS 握手失败则发生在 OAuth 鉴权之前。
-
-本机 MagicDNS 可能把公网域名解析为本机的 Tailscale 地址。通过该地址得到 HTTPS `200` 只证明内网 Serve 正常，不能替代公网 Funnel 验证。公网客户端需要另行测试公网 DNS 返回的真实入口地址，并可通过 `curl.exe --noproxy "*" --connect-to <域名>:443:<公网入口地址>:443` 保留原域名的 TLS 校验进行探测。同步检查 OAuth 网关请求日志、Tailscale 短时日志，以及 `tailscale debug metrics` 中 `peerapi_ingress` 的变化；若公网握手失败且这些入口观测没有对应请求，应继续排查公网到本机的入口链路，不能据此归因于 Worker、OAuth 令牌或 Host 工具定义。
-
-2026-10-08 在 6v1f 的调查中，绕过代理访问 Tailscale 内网 HTTPS 入口时，OAuth 注册、授权、令牌交换、刷新、撤销及 MCP 初始化、工具发现、两个 Worker 的 `list_projects` 调用均成功；但绕过代理直连公网 DNS 返回的两个 IPv4 入口地址仍在 TLS 握手阶段断开，入口观测未显示对应请求。Host 的 CCM 工具调用同时返回 `-32603 Internal error`，OAuth 网关没有收到对应请求。这组证据区分了正常的内网 Serve/OAuth/MCP 链路与异常的公网访问链路；尚未确认具体中继或 Tailscale 版本缺陷，不能把其他案例中的原因当作本机结论。
-
-后续调查确认其他共用该域名的 Host 工具也无法连接。重新发布完全相同的 Funnel 配置、触发无改动网络映射同步，以及重连 DERP 后，公网 TLS 故障均未恢复；配置与操作前备份一致，noha 内网连接正常。临时指定新加坡 DERP 时，状态仍显示香港，因而该尝试不能证明已完成区域切换，随后已恢复自动选择。本机 1.102.3 不能直接套用已在 1.102.2 修复的 1.102.1 Funnel 回归问题。助手首次尝试重启 Windows Tailscale 服务被系统服务管理权限拒绝，当时服务未停止；用户随后完成服务重启，验证结果见下文。不能把相似社区报告当作已确认根因。
-
-2026-10-08 11:13（北京时间），用户重新启动任务栏程序后，一次绕过代理的真实公网入口探测返回 `200`，Host 的 `tool_search` 也成功了一次；但后续两个公网 IPv4 地址的重复探测均再次发生 TLS 握手失败，Host 的 `exec` / `list_projects` 连续返回连接失败。任务栏进程已更换，而两个 `tailscaled` 进程的 PID 与此前一致。此时只能确认短暂可达，不能认定已稳定恢复，也不能将任务栏程序重启视为 Windows Tailscale 服务重启。
-
-2026-10-08 11:19（北京时间），用户执行服务重启后，两个 `tailscaled` 进程的 PID 均已更换。Host 的 `exec` / `ccm.list_projects` 连续四次成功，OAuth 网关记录对应 MCP 请求均为 `200`，6v1f 与 noha 两个 Worker 均正常，实际 Host 调用已恢复。本机绕过代理、固定连接上述两个公网 IPv4 地址的探测同期仍发生 TLS 握手失败，因此该探测与 Host 使用的路径存在差异，不能用它单独否定 Host 已恢复的实际结果。服务重启与恢复在时间上关联，但具体中继或守护进程根因仍未确认；后续以真实 Host 调用和服务端对应日志为主要验收依据。
+遇到 CCM 本地服务正常、Host 无法连接且网关没有收到对应请求的故障时，可尝试重启 Windows Tailscale 服务。
 
 ### ChatGPT rebuild handoff rule
 
