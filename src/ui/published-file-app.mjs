@@ -1,8 +1,8 @@
-export const PUBLISHED_IMAGE_PREVIEW_UI_URI = 'ui://ccm/published-image-preview-v1.html';
+export const PUBLISHED_FILE_UI_URI = 'ui://ccm/published-file-v1.html';
 
-// Deliberately separate from the ordinary file publisher: only an explicit
-// preview call creates an iframe, avoiding background cards for every file.
-export const PUBLISHED_IMAGE_PREVIEW_UI_HTML = String.raw`<!doctype html>
+// Every publication gets one useful card: images render inline; other files
+// show a filename and a Host-opened HTTPS download link.
+export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -12,7 +12,8 @@ export const PUBLISHED_IMAGE_PREVIEW_UI_HTML = String.raw`<!doctype html>
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; width: 100%; overflow-x: hidden; }
     body { font: 13px/1.4 system-ui, sans-serif; color: var(--color-text-primary, inherit); }
-    #frame { width: 100%; padding: 6px; }
+    #frame { width: 100%; padding: 8px; overflow-wrap: anywhere; }
+    #filename { display: none; font-weight: 600; margin-bottom: 7px; }
     #picture { display: none; width: 100%; text-align: center; }
     #picture img {
       display: block; width: auto; height: auto; max-width: 100%;
@@ -20,21 +21,23 @@ export const PUBLISHED_IMAGE_PREVIEW_UI_HTML = String.raw`<!doctype html>
       margin: auto; border-radius: 6px;
     }
     @media (max-width: 600px) { #picture img { max-height: 360px; } }
-    #status { overflow-wrap: anywhere; opacity: 0.8; }
+    #status { opacity: 0.8; }
     #details { display: none; margin-top: 7px; font-size: 12px; opacity: 0.7; }
-    #link { display: none; margin-top: 6px; overflow-wrap: anywhere; }
+    #link { display: none; margin-top: 8px; }
   </style>
 </head>
 <body>
   <div id="frame">
-    <div id="picture"><img id="image" alt="CCM published image preview"></div>
-    <div id="status">Loading CCM image preview…</div>
+    <div id="filename"></div>
+    <div id="picture"><img id="image" alt="CCM published image"></div>
+    <div id="status">Loading published file…</div>
     <div id="details"></div>
-    <a id="link" target="_blank" rel="noopener noreferrer">Open original image</a>
+    <a id="link" target="_blank" rel="noopener noreferrer">Download file</a>
   </div>
   <script>
     (() => {
       const frame = document.getElementById('frame');
+      const filename = document.getElementById('filename');
       const picture = document.getElementById('picture');
       const image = document.getElementById('image');
       const status = document.getElementById('status');
@@ -60,43 +63,85 @@ export const PUBLISHED_IMAGE_PREVIEW_UI_HTML = String.raw`<!doctype html>
           scheduled = false;
           const width = Math.ceil(document.documentElement.getBoundingClientRect().width);
           const height = Math.ceil(frame.getBoundingClientRect().height);
-          if (width > 0 && height > 0) post({ jsonrpc: '2.0', method: 'ui/notifications/size-changed', params: { width, height } });
+          if (width > 0 && height > 0) {
+            post({ jsonrpc: '2.0', method: 'ui/notifications/size-changed', params: { width, height } });
+          }
           try { window.openai?.notifyIntrinsicHeight?.(); } catch {}
         });
       }
       new ResizeObserver(sizeChanged).observe(frame);
       window.addEventListener('resize', sizeChanged);
+      function validUrl(url, kind) {
+        if (typeof url !== 'string') return false;
+        try {
+          const parsed = new URL(url);
+          return parsed.protocol === 'https:' && !parsed.username && !parsed.password &&
+            !parsed.search && !parsed.hash &&
+            new RegExp('^/ccm/' + kind +
+              '/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', 'i')
+              .test(parsed.pathname);
+        } catch { return false; }
+      }
+      link.addEventListener('click', (event) => {
+        const url = link.href;
+        if (!validUrl(url, 'download')) { event.preventDefault(); return; }
+        if (window.openai?.openExternal) {
+          event.preventDefault();
+          Promise.resolve(window.openai.openExternal({ href: url, redirectUrl: false }))
+            .catch(() => request('ui/open-link', { url }).catch(() => {
+              status.style.display = '';
+              status.textContent = 'Could not open the link. Use the download URL from the tool response.';
+              sizeChanged();
+            }));
+        } else {
+          event.preventDefault();
+          request('ui/open-link', { url }).catch(() => {
+            status.style.display = '';
+            status.textContent = 'Could not open the link. Use the download URL from the tool response.';
+            sizeChanged();
+          });
+        }
+      });
       function show(result) {
         const value = result?.structuredContent || result;
-        if (value?.capability !== 'preview_published_image') return;
-        const url = value.preview_url;
-        if (typeof url !== 'string' || !/^https:\/\/[^/?#]+\/ccm\/preview\/[0-9a-f-]{36}$/i.test(url)) {
-          status.textContent = 'Invalid CCM preview URL.';
+        if (value?.capability !== 'publish_worker_file') return;
+        const downloadUrl = value.download_url;
+        if (!validUrl(downloadUrl, 'download')) {
+          status.textContent = 'Invalid CCM download URL.';
           sizeChanged();
           return;
         }
-        if (url === lastUrl) return;
-        lastUrl = url;
-        status.textContent = 'Loading CCM image preview…';
-        status.style.display = '';
+        if (downloadUrl === lastUrl) return;
+        lastUrl = downloadUrl;
+        filename.textContent = typeof value.filename === 'string' ? value.filename : 'Published file';
+        filename.style.display = 'block';
+        link.href = downloadUrl;
+        link.textContent = 'Download file';
+        link.style.display = 'block';
         picture.style.display = 'none';
         details.style.display = 'none';
-        link.style.display = 'none';
+        const previewUrl = value.preview_url;
+        if (!validUrl(previewUrl, 'preview') ||
+            previewUrl.split('/').at(-1) !== downloadUrl.split('/').at(-1)) {
+          status.style.display = 'none';
+          image.removeAttribute('src');
+          sizeChanged();
+          return;
+        }
+        status.style.display = '';
+        status.textContent = 'Loading image preview…';
         image.onload = () => {
           picture.style.display = 'block';
           status.style.display = 'none';
           details.textContent = image.naturalWidth + ' × ' + image.naturalHeight + ' · fit entire image';
           details.style.display = 'block';
-          link.style.display = 'block';
           sizeChanged();
         };
         image.onerror = () => {
-          status.textContent = 'Preview failed to load. Use the original link below.';
-          link.style.display = 'block';
+          status.textContent = 'Image preview unavailable; download link is still available.';
           sizeChanged();
         };
-        link.href = url;
-        image.src = url;
+        image.src = previewUrl;
         sizeChanged();
       }
       window.addEventListener('message', (event) => {
@@ -118,13 +163,13 @@ export const PUBLISHED_IMAGE_PREVIEW_UI_HTML = String.raw`<!doctype html>
         try {
           await request('ui/initialize', {
             protocolVersion: '2026-01-26',
-            appInfo: { name: 'ccm-image-preview-test', version: '0.1.0' },
+            appInfo: { name: 'ccm-published-file', version: '1.0.0' },
             appCapabilities: {},
           });
           post({ jsonrpc: '2.0', method: 'ui/notifications/initialized' });
           show(window.openai?.toolOutput);
         } catch (error) {
-          status.textContent = 'CCM preview UI handshake failed: ' + String(error?.message || error);
+          status.textContent = 'CCM file UI handshake failed: ' + String(error?.message || error);
         }
         sizeChanged();
       }

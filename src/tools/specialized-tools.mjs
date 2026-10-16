@@ -1,6 +1,5 @@
 ﻿import * as z from 'zod/v4';
-import { FILE_TOKEN_RE } from '../controller/file-transfer-store.mjs';
-import { PUBLISHED_IMAGE_PREVIEW_UI_URI } from '../ui/published-image-preview-app.mjs';
+import { PUBLISHED_FILE_UI_URI } from '../ui/published-file-app.mjs';
 function toolError(error) {
   return {
     content: [{ type: 'text', text: String(error?.message || error) }],
@@ -148,60 +147,25 @@ async function run(runtime, args, command) {
 export function registerSpecializedTools(registry, runtime) {
   registry.register({
     namespace: 'ccm-extra',
-    name: 'preview_published_image',
-    provider: 'ccm-specialized',
-    provenance: 'ccm-published-image-preview',
-    surfaces: { direct: true },
-    tags: ['image', 'preview', 'chat'],
-    mcpMeta: {
-      ui: { resourceUri: PUBLISHED_IMAGE_PREVIEW_UI_URI },
-      'openai/outputTemplate': PUBLISHED_IMAGE_PREVIEW_UI_URI,
-    },
-    description: 'Show one previously published CCM PNG/JPEG/WebP image directly in chat using a fitted MCP App preview. Supply the token from publish_worker_file.preview_url. Use when the user should see a useful image or artifact preview inline; avoid unnecessary preview cards for every intermediate image. This does not upload a ChatGPT attachment and does not change publish_worker_file.',
-    inputSchema: { token: z.string().uuid().describe('Token from an existing CCM published image URL.') },
-    handler: async ({ token }) => {
-      try {
-        if (!FILE_TOKEN_RE.test(token)) throw Error('Invalid published image token.');
-        const entry = runtime.fileTransferStore?.get(token);
-        if (!entry || !/^image\/(png|jpeg|webp)$/i.test(entry.mime_type)) {
-          throw Error('Published preview not found or expired.');
-        }
-        const origin = runtime.fileDownloadOrigin();
-        if (!/^https:\/\//.test(origin)) throw Error('HTTPS file origin is unavailable.');
-        const previewUrl = origin + '/ccm/preview/' + token;
-        return {
-          content: [{ type: 'text', text: 'CCM image preview: ' + previewUrl }],
-          structuredContent: {
-            capability: 'preview_published_image',
-            filename: entry.filename,
-            mime_type: entry.mime_type,
-            preview_url: previewUrl,
-            expires_at: new Date(entry.expiresAt).toISOString(),
-          },
-        };
-      } catch (error) {
-        return toolError(error);
-      }
-    },
-  });
-
-  registry.register({
-    namespace: 'ccm-extra',
     name: 'publish_worker_file',
     provider: 'ccm-specialized',
     provenance: 'ccm-https-file-publishing',
     surfaces: { direct: true, codeMode: true },
     tags: ['file', 'attachment', 'transfer', 'gpt'],
+    mcpMeta: {
+      ui: { resourceUri: PUBLISHED_FILE_UI_URI },
+      'openai/outputTemplate': PUBLISHED_FILE_UI_URI,
+    },
     environmentRequirements: {
       capabilities: ['sendFile'],
     },
     supportsParallel: false,
     description: [
-      'Publish one known Worker file per call as a temporary public HTTPS download link (72 hours, subject to cache eviction). It is not a native ChatGPT attachment.',
+      'Publish one Worker file as a temporary HTTPS download link (up to 72 hours), and display one MCP App file card in chat. For PNG/JPEG/WebP, the card displays the actual image and its download link; for other file types, it shows the filename and download link. This is not a native ChatGPT attachment.',
       'When a user asks to create a PPT, PDF, image, report or other artifact, you may proactively publish the finished result and useful preview images for the user without a separate request to send it. Stage previews are permitted and further CCM work may continue after publishing. Do not publish files merely for model-side inspection.',
       'workspace_context is required and determines the Worker. Relative paths are resolved from that context root; absolute paths remain absolute on the selected Worker.',
       'For a genuinely projectless task, automatically obtain a projectless context first through ccm.create_projectless_context; do not ask the user to choose or register a temporary directory. If select_workspace or register_workspace is awaiting approval for the intended real project, wait for that action to resolve and use its registered workspace_context instead.',
-      'view_image is only for the model to inspect images; it does not show images to the user. For a useful published PNG/JPEG/WebP, call the separate Direct preview_published_image tool with the token from preview_url to show the actual image in the ChatGPT MCP App. Avoid unnecessary preview cards; the download and preview links remain available. PPT/PDF require separately rendered preview images to display visually.',
+      'view_image is only for model-side image inspection. One publication creates one useful file card; images fit inside the card, other files link to download. Avoid publishing unnecessary intermediate files. PPT/PDF require separately rendered image files to show their pages visually.',
       'The original bytes are preserved. Publish one file at a time, sequentially; public links are bearer capabilities and anyone possessing them can download during their lifetime.',
     ].join('\n\n'),
     inputSchema: {

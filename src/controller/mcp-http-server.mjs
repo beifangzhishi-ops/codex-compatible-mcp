@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import {
-  PUBLISHED_IMAGE_PREVIEW_UI_HTML,
-  PUBLISHED_IMAGE_PREVIEW_UI_URI,
-} from '../ui/published-image-preview-app.mjs';
+  PUBLISHED_FILE_UI_HTML,
+  PUBLISHED_FILE_UI_URI,
+} from '../ui/published-file-app.mjs';
 import { FILE_TOKEN_RE } from './file-transfer-store.mjs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -36,8 +36,7 @@ function createProtocolServer(
       'When the user explicitly asks to plan, discuss before implementation, or re-plan and a durable multi-turn Plan is useful, discover ccm.plan_patch / ccm.plan_read through tool_search. Use Codex-style planning discipline: explore discoverable facts first and do not ask for facts that reasonable non-mutating inspection can answer; if a high-impact ambiguity instead depends on a non-discoverable user preference, product/scope/compatibility choice, or meaningful tradeoff, ask rather than guess. When asking such a decision question, explicitly show 2-4 mutually exclusive choices in the user-visible question and identify a recommended default there when useful; the user may still provide another answer. Continue until the Plan is decision-complete for another executor, including implementation, interface/data-flow, failure-mode, validation, migration/cleanup, and acceptance details. While planning, ordinary read-only inspection and tests/builds limited to ignored/cache/temp side effects are allowed, but tracked implementation edits, migrations, rewriting codegen/formatting, dependency/config changes, deploy/release, commit, and push remain gated on explicit execution/implementation authorization. Keep the Plan current by removing or rewriting stale, completed, invalidated, or superseded content. When planning reaches a decision-complete stopping point and you are about to tell the user the Plan is complete or await execution authorization, read the current persisted Plan and include its complete latest text in that same user-visible reply; do not replace it with a summary, excerpt, plan_id, or change list. If plan_read is truncated and returns next_start_line, continue ordered range reads until the complete Plan has been collected before replying. This final-Plan handoff applies only when finishing the planning phase; later plan_read calls used during implementation remain lifecycle-neutral and do not require repeating the Plan or re-entering planning. Imperative task wording, Plan updates, completed inspection, workspace approval, registration approval, or sandbox escalation approval is not execution authorization. CCM does not maintain a Plan-Mode state machine or Codex Host proposal/input UI. Once the user explicitly asks to execute/implement, continue implementation; plan_read is a neutral reference lookup and never switches the workflow back to planning.',
       'If an operational tool requires workspace_context and the user has not selected, requested, or otherwise indicated a real registered project, discover ccm.create_projectless_context with tool_search and invoke it through exec. Do not use projectless as a fallback to bypass select_workspace or register_workspace while that pending action still targets the user\'s current intended real project. If the user explicitly changes to a different real project, directly select or register the new target; an older pending workspace approval does not need to be denied or resolved first. Specify environment_id when a particular Worker is required; omit it to use the primary environment. Use the returned workspace_context for subsequent CCM operations.',
       'An environment has no GPT-visible default workspace or project directory. Do not infer project location from Worker bootstrap cwd, CCM_WORKSPACE, Documents, Temp, a drive root, or any other internal path. CCM does not define a Projects Root; new-project placement comes from the user or upper-layer orchestrator.',
-      'Use direct apply_patch and view_image for model-side workspace work. ccm-extra.import_chatgpt_file remains deferred: discover it through tool_search and dispatch through exec with top-level exec.file binding; Library attachments must be materialized as raw_file before binding. It imports one file into the selected Worker context. Publish user-facing deliverables and useful previews using the direct publish_worker_file tool, one file per call; call it proactively when the user asked to create or see PPT/PDF/images/reports, without waiting for a separate send request, including stage previews when useful. Continue work after publishing when needed. publish_worker_file returns temporary CCM HTTPS links, not native ChatGPT attachments. view_image is only for the model to inspect images and does not display them to the user. For existing PNG/JPEG/WebP use the published preview URL in user responses when supported, otherwise link it. Never publish temporary files just for internal analysis.',
-      'When a user should see an actual published PNG/JPEG/WebP image inline, take the UUID from publish_worker_file.structuredContent.preview_url and call the Direct preview_published_image tool. This MCP App rendering was verified for portrait and landscape on mobile ChatGPT. Avoid creating preview cards for every intermediate file; for deliverables keep the HTTPS download link available. The model-facing view_image tool does not display images to the user.',
+      'Use direct apply_patch and view_image for model-side workspace work. ccm-extra.import_chatgpt_file remains deferred: discover it through tool_search and dispatch through exec with top-level exec.file binding; Library attachments must be materialized as raw_file before binding. It imports one file into the selected Worker context. Publish user-facing deliverables and useful previews using the direct publish_worker_file tool, one file per call; call it proactively when the user asked to create or see PPT/PDF/images/reports, without waiting for a separate send request, including stage previews when useful. Continue work after publishing when needed. publish_worker_file returns temporary CCM HTTPS links, not native ChatGPT attachments, and shows one file card: an inline fitted image and download link for PNG/JPEG/WebP, or a filename/download link for other formats. Its structured download_url remains available for users whose clients do not render MCP Apps. view_image is only for the model to inspect images and does not display them to the user. Avoid publishing unnecessary intermediate files solely for internal analysis.',
       'Discover chatgpt_share_export through tool_search and invoke it through exec when the user supplies a public ChatGPT Share URL and wants that conversation inspected or exported; do not route that workflow through BMG/browser automation. Codex 公开共享链接 https://chatgpt.com/s/cx_... 同样通过该工具读取和导出。Discover quark_upload through tool_search and invoke it through exec when the user asks to upload known local files through the logged-in Quark Cloud Drive desktop client.',
       'For bulk image inspection, view_image is also available through exec; batch independent image calls with parallel=true when useful.',
       'Use exec/wait for structured nested capability dispatch; host Code Mode remains responsible for JavaScript/control flow.',
@@ -72,18 +71,22 @@ function createProtocolServer(
   );
 
   server.registerResource(
-    'ccm-published-image-preview-ui',
-    PUBLISHED_IMAGE_PREVIEW_UI_URI,
+    'ccm-published-file-ui',
+    PUBLISHED_FILE_UI_URI,
     {
-      title: 'CCM published image preview',
+      title: 'CCM published file',
       mimeType: 'text/html;profile=mcp-app',
     },
     async () => ({
       contents: [{
-        uri: PUBLISHED_IMAGE_PREVIEW_UI_URI,
+        uri: PUBLISHED_FILE_UI_URI,
         mimeType: 'text/html;profile=mcp-app',
-        text: PUBLISHED_IMAGE_PREVIEW_UI_HTML,
+        text: PUBLISHED_FILE_UI_HTML,
         _meta: {
+          'openai/widgetCSP': {
+            redirect_domains: typeof runtime.fileDownloadOrigin === 'function'
+              ? [runtime.fileDownloadOrigin()] : [],
+          },
           ui: {
             prefersBorder: true,
             csp: {

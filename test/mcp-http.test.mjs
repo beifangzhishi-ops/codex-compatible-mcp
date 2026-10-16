@@ -17,9 +17,9 @@ import {
   APPROVAL_UI_URI,
 } from '../src/ui/approval-app.mjs';
 import {
-  PUBLISHED_IMAGE_PREVIEW_UI_HTML,
-  PUBLISHED_IMAGE_PREVIEW_UI_URI,
-} from '../src/ui/published-image-preview-app.mjs';
+  PUBLISHED_FILE_UI_HTML,
+  PUBLISHED_FILE_UI_URI,
+} from '../src/ui/published-file-app.mjs';
 
 test('health exposes connected abnormal environments as degraded', async () => {
   const runtime = {
@@ -152,7 +152,6 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       'apply_patch',
       'exec',
       'exec_command',
-      'preview_published_image',
       'publish_worker_file',
       'request_approval',
       'resolve_pending_action',
@@ -185,8 +184,10 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       (tool) => tool.name === 'request_approval',
     );
     assert.equal(approvalTool?._meta?.ui?.resourceUri, APPROVAL_UI_URI);
-    const previewTool = listed.tools.find((tool) => tool.name === 'preview_published_image');
-    assert.equal(previewTool?._meta?.ui?.resourceUri, PUBLISHED_IMAGE_PREVIEW_UI_URI);
+    const publishedFileUiTool = listed.tools.find((tool) => tool.name === 'publish_worker_file');
+    assert.equal(publishedFileUiTool?._meta?.ui?.resourceUri, PUBLISHED_FILE_UI_URI);
+    assert.equal(publishedFileUiTool?._meta?.['openai/outputTemplate'], PUBLISHED_FILE_UI_URI);
+    assert.equal(listed.tools.some((tool) => tool.name === 'preview_published_image'), false);
     assert.equal(listed.tools.some((tool) => tool.name === 'select_workspace'), false);
     assert.equal(listed.tools.some((tool) => tool.name === 'register_workspace'), false);
     assert.equal(listed.tools.some((tool) => tool.name === 'list_projects'), false);
@@ -292,10 +293,13 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const approvalResource = await client.readResource({ uri: APPROVAL_UI_URI });
     assert.equal(approvalResource.contents[0].text, APPROVAL_UI_HTML);
     assert.equal(approvalResource.contents[0]._meta.ui.prefersBorder, true);
-    const previewResource = await client.readResource({ uri: PUBLISHED_IMAGE_PREVIEW_UI_URI });
-    assert.equal(previewResource.contents[0].text, PUBLISHED_IMAGE_PREVIEW_UI_HTML);
-    assert.deepEqual(previewResource.contents[0]._meta.ui.csp.resourceDomains, ['https://example.test']);
-    assert.match(previewResource.contents[0].text, /ui\/notifications\/size-changed/);
+    const fileResource = await client.readResource({ uri: PUBLISHED_FILE_UI_URI });
+    assert.equal(fileResource.contents[0].text, PUBLISHED_FILE_UI_HTML);
+    assert.deepEqual(fileResource.contents[0]._meta.ui.csp.resourceDomains, ['https://example.test']);
+    assert.deepEqual(fileResource.contents[0]._meta['openai/widgetCSP'].redirect_domains, ['https://example.test']);
+    assert.match(fileResource.contents[0].text, /ui\/notifications\/size-changed/);
+    assert.match(fileResource.contents[0].text, /ui\/open-link/);
+    assert.match(fileResource.contents[0].text, /openExternal/);
 
     const projectless = await client.callTool({
       name: 'exec',
@@ -519,6 +523,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(publishResult.isError, undefined);
     assert.ok(!publishResult.content.some((item) => item.type === 'resource_link'));
     assert.match(publishResult.structuredContent.download_url, /^https:\/\/example\.test\/ccm\/download\//);
+    assert.equal(publishResult.structuredContent.preview_url, undefined);
     assert.equal(publishResult.structuredContent.byte_length, docBytes.length);
     const token = publishResult.structuredContent.download_url.split('/').at(-1);
     const download = await fetch('http://127.0.0.1:' + controller.address.port + '/ccm/download/' + token);
