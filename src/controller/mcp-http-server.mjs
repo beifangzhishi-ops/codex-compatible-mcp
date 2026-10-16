@@ -1,4 +1,8 @@
 import { randomUUID } from 'node:crypto';
+import {
+  PUBLISHED_IMAGE_PREVIEW_UI_HTML,
+  PUBLISHED_IMAGE_PREVIEW_UI_URI,
+} from '../ui/published-image-preview-app.mjs';
 import { FILE_TOKEN_RE } from './file-transfer-store.mjs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -62,6 +66,31 @@ function createProtocolServer(
         mimeType: 'text/html;profile=mcp-app',
         text: APPROVAL_UI_HTML,
         _meta: { ui: { prefersBorder: true } },
+      }],
+    }),
+  );
+
+  server.registerResource(
+    'ccm-published-image-preview-ui',
+    PUBLISHED_IMAGE_PREVIEW_UI_URI,
+    {
+      title: 'CCM published image preview (experimental)',
+      mimeType: 'text/html;profile=mcp-app',
+    },
+    async () => ({
+      contents: [{
+        uri: PUBLISHED_IMAGE_PREVIEW_UI_URI,
+        mimeType: 'text/html;profile=mcp-app',
+        text: PUBLISHED_IMAGE_PREVIEW_UI_HTML,
+        _meta: {
+          ui: {
+            prefersBorder: true,
+            csp: {
+              resourceDomains: typeof runtime.fileDownloadOrigin === 'function'
+                ? [runtime.fileDownloadOrigin()] : [],
+            },
+          },
+        },
       }],
     }),
   );

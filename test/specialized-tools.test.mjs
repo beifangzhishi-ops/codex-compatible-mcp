@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import { registerSpecializedTools } from '../src/tools/specialized-tools.mjs';
 import { ToolRegistry } from '../src/tools/tool-registry.mjs';
 import { FileTransferStore } from '../src/controller/file-transfer-store.mjs';
+import { PUBLISHED_IMAGE_PREVIEW_UI_URI } from '../src/ui/published-image-preview-app.mjs';
 import { registerArchitectureTools } from '../src/tools/architecture-tools.mjs';
 
 function fakeRuntime() {
@@ -120,6 +121,32 @@ test('publish_worker_file is Direct + Code Mode and yields an HTTPS URL through 
   assert.ok(!nested.content.some((item) => item.type === 'resource_link'));
   const parallel = await registry.get('exec').handler({ calls: [{ tool: 'ccm-extra.publish_worker_file', arguments: args }], parallel: true });
   assert.equal(parallel.isError, true);
+  runtime.fileTransferStore.close();
+});
+
+test('experimental image preview targets only valid cached image tokens and carries an MCP App resource', async () => {
+  const runtime = fakeRuntime();
+  const registry = new ToolRegistry();
+  registerSpecializedTools(registry, runtime);
+  const preview = registry.get('ccm-extra.preview_published_image');
+  assert.equal(preview.surfaces.direct, true);
+  assert.equal(preview.surfaces.codeMode, false);
+  assert.equal(preview.mcpMeta.ui.resourceUri, PUBLISHED_IMAGE_PREVIEW_UI_URI);
+  const bytes = Buffer.from('example-image');
+  const image = runtime.fileTransferStore.put({
+    filename: 'portrait.png', mime_type: 'image/png', byte_length: bytes.length,
+    data: bytes.toString('base64'),
+  });
+  const result = await preview.handler({ token: image.token });
+  assert.equal(result.structuredContent.preview_url, 'https://example.test/ccm/preview/' + image.token);
+  assert.equal(result.structuredContent.filename, 'portrait.png');
+  const missing = await preview.handler({ token: '12345678-1234-4234-8234-123456789abc' });
+  assert.equal(missing.isError, true);
+  const wrongType = runtime.fileTransferStore.put({
+    filename: 'note.txt', mime_type: 'text/plain', byte_length: bytes.length,
+    data: bytes.toString('base64'),
+  });
+  assert.equal((await preview.handler({ token: wrongType.token })).isError, true);
   runtime.fileTransferStore.close();
 });
 

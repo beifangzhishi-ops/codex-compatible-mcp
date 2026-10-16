@@ -16,6 +16,10 @@ import {
   APPROVAL_UI_HTML,
   APPROVAL_UI_URI,
 } from '../src/ui/approval-app.mjs';
+import {
+  PUBLISHED_IMAGE_PREVIEW_UI_HTML,
+  PUBLISHED_IMAGE_PREVIEW_UI_URI,
+} from '../src/ui/published-image-preview-app.mjs';
 
 test('health exposes connected abnormal environments as degraded', async () => {
   const runtime = {
@@ -148,6 +152,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       'apply_patch',
       'exec',
       'exec_command',
+      'preview_published_image',
       'publish_worker_file',
       'request_approval',
       'resolve_pending_action',
@@ -180,6 +185,8 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       (tool) => tool.name === 'request_approval',
     );
     assert.equal(approvalTool?._meta?.ui?.resourceUri, APPROVAL_UI_URI);
+    const previewTool = listed.tools.find((tool) => tool.name === 'preview_published_image');
+    assert.equal(previewTool?._meta?.ui?.resourceUri, PUBLISHED_IMAGE_PREVIEW_UI_URI);
     assert.equal(listed.tools.some((tool) => tool.name === 'select_workspace'), false);
     assert.equal(listed.tools.some((tool) => tool.name === 'register_workspace'), false);
     assert.equal(listed.tools.some((tool) => tool.name === 'list_projects'), false);
@@ -285,6 +292,10 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const approvalResource = await client.readResource({ uri: APPROVAL_UI_URI });
     assert.equal(approvalResource.contents[0].text, APPROVAL_UI_HTML);
     assert.equal(approvalResource.contents[0]._meta.ui.prefersBorder, true);
+    const previewResource = await client.readResource({ uri: PUBLISHED_IMAGE_PREVIEW_UI_URI });
+    assert.equal(previewResource.contents[0].text, PUBLISHED_IMAGE_PREVIEW_UI_HTML);
+    assert.deepEqual(previewResource.contents[0]._meta.ui.csp.resourceDomains, ['https://example.test']);
+    assert.match(previewResource.contents[0].text, /ui\/notifications\/size-changed/);
 
     const projectless = await client.callTool({
       name: 'exec',

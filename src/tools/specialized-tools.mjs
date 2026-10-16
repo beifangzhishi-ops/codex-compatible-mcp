@@ -1,4 +1,6 @@
 ﻿import * as z from 'zod/v4';
+import { FILE_TOKEN_RE } from '../controller/file-transfer-store.mjs';
+import { PUBLISHED_IMAGE_PREVIEW_UI_URI } from '../ui/published-image-preview-app.mjs';
 function toolError(error) {
   return {
     content: [{ type: 'text', text: String(error?.message || error) }],
@@ -144,6 +146,45 @@ async function run(runtime, args, command) {
 }
 
 export function registerSpecializedTools(registry, runtime) {
+  registry.register({
+    namespace: 'ccm-extra',
+    name: 'preview_published_image',
+    provider: 'ccm-specialized',
+    provenance: 'ccm-image-preview-experiment',
+    surfaces: { direct: true },
+    tags: ['image', 'preview', 'experiment'],
+    mcpMeta: {
+      ui: { resourceUri: PUBLISHED_IMAGE_PREVIEW_UI_URI },
+      'openai/outputTemplate': PUBLISHED_IMAGE_PREVIEW_UI_URI,
+    },
+    description: 'Experimental MCP App image preview. Show one previously published CCM PNG/JPEG/WebP in a chat iframe to test fit and clipping. Supply the token from publish_worker_file.preview_url. Do not invoke for ordinary file publication; this is an opt-in layout test.',
+    inputSchema: { token: z.string().uuid().describe('Token from an existing CCM published image URL.') },
+    handler: async ({ token }) => {
+      try {
+        if (!FILE_TOKEN_RE.test(token)) throw Error('Invalid published image token.');
+        const entry = runtime.fileTransferStore?.get(token);
+        if (!entry || !/^image\/(png|jpeg|webp)$/i.test(entry.mime_type)) {
+          throw Error('Published preview not found or expired.');
+        }
+        const origin = runtime.fileDownloadOrigin();
+        if (!/^https:\/\//.test(origin)) throw Error('HTTPS file origin is unavailable.');
+        const previewUrl = origin + '/ccm/preview/' + token;
+        return {
+          content: [{ type: 'text', text: 'CCM image preview: ' + previewUrl }],
+          structuredContent: {
+            capability: 'preview_published_image',
+            filename: entry.filename,
+            mime_type: entry.mime_type,
+            preview_url: previewUrl,
+            expires_at: new Date(entry.expiresAt).toISOString(),
+          },
+        };
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  });
+
   registry.register({
     namespace: 'ccm-extra',
     name: 'publish_worker_file',
