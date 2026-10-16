@@ -36,7 +36,10 @@ test('Controller streams original file bytes and safe attachment headers', async
     assert.deepEqual(Buffer.from(await res.arrayBuffer()), bytes);
   }
   assert.equal((await fetch(uri, { method: 'POST' })).status, 405);
-  assert.equal((await fetch(uri + '?leak=1')).status, 404);
+  const tracked = await fetch(uri + '?utm_source=chatgpt.com');
+  assert.equal(tracked.status, 200);
+  assert.deepEqual(Buffer.from(await tracked.arrayBuffer()), bytes);
+  assert.equal((await fetch(uri + '?leak=1', { method: 'POST' })).status, 405);
   assert.equal((await fetch(origin + '/ccm/download/not-a-token')).status, 404);
   assert.equal((await fetch(origin + '/ccm/preview/' + entry.token)).status, 404);
 }));
@@ -47,4 +50,8 @@ test('Controller serves inline only allowlisted PNG/JPEG/WebP image types', asyn
   assert.equal(res.headers.get('content-type'), 'image/png');
   assert.equal(res.headers.get('content-disposition'), 'inline');
   assert.equal(await res.text(), 'fake-png');
+  const tracked = await fetch(origin + '/ccm/preview/' + entry.token + '?utm_source=chatgpt.com');
+  assert.equal(tracked.status, 200);
+  assert.equal(tracked.headers.get('content-disposition'), 'inline');
+  assert.equal(await tracked.text(), 'fake-png');
 }));

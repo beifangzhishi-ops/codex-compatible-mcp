@@ -31,7 +31,11 @@ test('HTTPS file sidecar streams 12 MiB without OAuth and redacts URL tokens', a
     assert.equal(received.status, 200);
     assert.equal((await received.arrayBuffer()).byteLength, bytes.length);
     assert.equal((await fetch(url, { method: 'POST' })).status, 405);
-    assert.equal((await fetch(url + '?leak=1')).status, 404);
+    const tracked = await fetch(url + '?utm_source=chatgpt.com');
+    assert.equal(tracked.status, 200);
+    assert.equal((await tracked.arrayBuffer()).byteLength, bytes.length);
+    assert.equal((await fetch(url + '?leak=1', { method: 'POST' })).status, 405);
+    assert.equal((await fetch(base + '/ccm/download/not-a-token?utm_source=chatgpt.com')).status, 404);
     assert.equal((await fetch(base + '/ccm/mcp', { method: 'POST' })).status, 401);
     const trace = await fs.readFile(path.join(config.logDir, 'ccm-http.log'), 'utf8');
     assert.ok(!trace.includes(token));

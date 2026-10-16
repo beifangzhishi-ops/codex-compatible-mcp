@@ -652,7 +652,7 @@ function proxyPublishedFile(request, response, url, runtime) {
     sendJson(response, 405, { error: 'method_not_allowed' }, { noStore: true });
     return;
   }
-  if (!DOWNLOAD_ROUTE.test(url.pathname) || url.search || url.hash) {
+  if (!DOWNLOAD_ROUTE.test(url.pathname)) {
     sendJson(response, 404, { error: 'not_found' }, { noStore: true });
     return;
   }

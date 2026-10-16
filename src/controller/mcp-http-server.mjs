@@ -106,7 +106,7 @@ export function createHttpController({
 
   const download = (req, res) => {
     const match = /^\/ccm\/(download|preview)\/([^/]+)$/.exec(req.path);
-    if (!match || !FILE_TOKEN_RE.test(match[2]) || req.originalUrl.includes('?')) {
+    if (!match || !FILE_TOKEN_RE.test(match[2])) {
       res.status(404).end();
       return;
     }
