@@ -126,6 +126,7 @@ export class LocalWorkerSupervisor {
               ? '::1'
               : this.workerHub.host,
         CCM_WORKER_HUB_PORT: String(hubAddress.port),
+        CCM_SUPERVISED_WORKER: '1',
         ...(this.takeoverToken
           ? { CCM_WORKER_TAKEOVER_TOKEN: this.takeoverToken }
           : {}),

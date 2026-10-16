@@ -15,6 +15,7 @@ import { ExecPolicyStore } from './exec-policy-store.mjs';
 import { TrustedPackageScriptStore } from './trusted-package-script-store.mjs';
 import { defaultControllerStateFile } from './controller-state.mjs';
 import { WorkerQuarantinePolicy } from './worker-quarantine-policy.mjs';
+import { ControlledRestart } from './controlled-restart.mjs';
 
 const installRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -92,6 +93,13 @@ export function createControllerRuntime(options = {}) {
   const planManager = options.planManager || new PlanManager({
     stateDir: options.planStateDir || path.join(installRoot, '.state', 'plans'),
   });
+  const controlledRestart = options.controlledRestart || new ControlledRestart({
+    environmentRegistry,
+    workerHub,
+    controllerEnvironmentId: options.defaultEnvironmentId || null,
+    requestControllerRestart: options.requestControllerRestart,
+    policyFile: options.restartPolicyFile,
+  });
 
   return {
     environmentRegistry,
@@ -106,6 +114,7 @@ export function createControllerRuntime(options = {}) {
     fileTransferStore,
     fileDownloadOrigin,
     planManager,
+    controlledRestart,
     async start() {
       workerQuarantinePolicy.start();
       try {

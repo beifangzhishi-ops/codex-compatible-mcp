@@ -48,6 +48,7 @@ export class RemoteWorkerClient {
     handshakeTimeoutMs = Number(
       process.env.CCM_WORKER_HANDSHAKE_TIMEOUT_MS || 10_000,
     ),
+    requestRestart = null,
   } = {}) {
     if (!runtime) throw new Error('RemoteWorkerClient requires a worker runtime.');
     this.runtime = runtime;
@@ -57,6 +58,7 @@ export class RemoteWorkerClient {
     this.host = host;
     this.port = port;
     this.handshakeTimeoutMs = handshakeTimeoutMs;
+    this.requestRestart = requestRestart;
     this.socket = null;
     this.buffer = '';
     this.connected = false;
@@ -184,6 +186,9 @@ export class RemoteWorkerClient {
         id: message.id,
         result,
       });
+      if (message.method === 'restart_self') {
+        setTimeout(() => this.requestRestart(), 250).unref();
+      }
     } catch (error) {
       send(this.socket, {
         type: 'response',
@@ -200,6 +205,14 @@ export class RemoteWorkerClient {
     switch (method) {
       case 'ping':
         return { ok: true, worker_id: this.workerId };
+      case 'restart_self':
+        if (Object.keys(params).length !== 0) {
+          throw new RemoteWorkerDispatchError('invalid_restart_request', 'CCM restart_self takes no arguments.');
+        }
+        if (typeof this.requestRestart !== 'function') {
+          throw new RemoteWorkerDispatchError('worker_not_supervised', 'CCM restart requires the Worker Supervisor.');
+        }
+        return { accepted: true };
       case 'exec_command':
         return this.runtime.processManager.execCommand(params);
       case 'write_stdin':

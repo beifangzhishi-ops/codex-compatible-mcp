@@ -6,6 +6,7 @@ import {
   acquireWorkerInstanceLock,
   writeJsonAtomic,
 } from './worker-state.mjs';
+import { supervisorOwnsProcess } from './supervisor-ownership.mjs';
 
 const installRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -42,6 +43,7 @@ const instanceLock = await acquireWorkerInstanceLock({
 let stopping = false;
 let activeClient = null;
 let healthTimer = null;
+let restartQueued = false;
 
 const terminalHandshakeCodes = new Set([
   'duplicate_worker_id',
@@ -99,6 +101,15 @@ async function shutdown() {
   runtime.close();
 }
 
+function requestWorkerRestart() {
+  if (restartQueued) return;
+  restartQueued = true;
+  shutdown().catch((error) => {
+    console.error('CCM Remote Worker restart shutdown failed:', error);
+    process.exitCode = 1;
+  });
+}
+
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
@@ -107,6 +118,9 @@ while (!stopping) {
     runtime,
     workerId: workerIdentity,
     takeoverToken,
+    requestRestart: (process.env.CCM_SUPERVISED_WORKER === '1' ||
+      supervisorOwnsProcess(path.join(stateDir, 'ccm-worker.pid')))
+      ? requestWorkerRestart : null,
   });
   activeClient = client;
   try {

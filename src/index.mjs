@@ -7,6 +7,7 @@ import { createControllerRuntime } from './controller/runtime.mjs';
 import { createHttpController } from './controller/mcp-http-server.mjs';
 import { LocalWorkerSupervisor } from './controller/local-worker-supervisor.mjs';
 import { createToolRegistry } from './tools/index.mjs';
+import { supervisorOwnsProcess } from './worker/supervisor-ownership.mjs';
 
 const installRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -14,8 +15,19 @@ const installRoot = path.resolve(
 );
 const localEnvironmentId = process.env.CCM_ENVIRONMENT_ID || os.hostname();
 const localWorkerTakeoverToken = randomUUID();
+let restartQueued = false;
+function requestControllerRestart() {
+  // The Supervisor tracks start-public.mjs, which is this Controller's parent.
+  if (!supervisorOwnsProcess(path.join(installRoot, '.state', 'ccm-public.pid'), process.ppid)) {
+    throw new Error('CCM Controller restart requires a running Supervisor.');
+  }
+  if (restartQueued) throw new Error('CCM Controller restart is already queued.');
+  restartQueued = true;
+  setTimeout(() => shutdown(), 1500).unref();
+}
 const runtime = createControllerRuntime({
   defaultEnvironmentId: localEnvironmentId,
+  requestControllerRestart,
   workerTakeoverToken: localWorkerTakeoverToken,
   workspaceContextStateFile:
     process.env.CCM_WORKSPACE_CONTEXT_FILE ||
