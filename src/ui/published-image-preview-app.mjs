@@ -1,7 +1,7 @@
 export const PUBLISHED_IMAGE_PREVIEW_UI_URI = 'ui://ccm/published-image-preview-v1.html';
 
 // Deliberately separate from the ordinary file publisher: only an explicit
-// preview test creates an iframe, avoiding background cards for every file.
+// preview call creates an iframe, avoiding background cards for every file.
 export const PUBLISHED_IMAGE_PREVIEW_UI_HTML = String.raw`<!doctype html>
 <html lang="en">
 <head>

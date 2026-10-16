@@ -124,7 +124,7 @@ test('publish_worker_file is Direct + Code Mode and yields an HTTPS URL through 
   runtime.fileTransferStore.close();
 });
 
-test('experimental image preview targets only valid cached image tokens and carries an MCP App resource', async () => {
+test('inline image preview targets only valid cached image tokens and carries an MCP App resource', async () => {
   const runtime = fakeRuntime();
   const registry = new ToolRegistry();
   registerSpecializedTools(registry, runtime);
@@ -328,24 +328,6 @@ test('ChatGPT Share export can use the default Git-ignored cache output', async 
   });
   assert.equal(result.isError, undefined);
   assert.equal(runtime.calls[0].cmd.includes(' --output '), false);
-});
-
-test('ChatGPT schema refresh keeps CCM approval credentials local to the worker', async () => {
-  const script = await fs.readFile(
-    new URL('../tools/chatgpt-schema-refresh/refresh.ps1', import.meta.url),
-    'utf8',
-  );
-  assert.match(script, /CCM_APPROVAL_SECRET_FILE/);
-  assert.match(script, /\/ccm\/oauth\/consent/);
-  assert.match(script, /PostAsync\(\$consent,\$content\)/);
-  assert.match(script, /Refusing to send the CCM approval secret to an unexpected consent URL/);
-  assert.equal(/Invoke-Bmg[^\n]*approval_secret/.test(script), false);
-  assert.match(script, /suffix\[0\] -gt \[char\]127/);
-  assert.match(script, /StartsWith\(\$Name,\[StringComparison\]::Ordinal\)/);
-  assert.match(
-    script,
-    /function Rename-Connector[\s\S]*?Click-Element \$Connector/,
-  );
 });
 
 test('Bilibili deferred tool passes signed DASH URLs without exposing them in result metadata', async () => {

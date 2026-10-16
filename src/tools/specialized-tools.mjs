@@ -150,14 +150,14 @@ export function registerSpecializedTools(registry, runtime) {
     namespace: 'ccm-extra',
     name: 'preview_published_image',
     provider: 'ccm-specialized',
-    provenance: 'ccm-image-preview-experiment',
+    provenance: 'ccm-published-image-preview',
     surfaces: { direct: true },
-    tags: ['image', 'preview', 'experiment'],
+    tags: ['image', 'preview', 'chat'],
     mcpMeta: {
       ui: { resourceUri: PUBLISHED_IMAGE_PREVIEW_UI_URI },
       'openai/outputTemplate': PUBLISHED_IMAGE_PREVIEW_UI_URI,
     },
-    description: 'Experimental MCP App image preview. Show one previously published CCM PNG/JPEG/WebP in a chat iframe to test fit and clipping. Supply the token from publish_worker_file.preview_url. Do not invoke for ordinary file publication; this is an opt-in layout test.',
+    description: 'Show one previously published CCM PNG/JPEG/WebP image directly in chat using a fitted MCP App preview. Supply the token from publish_worker_file.preview_url. Use when the user should see a useful image or artifact preview inline; avoid unnecessary preview cards for every intermediate image. This does not upload a ChatGPT attachment and does not change publish_worker_file.',
     inputSchema: { token: z.string().uuid().describe('Token from an existing CCM published image URL.') },
     handler: async ({ token }) => {
       try {
@@ -201,7 +201,7 @@ export function registerSpecializedTools(registry, runtime) {
       'When a user asks to create a PPT, PDF, image, report or other artifact, you may proactively publish the finished result and useful preview images for the user without a separate request to send it. Stage previews are permitted and further CCM work may continue after publishing. Do not publish files merely for model-side inspection.',
       'workspace_context is required and determines the Worker. Relative paths are resolved from that context root; absolute paths remain absolute on the selected Worker.',
       'For a genuinely projectless task, automatically obtain a projectless context first through ccm.create_projectless_context; do not ask the user to choose or register a temporary directory. If select_workspace or register_workspace is awaiting approval for the intended real project, wait for that action to resolve and use its registered workspace_context instead.',
-      'view_image is only for the model to inspect images; it does not show images to the user. For PNG/JPEG/WebP, use the returned preview_url in the reply when the Host supports inline HTTPS images; otherwise provide a clickable preview link. PPT/PDF require separately rendered preview images to display visually.',
+      'view_image is only for the model to inspect images; it does not show images to the user. For a useful published PNG/JPEG/WebP, call the separate Direct preview_published_image tool with the token from preview_url to show the actual image in the ChatGPT MCP App. Avoid unnecessary preview cards; the download and preview links remain available. PPT/PDF require separately rendered preview images to display visually.',
       'The original bytes are preserved. Publish one file at a time, sequentially; public links are bearer capabilities and anyone possessing them can download during their lifetime.',
     ].join('\n\n'),
     inputSchema: {
