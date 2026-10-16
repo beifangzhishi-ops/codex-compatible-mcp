@@ -4,6 +4,8 @@ $ErrorActionPreference='Stop'
 $port=18208
 $routes=@(
   '/ccm/mcp',
+  '/ccm/download',
+  '/ccm/preview',
   '/ccm/authorize',
   '/ccm/token',
   '/ccm/register',

@@ -7,6 +7,8 @@ import { WorkerHub } from './worker-hub.mjs';
 import { ApprovalManager } from './approval-manager.mjs';
 import { WorkspaceContextManager } from './workspace-context-manager.mjs';
 import { FileTransferStore } from './file-transfer-store.mjs';
+import { parseEnvFile, requireHttpsIdentity } from '../../ccm-sidecar/config.mjs';
+import fs from 'node:fs';
 import { PlanManager } from './plan-manager.mjs';
 import { createAuditLogger } from './audit-log.mjs';
 import { ExecPolicyStore } from './exec-policy-store.mjs';
@@ -82,6 +84,11 @@ export function createControllerRuntime(options = {}) {
     stateDir: options.fileTransferStateDir ||
       path.join(installRoot, '.state', 'file-transfers'),
   });
+  const fileDownloadOrigin = options.fileDownloadOrigin || (() => {
+    const configFile = path.join(installRoot, 'config', 'ccm.env');
+    const values = parseEnvFile(fs.readFileSync(configFile, 'utf8'));
+    return new URL(requireHttpsIdentity('CCM_RESOURCE', values.CCM_RESOURCE, '/ccm/mcp')).origin;
+  });
   const planManager = options.planManager || new PlanManager({
     stateDir: options.planStateDir || path.join(installRoot, '.state', 'plans'),
   });
@@ -97,6 +104,7 @@ export function createControllerRuntime(options = {}) {
     processManager,
     fileService,
     fileTransferStore,
+    fileDownloadOrigin,
     planManager,
     async start() {
       workerQuarantinePolicy.start();

@@ -69,7 +69,7 @@ function normalizeUpstreamUrl(value) {
   return UPSTREAM_URL;
 }
 
-function requireHttpsIdentity(name, value, expectedPath) {
+export function requireHttpsIdentity(name, value, expectedPath) {
   const text = String(value ?? '').trim();
   if (!text) throw new Error(name + ' is required.');
   let url;

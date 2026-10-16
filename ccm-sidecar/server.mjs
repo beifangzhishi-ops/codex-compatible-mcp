@@ -15,6 +15,8 @@ import {
 const MAX_BODY_BYTES = 1024 * 1024;
 const UPSTREAM_TIMEOUT_MS = 120000;
 const MAX_UPSTREAM_RESPONSE_BYTES = 8 * 1024 * 1024;
+const MAX_DOWNLOAD_BYTES = 12 * 1024 * 1024;
+const DOWNLOAD_ROUTE = /^\/ccm\/(download|preview)\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i;
 const MCP_SESSION_HEADER = 'mcp-session-id';
 const REQUEST_HOP_HEADERS = new Set([
   'connection',
@@ -644,6 +646,64 @@ function sendUpstreamResponse(
   response.end(upstreamResponse.body);
 }
 
+function proxyPublishedFile(request, response, url, runtime) {
+  if (request.method !== 'GET') {
+    response.setHeader('Allow', 'GET');
+    sendJson(response, 405, { error: 'method_not_allowed' }, { noStore: true });
+    return;
+  }
+  if (!DOWNLOAD_ROUTE.test(url.pathname) || url.search || url.hash) {
+    sendJson(response, 404, { error: 'not_found' }, { noStore: true });
+    return;
+  }
+  const upstream = http.request({
+    hostname: '127.0.0.1',
+    port: runtime.downloadUpstreamPort,
+    path: url.pathname,
+    method: 'GET',
+    timeout: UPSTREAM_TIMEOUT_MS,
+    headers: { Accept: 'application/octet-stream' },
+  }, (source) => {
+    const status = source.statusCode || 502;
+    if (status === 404) {
+      source.resume();
+      sendJson(response, 404, { error: 'not_found' }, { noStore: true });
+      return;
+    }
+    const length = Number(source.headers['content-length']);
+    if (status !== 200 || !Number.isSafeInteger(length) || length < 0 || length > MAX_DOWNLOAD_BYTES) {
+      source.destroy();
+      if (!response.headersSent) sendJson(response, 502, { error: 'invalid_upstream' }, { noStore: true });
+      return;
+    }
+    response.statusCode = 200;
+    for (const name of ['content-type', 'content-length', 'content-disposition', 'cache-control', 'x-content-type-options', 'referrer-policy']) {
+      if (source.headers[name] !== undefined) response.setHeader(name, source.headers[name]);
+    }
+    response.setHeader('Cache-Control', 'no-store');
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    response.setHeader('Referrer-Policy', 'no-referrer');
+    let total = 0;
+    source.on('data', (chunk) => {
+      total += chunk.length;
+      if (total > length || total > MAX_DOWNLOAD_BYTES) {
+        source.destroy();
+        response.destroy();
+      }
+    });
+    source.on('error', () => response.destroy());
+    source.on('end', () => { if (total !== length) response.destroy(); });
+    source.pipe(response);
+  });
+  upstream.on('timeout', () => upstream.destroy(new Error('upstream timeout')));
+  upstream.on('error', () => {
+    if (!response.headersSent) sendJson(response, 502, { error: 'upstream_unavailable' }, { noStore: true });
+    else response.destroy();
+  });
+  response.on('close', () => upstream.destroy());
+  upstream.end();
+}
+
 function parseUpstreamMessage(body) {
   const text = body.toString('utf8');
   const dataLine = text
@@ -1113,6 +1173,11 @@ async function handleProtectedMcp(request, response, runtime, url) {
 
 async function handleRequest(request, response, runtime) {
   const url = new URL(request.url || '/', 'http://127.0.0.1');
+  if (url.pathname === '/ccm/download' || url.pathname.startsWith('/ccm/download/') ||
+      url.pathname === '/ccm/preview' || url.pathname.startsWith('/ccm/preview/')) {
+    proxyPublishedFile(request, response, url, runtime);
+    return;
+  }
   if (request.method === 'OPTIONS') {
     setCors(response);
     response.statusCode = 204;
@@ -1196,6 +1261,7 @@ export function createCcmOAuthServer(options = {}) {
     store,
     logger,
     upstreamUrl,
+    downloadUpstreamPort: options.downloadUpstreamPort ?? 18209,
     approvalSecret,
     upstreamSession: null,
     registrationAttempts: new Map(),
@@ -1204,9 +1270,12 @@ export function createCcmOAuthServer(options = {}) {
   runtime.upstreamSession = new UpstreamSessionManager(runtime);
   const server = http.createServer((request, response) => {
     const requestPath = new URL(request.url || '/', 'http://127.0.0.1').pathname;
-    response.on('finish', () => appendHttpTrace(runtime, 'HTTP ' + request.method + ' ' + requestPath + ' status=' + response.statusCode));
+    const safePath = /^\/ccm\/(?:download|preview)(?:\/|$)/.test(requestPath)
+      ? '/ccm/file/[redacted]' : requestPath;
+    response.on('finish', () => appendHttpTrace(runtime, 'HTTP ' + request.method + ' ' + safePath + ' status=' + response.statusCode));
     handleRequest(request, response, runtime).catch((error) => {
-      appendHttpTrace(runtime, 'ERROR ' + request.method + ' ' + requestPath + ' message=' + String(error?.message || error || 'unknown'));
+      appendHttpTrace(runtime, 'ERROR ' + request.method + ' ' + safePath +
+        (safePath.includes('[redacted]') ? ' message=download failed' : ' message=' + String(error?.message || error || 'unknown')));
       if (!response.headersSent) {
         sendJson(response, 500, { error: 'internal_server_error' }, { noStore: true });
       } else if (!response.writableEnded) {

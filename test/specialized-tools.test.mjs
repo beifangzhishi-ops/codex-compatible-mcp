@@ -88,125 +88,54 @@ function fakeRuntime() {
       },
     },
     fileTransferStore: new FileTransferStore(),
+    fileDownloadOrigin: () => 'https://example.test',
   };
 }
 
-test('send_file is Deferred + Code Mode and returns one native resource link using workspace_context', async () => {
+test('publish_worker_file is Direct + Code Mode and yields an HTTPS URL through direct and exec', async () => {
   const runtime = fakeRuntime();
-  runtime.environmentRegistry.resolve = (environmentId) => ({
-    id: environmentId || 'windows-worker',
-    platform: 'windows',
-    capabilities: { sendFile: true },
-  });
   const registry = new ToolRegistry();
   registerSpecializedTools(registry, runtime);
-  const sendFile = registry.get('ccm-extra.send_file');
-  assert.equal(sendFile.surfaces.direct, false);
-  assert.equal(sendFile.surfaces.deferred, true);
-  assert.equal(sendFile.surfaces.codeMode, true);
-  assert.equal(sendFile.discoverability, 'exact');
-  assert.equal(sendFile.supportsParallel, false);
-  assert.match(sendFile.description, /exactly one file per call/i);
-  assert.match(sendFile.description, /sequentially/i);
-  assert.match(sendFile.description, /never issue concurrent or parallel/i);
-  assert.match(sendFile.description, /exact name send_file or ccm-extra\.send_file/i);
-  assert.match(sendFile.description, /terminal handoff step/i);
-  assert.match(sendFile.description, /Host may require user interaction/i);
-  assert.match(
-    sendFile.description,
-    /include the host-generated native ChatGPT file attachment object in the final response, not its file ID as text/i,
-  );
-  assert.match(sendFile.description, /1 KiB \(1024 bytes\)/i);
-  assert.match(sendFile.description, /never pad, rewrite, or otherwise alter/i);
-  assert.match(sendFile.inputSchema.path.description, /exactly one file path/i);
-  assert.match(sendFile.inputSchema.path.description, /do not call send_file in parallel/i);
-
-  const result = await registry.get('ccm-extra.send_file').handler({
-    workspace_context: '00000000-0000-4000-8000-000000000001',
-    path: 'C:\\docs\\report.docx',
-  });
-  assert.equal(result.isError, undefined);
-  assert.equal(result.content[0].type, 'text');
-  const resourceLink = result.content.find(
-    (item) => item.type === 'resource_link',
-  );
-  assert.ok(resourceLink);
-  assert.equal(resourceLink.name, 'report.docx');
-  assert.equal(
-    resourceLink.mimeType,
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  );
-  assert.equal(resourceLink.size, 4);
-  assert.equal(resourceLink._meta.sha256, 'test-sha256');
-  assert.equal(resourceLink._meta.source_environment_id, 'worker-a');
-  assert.equal(
-    result.content.filter((item) => item.type === 'resource_link').length,
-    1,
-  );
-  assert.match(resourceLink.uri, /^ccm-file:\/\/\/[0-9a-f-]+$/i);
-  const token = resourceLink.uri.split('/').at(-1);
-  const stored = runtime.fileTransferStore.get(token);
-  assert.ok(stored);
-  assert.equal(
-    Buffer.from(stored.data, 'base64').toString(),
-    'test',
-  );
-  assert.equal(result.structuredContent.filename, 'report.docx');
-
+  const publish = registry.get('ccm-extra.publish_worker_file');
+  assert.ok(publish);
+  assert.equal(publish.surfaces.direct, true);
+  assert.equal(publish.surfaces.codeMode, true);
+  assert.equal(publish.surfaces.deferred, false);
+  assert.match(publish.description, /proactively publish/i);
+  assert.equal(publish.supportsParallel, false);
+  assert.equal(registry.get('ccm-extra.send_file'), null);
+  const args = { workspace_context: '00000000-0000-4000-8000-000000000001', path: 'report.docx' };
+  const direct = await publish.handler(args);
+  assert.equal(direct.isError, undefined);
+  assert.equal(direct.structuredContent.capability, 'publish_worker_file');
+  assert.match(direct.structuredContent.download_url, /^https:\/\/example\.test\/ccm\/download\/[0-9a-f-]+$/);
+  assert.ok(!direct.content.some((item) => item.type === 'resource_link'));
+  const token = direct.structuredContent.download_url.split('/').at(-1);
+  assert.equal(runtime.fileTransferStore.get(token).byte_length, 4);
   registerArchitectureTools(registry);
-  const sequential = await registry.get('exec').handler({
-    calls: [{
-      tool: 'ccm-extra.send_file',
-      arguments: {
-        workspace_context: '00000000-0000-4000-8000-000000000001',
-        path: 'C:\\docs\\second.docx',
-      },
-    }],
-  });
-  assert.equal(sequential.isError, undefined);
-  assert.equal(sequential.structuredContent.state, 'completed');
-  const nestedResourceLink = sequential.content.find(
-    (item) => item.type === 'resource_link',
-  );
-  assert.ok(nestedResourceLink);
-  assert.equal(nestedResourceLink.name, 'report.docx');
-  assert.equal(nestedResourceLink.size, 4);
-  assert.equal(nestedResourceLink._meta.sha256, 'test-sha256');
-  assert.equal(nestedResourceLink._meta.source_environment_id, 'worker-a');
-  assert.deepEqual(runtime.calls.at(-1), {
-    sendFile: {
-      workspace_context: '00000000-0000-4000-8000-000000000001',
-      path: 'C:\\docs\\second.docx',
-    },
-  });
-
-  const rejected = await registry.get('exec').handler({
-    calls: [{
-      tool: 'ccm-extra.send_file',
-      arguments: {
-        workspace_context: '00000000-0000-4000-8000-000000000001',
-        path: 'C:\\docs\\second.docx',
-      },
-    }],
-    parallel: true,
-  });
-  assert.equal(rejected.isError, true);
-  assert.match(rejected.content[0].text, /parallel-call support/i);
+  const nested = await registry.get('exec').handler({ calls: [{ tool: 'ccm-extra.publish_worker_file', arguments: args }] });
+  assert.equal(nested.isError, undefined);
+  assert.equal(nested.structuredContent.state, 'completed');
+  assert.equal(nested.structuredContent.calls[0].result.structured_content.capability, 'publish_worker_file');
+  assert.ok(!nested.content.some((item) => item.type === 'resource_link'));
+  const parallel = await registry.get('exec').handler({ calls: [{ tool: 'ccm-extra.publish_worker_file', arguments: args }], parallel: true });
+  assert.equal(parallel.isError, true);
+  runtime.fileTransferStore.close();
 });
 
 test('receive_file is Deferred + Code Mode and preserves native file objects through exec', async () => {
   const runtime = fakeRuntime();
   const registry = new ToolRegistry();
   registerSpecializedTools(registry, runtime);
-  const receiveFile = registry.get('ccm-extra.receive_file');
+  const receiveFile = registry.get('ccm-extra.import_chatgpt_file');
   assert.ok(receiveFile);
   assert.equal(receiveFile.surfaces.direct, false);
   assert.equal(receiveFile.surfaces.deferred, true);
   assert.equal(receiveFile.surfaces.codeMode, true);
   assert.equal(receiveFile.supportsParallel, false);
-  assert.match(receiveFile.description, /exactly one ChatGPT file per call/i);
-  assert.match(receiveFile.description, /sequentially/i);
-  assert.match(receiveFile.description, /Never issue concurrent or parallel/i);
+  assert.match(receiveFile.description, /Import exactly one ChatGPT file/i);
+  assert.match(receiveFile.description, /sequential/i);
+  assert.match(receiveFile.description, /multiple imports must be sequential/i);
   assert.match(receiveFile.description, /ordinary conversation attachment.*top-level file/i);
   assert.match(receiveFile.description, /Library file.*materialize.*raw_file.*top-level exec\.file/i);
 
@@ -222,7 +151,7 @@ test('receive_file is Deferred + Code Mode and preserves native file objects thr
     destination: 'incoming.txt',
   });
   assert.equal(result.isError, undefined);
-  assert.equal(result.structuredContent.capability, 'receive_file');
+  assert.equal(result.structuredContent.capability, 'import_chatgpt_file');
   assert.equal(result.structuredContent.file_id, 'file_incoming');
   assert.deepEqual(runtime.calls.at(-1), {
     receiveFile: {
@@ -238,7 +167,7 @@ test('receive_file is Deferred + Code Mode and preserves native file objects thr
   assert.deepEqual(execTool.mcpMeta['openai/fileParams'], ['file']);
   const nested = await registry.get('exec').handler({
     calls: [{
-      tool: 'ccm-extra.receive_file',
+      tool: 'ccm-extra.import_chatgpt_file',
       arguments: {
         workspace_context: '00000000-0000-4000-8000-000000000001',
         file: input,
@@ -260,7 +189,7 @@ test('receive_file is Deferred + Code Mode and preserves native file objects thr
   const bridged = await registry.get('exec').handler({
     file: input,
     calls: [{
-      tool: 'ccm-extra.receive_file',
+      tool: 'ccm-extra.import_chatgpt_file',
       arguments: {
         workspace_context: '00000000-0000-4000-8000-000000000001',
         destination: 'bridged-incoming.txt',
@@ -281,7 +210,7 @@ test('receive_file is Deferred + Code Mode and preserves native file objects thr
   const duplicateFile = await registry.get('exec').handler({
     file: input,
     calls: [{
-      tool: 'ccm-extra.receive_file',
+      tool: 'ccm-extra.import_chatgpt_file',
       arguments: {
         workspace_context: '00000000-0000-4000-8000-000000000001',
         file: input,
@@ -293,7 +222,7 @@ test('receive_file is Deferred + Code Mode and preserves native file objects thr
 
   const rejectedParallel = await registry.get('exec').handler({
     calls: [{
-      tool: 'ccm-extra.receive_file',
+      tool: 'ccm-extra.import_chatgpt_file',
       arguments: {
         workspace_context: '00000000-0000-4000-8000-000000000001',
         file: input,
@@ -342,7 +271,7 @@ test('quark_upload is Deferred + Code Mode and advertises deferred routing', () 
   assert.match(quarkUpload.description, /discover this capability through tool_search and invoke it through exec/i);
 });
 
-test('Codex 共享链接通过现有导出工具分派并可被发现', async () => {
+test('Codex share URL is discovered and dispatched by the export tool', async () => {
   const runtime = fakeRuntime();
   runtime.environmentRegistry.resolve = () => ({ id: 'worker-a', capabilities: { exec: true } });
   const registry = new ToolRegistry();

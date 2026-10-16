@@ -71,6 +71,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     trustedPackageScriptStateFile: path.join(tempRoot, 'trusted-package-scripts.json'),
     workspaceContextStateFile: path.join(tempRoot, 'workspace-contexts.json'),
     fileTransferStateDir: path.join(tempRoot, 'file-transfers'),
+    fileDownloadOrigin: () => 'https://example.test',
     planStateDir: path.join(tempRoot, 'plans'),
   });
   const workerRuntime = createWorkerRuntime({
@@ -147,6 +148,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       'apply_patch',
       'exec',
       'exec_command',
+      'publish_worker_file',
       'request_approval',
       'resolve_pending_action',
       'tool_search',
@@ -204,10 +206,10 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
 
     const receiveSearch = await client.callTool({
       name: 'tool_search',
-      arguments: { query: 'receive_file', limit: 5 },
+      arguments: { query: 'import_chatgpt_file', limit: 5 },
     });
     const receiveFileTool = receiveSearch.structuredContent.tools.find(
-      (tool) => tool.qualified_name === 'ccm-extra.receive_file',
+      (tool) => tool.qualified_name === 'ccm-extra.import_chatgpt_file',
     );
     assert.ok(receiveFileTool);
     assert.deepEqual(receiveFileTool.surfaces, ['deferred', 'code_mode']);
@@ -226,51 +228,13 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(receiveFileTool.description, /ordinary conversation attachment.*top-level file/i);
     assert.match(receiveFileTool.description, /Library file.*materialize.*raw_file.*top-level exec\.file/i);
 
-    const sendSearch = await client.callTool({
-      name: 'tool_search',
-      arguments: { query: 'send_file', limit: 5 },
-    });
-    const sendFileTool = sendSearch.structuredContent.tools.find(
-      (tool) => tool.qualified_name === 'ccm-extra.send_file',
-    );
-    assert.ok(sendFileTool);
-    assert.deepEqual(sendFileTool.surfaces, ['deferred', 'code_mode']);
-    assert.equal(sendFileTool.discoverability, 'exact');
-    assert.match(
-      sendFileTool.description,
-      /include the host-generated native ChatGPT file attachment object in the final response, not its file ID as text/i,
-    );
-    assert.match(sendFileTool.description, /terminal handoff step/i);
-    assert.match(sendFileTool.description, /Host may require user interaction/i);
-    assert.match(sendFileTool.description, /1 KiB \(1024 bytes\)/i);
-    assert.match(sendFileTool.description, /never pad, rewrite, or otherwise alter/i);
+    const publishTool = listed.tools.find((tool) => tool.name === 'publish_worker_file');
+    assert.ok(publishTool);
+    assert.match(publishTool.description, /proactively publish/i);
+    assert.equal(listed.tools.some((tool) => tool.name === 'import_chatgpt_file'), false);
+    assert.match(client.getInstructions(), /Publish user-facing deliverables and useful previews/i);
 
-    for (const query of ['', 'file', 'attachment', 'download']) {
-      const broadSearch = await client.callTool({
-        name: 'tool_search',
-        arguments: { query, limit: 25 },
-      });
-      assert.equal(
-        broadSearch.structuredContent.tools.some(
-          (tool) => tool.qualified_name === 'ccm-extra.send_file',
-        ),
-        false,
-        'send_file should require exact discovery for query ' + JSON.stringify(query),
-      );
-    }
-
-    const qualifiedSendSearch = await client.callTool({
-      name: 'tool_search',
-      arguments: { query: 'ccm-extra.send_file', limit: 5 },
-    });
-    assert.equal(
-      qualifiedSendSearch.structuredContent.tools.some(
-        (tool) => tool.qualified_name === 'ccm-extra.send_file',
-      ),
-      true,
-    );
-
-    for (const deferredName of ['send_file', 'chatgpt_share_export', 'quark_upload']) {
+    for (const deferredName of ['chatgpt_share_export', 'quark_upload']) {
       const search = await client.callTool({
         name: 'tool_search',
         arguments: { query: deferredName, limit: 10 },
@@ -537,46 +501,18 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
 
     const docBytes = Buffer.alloc(3 * 1024 * 1024, 0x61);
     await fs.writeFile(path.join(workspaceRoot, 'preview.docx'), docBytes);
-    const sendFileResult = await client.callTool({
-      name: 'exec',
-      arguments: {
-        calls: [{
-          tool: 'ccm-extra.send_file',
-          arguments: {
-            workspace_context: workspaceContext,
-            path: 'preview.docx',
-          },
-        }],
-        yield_time_ms: 1000,
-      },
+    const publishResult = await client.callTool({
+      name: 'publish_worker_file',
+      arguments: { workspace_context: workspaceContext, path: 'preview.docx' },
     });
-    assert.equal(sendFileResult.isError, undefined);
-    const resourceLink = sendFileResult.content.find(
-      (item) => item.type === 'resource_link',
-    );
-    assert.ok(resourceLink);
-    assert.equal(resourceLink.name, 'preview.docx');
-    assert.equal(resourceLink.size, docBytes.length);
-    const nestedSendFile = sendFileResult.structuredContent
-      .calls[0].result.structured_content;
-    assert.equal(
-      nestedSendFile.mime_type,
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    );
-    assert.equal(nestedSendFile.byte_length, docBytes.length);
-    const resourceUri = resourceLink.uri;
-    assert.match(resourceUri, /^ccm-file:\/\/\//);
-    assert.equal(resourceLink.mimeType, nestedSendFile.mime_type);
-    const readFileResult = await client.readResource({ uri: resourceUri });
-    assert.equal(readFileResult.contents.length, 1);
-    assert.equal(
-      readFileResult.contents[0].mimeType,
-      nestedSendFile.mime_type,
-    );
-    assert.deepEqual(
-      Buffer.from(readFileResult.contents[0].blob, 'base64'),
-      docBytes,
-    );
+    assert.equal(publishResult.isError, undefined);
+    assert.ok(!publishResult.content.some((item) => item.type === 'resource_link'));
+    assert.match(publishResult.structuredContent.download_url, /^https:\/\/example\.test\/ccm\/download\//);
+    assert.equal(publishResult.structuredContent.byte_length, docBytes.length);
+    const token = publishResult.structuredContent.download_url.split('/').at(-1);
+    const download = await fetch('http://127.0.0.1:' + controller.address.port + '/ccm/download/' + token);
+    assert.equal(download.status, 200);
+    assert.deepEqual(Buffer.from(await download.arrayBuffer()), docBytes);
 
     registry.register({
       name: 'late_echo',

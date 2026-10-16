@@ -32,39 +32,31 @@ function execResult(value, metadata = {}) {
   };
 }
 
-function fileResourceResult(value, environmentId, fileTransferStore) {
+function fileResourceResult(value, environmentId, runtime) {
+  const fileTransferStore = runtime.fileTransferStore;
   if (!fileTransferStore) {
     throw new Error('CCM file-transfer store is unavailable.');
   }
+  const origin = runtime.fileDownloadOrigin();
+  if (!/^https:\/\//.test(origin)) throw new Error('Valid HTTPS file origin is required.');
   const transfer = fileTransferStore.put(value, { environmentId });
+  const url = origin + '/ccm/download/' + transfer.token;
+  const previewUrl = /^image\/(png|jpeg|webp)$/i.test(transfer.mime_type)
+    ? origin + '/ccm/preview/' + transfer.token : undefined;
   return {
-    content: [
-      {
-        type: 'text',
-        text: 'Attached ' + value.filename + ' from ' + environmentId +
-          ' (' + value.byte_length + ' bytes, sha256 ' + value.sha256 + ').',
-      },
-      {
-        type: 'resource_link',
-        uri: transfer.uri,
-        name: value.filename,
-        description: 'File transferred from CCM environment ' + environmentId,
-        mimeType: value.mime_type,
-        size: value.byte_length,
-        _meta: {
-          sha256: value.sha256,
-          source_environment_id: environmentId,
-        },
-      },
-    ],
+    content: [{ type: 'text', text: 'Download ' + transfer.filename + ': ' + url +
+      (previewUrl ? '\nImage preview: ' + previewUrl : '') +
+      '\nExpires: ' + new Date(transfer.expiresAt).toISOString() }],
     structuredContent: {
-      capability: 'send_file',
+      capability: 'publish_worker_file',
       environment_id: environmentId,
-      path: value.path,
-      filename: value.filename,
-      mime_type: value.mime_type,
-      byte_length: value.byte_length,
-      sha256: value.sha256,
+      download_url: url,
+      ...(previewUrl ? { preview_url: previewUrl } : {}),
+      filename: transfer.filename,
+      mime_type: transfer.mime_type,
+      byte_length: transfer.byte_length,
+      sha256: transfer.sha256,
+      expires_at: new Date(transfer.expiresAt).toISOString(),
     },
   };
 }
@@ -78,7 +70,7 @@ function receivedFileResult(value, environmentId) {
         ' bytes, sha256 ' + value.sha256 + ').',
     }],
     structuredContent: {
-      capability: 'receive_file',
+      capability: 'import_chatgpt_file',
       environment_id: environmentId,
       path: value.path,
       filename: value.filename,
@@ -154,32 +146,26 @@ async function run(runtime, args, command) {
 export function registerSpecializedTools(registry, runtime) {
   registry.register({
     namespace: 'ccm-extra',
-    name: 'send_file',
+    name: 'publish_worker_file',
     provider: 'ccm-specialized',
-    provenance: 'ccm-native-file-transfer',
-    surfaces: { deferred: true, codeMode: true },
-    discoverability: 'exact',
+    provenance: 'ccm-https-file-publishing',
+    surfaces: { direct: true, codeMode: true },
     tags: ['file', 'attachment', 'transfer', 'gpt'],
     environmentRequirements: {
       capabilities: ['sendFile'],
     },
     supportsParallel: false,
     description: [
-      'Send exactly one file per call from a CCM environment to the GPT client as a native MCP resource link. If the user needs multiple files, call send_file sequentially and wait for each call to return before starting the next. Never issue concurrent or parallel send_file calls.',
-      'Use this only when the user explicitly asks for a known local Worker file to be delivered as a native ChatGPT attachment. Discover it through tool_search only by the exact name send_file or ccm-extra.send_file, then invoke it through exec.',
-      'Treat send_file as a terminal handoff step: run it only after all required analysis, verification, editing, testing, and other tool work is complete. Do not call it as an intermediate step when the model still needs to continue working afterward.',
+      'Publish one known Worker file per call as a temporary public HTTPS download link (72 hours, subject to cache eviction). It is not a native ChatGPT attachment.',
+      'When a user asks to create a PPT, PDF, image, report or other artifact, you may proactively publish the finished result and useful preview images for the user without a separate request to send it. Stage previews are permitted and further CCM work may continue after publishing. Do not publish files merely for model-side inspection.',
       'workspace_context is required and determines the Worker. Relative paths are resolved from that context root; absolute paths remain absolute on the selected Worker.',
       'For a genuinely projectless task, automatically obtain a projectless context first through ccm.create_projectless_context; do not ask the user to choose or register a temporary directory. If select_workspace or register_workspace is awaiting approval for the intended real project, wait for that action to resolve and use its registered workspace_context instead.',
-      'Do NOT use send_file for model-side inspection, review, analysis, verification, stage previews, or cross-tool transfer. If the file can be examined inside CCM, prefer local reading, view_image, command-line inspection, or a temporary local preview instead.',
-      'The ChatGPT Host may require user interaction before materializing the native attachment. That confirmation is Host-owned, not a CCM approval, and CCM does not provide a way to bypass it.',
-      'The transfer preserves the original file bytes and does not use BMG or upload the file to ChatGPT Library.',
-      'After send_file succeeds, include the host-generated native ChatGPT file attachment object in the final response, not its file ID as text.',
-      'Treat 1 KiB (1024 bytes) as the operational minimum for reliable ChatGPT attachment downloads. Files smaller than 1 KiB may still be transferred byte-for-byte, but some ChatGPT clients can remain stuck connecting when downloading them. Never pad, rewrite, or otherwise alter the source file to reach this threshold; warn the user instead when a sub-1-KiB file is being handed off.',
-      'Use this for Word, PDF, Excel, PowerPoint, archives, images, and other local files only after locating the exact path and determining that an actual user-facing transfer is needed.',
+      'view_image is only for the model to inspect images; it does not show images to the user. For PNG/JPEG/WebP, use the returned preview_url in the reply when the Host supports inline HTTPS images; otherwise provide a clickable preview link. PPT/PDF require separately rendered preview images to display visually.',
+      'The original bytes are preserved. Publish one file at a time, sequentially; public links are bearer capabilities and anyone possessing them can download during their lifetime.',
     ].join('\n\n'),
     inputSchema: {
       path: z.string().min(1).describe(
-        'Exactly one file path on the Worker selected by workspace_context. Relative paths resolve from the selected context root; absolute paths remain absolute. For multiple files, invoke send_file sequentially once per file and wait for each call to return before issuing the next; do not call send_file in parallel.',
+        'Exactly one Worker file to publish for the user. Relative paths resolve from the selected context root; absolute paths remain absolute. Publish multiple files sequentially.',
       ),
       workspace_context: z.string().uuid().describe(
         'Existing workspace context used to determine the Worker that owns the file.',
@@ -194,7 +180,7 @@ export function registerSpecializedTools(registry, runtime) {
         return fileResourceResult(
           value,
           value.environment_id,
-          runtime.fileTransferStore,
+          runtime,
         );
       } catch (error) {
         return toolError(error);
@@ -204,7 +190,7 @@ export function registerSpecializedTools(registry, runtime) {
 
   registry.register({
     namespace: 'ccm-extra',
-    name: 'receive_file',
+    name: 'import_chatgpt_file',
     provider: 'ccm-specialized',
     provenance: 'ccm-native-file-transfer',
     surfaces: { deferred: true, codeMode: true },
@@ -214,11 +200,11 @@ export function registerSpecializedTools(registry, runtime) {
     },
     supportsParallel: false,
     description: [
-      'Receive exactly one ChatGPT file per call and save it to the Worker selected by workspace_context. For multiple files, call receive_file sequentially and wait for each call to return before starting the next. Never issue concurrent or parallel receive_file calls.',
-      'For an ordinary conversation attachment, bind it through exec\'s top-level file parameter, then call ccm-extra.receive_file once; exec injects the resolved native file object into this nested call.',
-      'For a ChatGPT Library file, first materialize the exact Library object as raw_file with ChatGPT Files, then bind that materialized file through top-level exec.file and call ccm-extra.receive_file once.',
+      'Import exactly one ChatGPT file into the Worker selected by workspace_context; multiple imports must be sequential.',
+      'For an ordinary conversation attachment, bind it through exec\'s top-level file parameter, then call ccm-extra.import_chatgpt_file once; exec injects the resolved native file object into this nested call.',
+      'For a ChatGPT Library file, first materialize the exact Library object as raw_file with ChatGPT Files, then bind that materialized file through top-level exec.file and call ccm-extra.import_chatgpt_file once.',
       'Do not pass a Library/file ID, ref, or URI as nested arguments.file.',
-      'workspace_context is required and determines the Worker and context root. receive_file writes only inside that context root. destination must be relative; absolute paths and workspace escapes are rejected.',
+      'workspace_context is required and determines the Worker and context root. Imports write only inside that root. destination must be relative; absolute paths and workspace escapes are rejected.',
       'If destination is omitted, the sanitized ChatGPT file_name is used at the context root. Existing files are not replaced unless overwrite=true.',
       'The Worker downloads the temporary ChatGPT URL directly; CCM does not route the file bytes through BMG or the Controller file-transfer cache.',
     ].join('\\n\\n'),
@@ -229,7 +215,7 @@ export function registerSpecializedTools(registry, runtime) {
         mime_type: z.string().optional(),
         file_name: z.string().optional(),
       }).strict().describe(
-        'Exactly one ChatGPT file object. For multiple files, invoke receive_file sequentially once per file; do not call receive_file in parallel.',
+        'Exactly one ChatGPT file object. For multiple files, invoke import_chatgpt_file sequentially once per file; do not call in parallel.',
       ),
       workspace_context: z.string().uuid().describe(
         'Existing workspace context used to determine the target Worker and context root.',

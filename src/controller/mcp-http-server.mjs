@@ -1,8 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import {
-  McpServer,
-  ResourceTemplate,
-} from '@modelcontextprotocol/sdk/server/mcp.js';
+import { FILE_TOKEN_RE } from './file-transfer-store.mjs';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
@@ -34,7 +32,7 @@ function createProtocolServer(
       'When the user explicitly asks to plan, discuss before implementation, or re-plan and a durable multi-turn Plan is useful, discover ccm.plan_patch / ccm.plan_read through tool_search. Use Codex-style planning discipline: explore discoverable facts first and do not ask for facts that reasonable non-mutating inspection can answer; if a high-impact ambiguity instead depends on a non-discoverable user preference, product/scope/compatibility choice, or meaningful tradeoff, ask rather than guess. When asking such a decision question, explicitly show 2-4 mutually exclusive choices in the user-visible question and identify a recommended default there when useful; the user may still provide another answer. Continue until the Plan is decision-complete for another executor, including implementation, interface/data-flow, failure-mode, validation, migration/cleanup, and acceptance details. While planning, ordinary read-only inspection and tests/builds limited to ignored/cache/temp side effects are allowed, but tracked implementation edits, migrations, rewriting codegen/formatting, dependency/config changes, deploy/release, commit, and push remain gated on explicit execution/implementation authorization. Keep the Plan current by removing or rewriting stale, completed, invalidated, or superseded content. When planning reaches a decision-complete stopping point and you are about to tell the user the Plan is complete or await execution authorization, read the current persisted Plan and include its complete latest text in that same user-visible reply; do not replace it with a summary, excerpt, plan_id, or change list. If plan_read is truncated and returns next_start_line, continue ordered range reads until the complete Plan has been collected before replying. This final-Plan handoff applies only when finishing the planning phase; later plan_read calls used during implementation remain lifecycle-neutral and do not require repeating the Plan or re-entering planning. Imperative task wording, Plan updates, completed inspection, workspace approval, registration approval, or sandbox escalation approval is not execution authorization. CCM does not maintain a Plan-Mode state machine or Codex Host proposal/input UI. Once the user explicitly asks to execute/implement, continue implementation; plan_read is a neutral reference lookup and never switches the workflow back to planning.',
       'If an operational tool requires workspace_context and the user has not selected, requested, or otherwise indicated a real registered project, discover ccm.create_projectless_context with tool_search and invoke it through exec. Do not use projectless as a fallback to bypass select_workspace or register_workspace while that pending action still targets the user\'s current intended real project. If the user explicitly changes to a different real project, directly select or register the new target; an older pending workspace approval does not need to be denied or resolved first. Specify environment_id when a particular Worker is required; omit it to use the primary environment. Use the returned workspace_context for subsequent CCM operations.',
       'An environment has no GPT-visible default workspace or project directory. Do not infer project location from Worker bootstrap cwd, CCM_WORKSPACE, Documents, Temp, a drive root, or any other internal path. CCM does not define a Projects Root; new-project placement comes from the user or upper-layer orchestrator.',
-      'Use direct apply_patch and view_image for common workspace file operations. receive_file remains deferred: discover it through tool_search and dispatch it through exec. For an ordinary conversation attachment, bind it through top-level exec.file. For a Library file, first materialize the exact Library object as raw_file with ChatGPT Files, then bind that materialized file through exec.file. Dispatch ccm-extra.receive_file sequentially; its destination remains relative to the selected context root. send_file is an exact-discovery terminal handoff: use tool_search with exactly send_file or ccm-extra.send_file only when the user explicitly asks for a known local Worker file as a native ChatGPT attachment, and call it only after all required analysis, verification, editing, testing, and other tool work is complete. Never use send_file for inspection, verification, stage previews, or intermediate cross-tool transfer. The ChatGPT Host may require user interaction to materialize the native attachment; that is Host-owned confirmation, not CCM approval, and CCM does not bypass it. send_file requires workspace_context, is strictly single-file, and multiple files must be sent sequentially. It stores the exact Worker bytes in the persistent CCM file bridge and returns a standard MCP resource link that exec passes through for the host to present natively. Treat 1 KiB (1024 bytes) as the operational minimum for reliable ChatGPT attachment downloads: sub-1-KiB files may still be transferred exactly, but some clients can remain stuck connecting. Never pad or alter a source file to cross that threshold; warn the user instead.',
+      'Use direct apply_patch and view_image for model-side workspace work. ccm-extra.import_chatgpt_file remains deferred: discover it through tool_search and dispatch through exec with top-level exec.file binding; Library attachments must be materialized as raw_file before binding. It imports one file into the selected Worker context. Publish user-facing deliverables and useful previews using the direct publish_worker_file tool, one file per call; call it proactively when the user asked to create or see PPT/PDF/images/reports, without waiting for a separate send request, including stage previews when useful. Continue work after publishing when needed. publish_worker_file returns temporary CCM HTTPS links, not native ChatGPT attachments. view_image is only for the model to inspect images and does not display them to the user. For existing PNG/JPEG/WebP use the published preview URL in user responses when supported, otherwise link it. Never publish temporary files just for internal analysis.',
       'Discover chatgpt_share_export through tool_search and invoke it through exec when the user supplies a public ChatGPT Share URL and wants that conversation inspected or exported; do not route that workflow through BMG/browser automation. Codex 公开共享链接 https://chatgpt.com/s/cx_... 同样通过该工具读取和导出。Discover quark_upload through tool_search and invoke it through exec when the user asks to upload known local files through the logged-in Quark Cloud Drive desktop client.',
       'For bulk image inspection, view_image is also available through exec; batch independent image calls with parallel=true when useful.',
       'Use exec/wait for structured nested capability dispatch; host Code Mode remains responsible for JavaScript/control flow.',
@@ -49,35 +47,6 @@ function createProtocolServer(
       'Treat transient network failures carefully: a single timeout, DNS failure, connection reset, HTTP 502, or target-site 403/404/challenge does not mean a CCM environment is offline. Distinguish CCM transport, worker connectivity, command runtime, and target-site failures; verify environment health and retry transient network operations 2-3 times when appropriate.',
     ].join('\n'),
   });
-
-  server.registerResource(
-    'ccm-file-transfer',
-    new ResourceTemplate('ccm-file:///{token}', { list: undefined }),
-    {
-      title: 'CCM transferred file',
-      description: 'Temporary file transferred from a CCM environment.',
-    },
-    async (uri, variables) => {
-      const token = String(variables.token || '');
-      const entry = runtime.fileTransferStore?.get(token);
-      if (!entry) {
-        throw new Error('CCM file resource is unknown or expired: ' + uri);
-      }
-      return {
-        contents: [{
-          uri: entry.uri,
-          mimeType: entry.mime_type,
-          blob: entry.data,
-          _meta: {
-            filename: entry.filename,
-            byte_length: entry.byte_length,
-            sha256: entry.sha256,
-            source_environment_id: entry.environment_id,
-          },
-        }],
-      };
-    },
-  );
 
   server.registerResource(
     'ccm-approval-ui',
@@ -134,6 +103,42 @@ export function createHttpController({
   // higher-level intent solely against this transport-scoped identifier.
   const transports = new Map();
   const protocolServers = new Map();
+
+  const download = (req, res) => {
+    const match = /^\/ccm\/(download|preview)\/([^/]+)$/.exec(req.path);
+    if (!match || !FILE_TOKEN_RE.test(match[2]) || req.originalUrl.includes('?')) {
+      res.status(404).end();
+      return;
+    }
+    if (req.method !== 'GET') {
+      res.setHeader('Allow', 'GET');
+      res.status(405).end();
+      return;
+    }
+    const acquired = runtime.fileTransferStore?.acquire(match[2]);
+    if (!acquired) { res.status(404).end(); return; }
+    const { entry, stream, release } = acquired;
+    const preview = match[1] === 'preview';
+    if (preview && !/^image\/(png|jpeg|webp)$/i.test(entry.mime_type)) {
+      stream.destroy(); release();
+      res.status(404).end(); return;
+    }
+    const safeFilename = entry.filename.replace(/[\r\n\\/"\x00-\x1f\x7f]/g, '_');
+    const asciiName = safeFilename.replace(/[^\x20-\x7e]/g, '_').replace(/[%\\]/g, '_');
+    const mime = /^[\w.+-]+\/[\w.+-]+$/.test(entry.mime_type) ? entry.mime_type : 'application/octet-stream';
+    res.status(200);
+    res.setHeader('Content-Length', entry.byte_length);
+    res.setHeader('Content-Type', preview ? entry.mime_type : mime);
+    res.setHeader('Content-Disposition', preview ? 'inline' : 'attachment; filename="' + asciiName + '"; filename*=UTF-8\'\'' + encodeURIComponent(safeFilename));
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    stream.on('close', release);
+    stream.on('error', () => { if (!res.headersSent) res.status(500).end(); else res.destroy(); });
+    res.on('close', () => stream.destroy());
+    stream.pipe(res);
+  };
+  app.all(/^\/ccm\/(?:download|preview)(?:\/.*)?$/, download);
 
   app.get('/ccm/health', (_req, res) => {
     const extraHealth = typeof healthProvider === 'function'
