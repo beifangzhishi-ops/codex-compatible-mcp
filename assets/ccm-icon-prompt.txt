@@ -1,0 +1,7 @@
+Create one original, premium square app icon for CCM (Codex-Compatible MCP), a developer tool that securely connects an AI coding client to local and remote execution workers.
+
+Design direction: geometric, modern, iconic and extremely legible even at 32x32 pixels. A single distinctive abstract symbol in the center: a bold, angular C-shaped open ring with three small interconnected circular nodes toward the open right side, communicating controller-to-worker connections, precise execution and reliable routing. Keep the C silhouette simple and unmistakable, and connect the small nodes with only a few clean short paths. Precisely balanced negative space and consistent stroke weight. No literal terminal window or generic robot head.
+
+Palette: deep midnight-navy (#101A2B) full-bleed rounded-square background, luminous clean cyan (#35D4E8) and modern blue (#4A8DFF) symbol. Restrained, flat-vector appearance with crisp contours, subtle premium color transitions only inside the symbol if necessary. Strong contrast; not overly bright, noisy or decorative. Edge-to-edge app tile, perfectly centered geometry, no surrounding mockup or frame.
+
+Image should look like a real finished software product icon, with sharp elegant lines, clear recognizability, deliberate spacing, and a polished contemporary engineering identity. 1:1 square composition. NO written words, letters, typography, numbers, trademarks, watermark, unnecessary tiny details, photographic effects, 3D extrusion, glossy reflections, stars, or glow bloom.

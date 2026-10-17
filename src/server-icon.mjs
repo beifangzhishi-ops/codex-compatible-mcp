@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-export const CCM_ICON_ROUTE = '/ccm/icon.png';
+export const CCM_ICON_ROUTE = '/ccm/preview/icon.png';
 export const CCM_ICON_PATH = fileURLToPath(new URL('../assets/ccm-icon.png', import.meta.url));
 
 const PNG_HEADER = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
