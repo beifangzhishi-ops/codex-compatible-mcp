@@ -19,6 +19,20 @@ The v0.1 release gate is defined in [PROJECT.md](PROJECT.md). v0.1 is intended t
 
 ## Architecture
 
+### MCP server icon
+
+CCM reserves `assets/ccm-icon.png` for its square 512×512 PNG brand icon. When this
+file exists, the MCP `initialize` response advertises `serverInfo.icons` with a
+same-origin, permanent HTTPS URL: `<CCM_RESOURCE origin>/ccm/icon.png`. The public
+OAuth sidecar serves that path as `image/png` without credentials, so MCP clients
+can retrieve it as soon as they connect by URL. Clients decide whether to show
+server icons; providing the standard metadata cannot force a client UI to render it.
+
+An absent PNG leaves the `icons` field unset and the URL returns 404; it does not
+affect MCP connections. The actual artwork must be generated and visually approved
+through the CPA ImgGen workflow before adding the asset. The CPA API base, key, and
+model are not part of CCM configuration or this repository.
+
 ```text
 MCP client
    |

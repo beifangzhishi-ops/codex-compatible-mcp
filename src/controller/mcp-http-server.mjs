@@ -9,6 +9,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
+import { CCM_ICON_PATH, CCM_ICON_ROUTE, readCcmIcon } from '../server-icon.mjs';
 import {
   guardMcpToolResult,
   resolveMaxMcpFileResultBytes,
@@ -19,15 +20,27 @@ import {
   APPROVAL_UI_URI,
 } from '../ui/approval-app.mjs';
 
-const SERVER_INFO = { name: 'ccm', version: '0.1.0' };
-
 function createProtocolServer(
   toolRegistry,
   runtime,
   maxToolResultBytes,
   maxFileResultBytes,
+  iconPath,
 ) {
-  const server = new McpServer(SERVER_INFO, {
+  const icon = readCcmIcon(iconPath);
+  const origin = icon && typeof runtime.fileDownloadOrigin === 'function'
+    ? runtime.fileDownloadOrigin() : null;
+  const serverInfo = {
+    name: 'ccm',
+    title: 'CCM',
+    version: '0.1.0',
+    ...(origin ? { icons: [{
+      src: new URL(CCM_ICON_ROUTE, origin).href,
+      mimeType: 'image/png',
+      sizes: ['512x512'],
+    }] } : {}),
+  };
+  const server = new McpServer(serverInfo, {
     capabilities: { tools: { listChanged: true } },
     instructions: [
       'CCM is a Codex-compatible execution harness.',
@@ -119,6 +132,7 @@ function createProtocolServer(
 export function createHttpController({
   toolRegistry,
   runtime,
+  iconPath = CCM_ICON_PATH,
   healthProvider = null,
   port = Number(process.env.CCM_PORT || 18209),
   host = process.env.CCM_HOST || '127.0.0.1',
@@ -223,6 +237,7 @@ export function createHttpController({
           runtime,
           maxToolResultBytes,
           maxFileResultBytes,
+          iconPath,
         );
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),

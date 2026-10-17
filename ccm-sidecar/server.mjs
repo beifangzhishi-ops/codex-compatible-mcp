@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CCM_ICON_PATH, CCM_ICON_ROUTE, readCcmIcon } from '../src/server-icon.mjs';
 import { loadConfig } from './config.mjs';
 import {
   OAuthError,
@@ -1173,6 +1174,27 @@ async function handleProtectedMcp(request, response, runtime, url) {
 
 async function handleRequest(request, response, runtime) {
   const url = new URL(request.url || '/', 'http://127.0.0.1');
+  if (url.pathname === CCM_ICON_ROUTE) {
+    if (request.method !== 'GET') {
+      response.writeHead(405, { Allow: 'GET' });
+      response.end();
+      return;
+    }
+    const icon = readCcmIcon(runtime.iconPath);
+    if (!icon) {
+      response.writeHead(404);
+      response.end();
+      return;
+    }
+    response.writeHead(200, {
+      'Content-Type': 'image/png',
+      'Content-Length': icon.length,
+      'Cache-Control': 'public, max-age=3600',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    response.end(icon);
+    return;
+  }
   if (url.pathname === '/ccm/download' || url.pathname.startsWith('/ccm/download/') ||
       url.pathname === '/ccm/preview' || url.pathname.startsWith('/ccm/preview/')) {
     proxyPublishedFile(request, response, url, runtime);
@@ -1258,6 +1280,7 @@ export function createCcmOAuthServer(options = {}) {
   fs.mkdirSync(config.logDir, { recursive: true });
   const runtime = {
     config,
+    iconPath: options.iconPath ?? CCM_ICON_PATH,
     store,
     logger,
     upstreamUrl,
