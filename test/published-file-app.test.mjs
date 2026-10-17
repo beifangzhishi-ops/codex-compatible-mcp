@@ -5,10 +5,11 @@ import { PUBLISHED_FILE_UI_HTML } from '../src/ui/published-file-app.mjs';
 
 const downloadUrl = 'https://example.test/ccm/download/12345678-1234-4234-8234-123456789abc';
 const previewUrl = 'https://example.test/ccm/preview/12345678-1234-4234-8234-123456789abc';
+const fullTextUrl = 'https://example.test/ccm/text/12345678-1234-4234-8234-123456789abc';
 
 function mountCard() {
   const elements = Object.fromEntries(
-    ['frame', 'filename', 'picture', 'image', 'status', 'details', 'link']
+    ['frame', 'filename', 'picture', 'image', 'text-preview', 'text-note', 'status', 'details', 'link', 'full-link']
       .map((name) => [name, {
         style: {},
         textContent: '',
@@ -95,4 +96,43 @@ test('published image shows fitted image and download link in the same card', ()
   assert.match(card.elements.details.textContent, /420 × 1260/);
   assert.equal(card.elements.link.href, downloadUrl);
   assert.ok(card.notifications.some((x) => x.method === 'ui/notifications/size-changed'));
+});
+
+test('published text has a scrollable fixed-height snippet, full view and download', () => {
+  const card = mountCard();
+  card.result({
+    capability: 'publish_worker_file',
+    download_url: downloadUrl,
+    text_url: fullTextUrl,
+    text_preview: '<h1>Hello</h1>\nline 2',
+    text_truncated: true,
+    filename: 'index.html',
+    mime_type: 'text/html',
+  });
+  assert.equal(card.elements['text-preview'].textContent, '<h1>Hello</h1>\nline 2');
+  assert.equal(card.elements['text-preview'].style.display, 'block');
+  assert.equal(card.elements['full-link'].href, fullTextUrl);
+  assert.equal(card.elements['full-link'].style.display, 'block');
+  assert.equal(card.elements.link.href, downloadUrl);
+  assert.match(card.elements['text-note'].textContent, /beginning/);
+  assert.equal(card.elements.picture.style.display, 'none');
+  let prevented = false;
+  card.elements['full-link'].click({ preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.equal(card.opened[0].href, fullTextUrl);
+  assert.match(PUBLISHED_FILE_UI_HTML, /height:\s*220px/);
+  assert.match(PUBLISHED_FILE_UI_HTML, /overflow:\s*auto/);
+});
+
+test('text preview rejects foreign/mismatched full-text links', () => {
+  const card = mountCard();
+  card.result({
+    capability: 'publish_worker_file',
+    download_url: downloadUrl,
+    text_url: 'https://evil.example/ccm/text/12345678-1234-4234-8234-123456789abc',
+    text_preview: 'should not render',
+    filename: 'unsafe.txt',
+  });
+  assert.equal(card.elements['text-preview'].style.display, 'none');
+  assert.equal(card.elements['full-link'].style.display, 'none');
 });

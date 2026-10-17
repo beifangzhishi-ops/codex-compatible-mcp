@@ -1,7 +1,7 @@
-export const PUBLISHED_FILE_UI_URI = 'ui://ccm/published-file-v1.html';
+export const PUBLISHED_FILE_UI_URI = 'ui://ccm/published-file-v2.html';
 
-// Every publication gets one useful card: images render inline; other files
-// show a filename and a Host-opened HTTPS download link.
+// Every publication gets one useful card: images render inline, text shows a
+// bounded scrollable snippet, and all files retain a download link.
 export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
 <html lang="en">
 <head>
@@ -21,17 +21,28 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
       margin: auto; border-radius: 6px;
     }
     @media (max-width: 600px) { #picture img { max-height: 360px; } }
+    #text-preview {
+      display: none; height: 220px; max-width: 100%; overflow: auto;
+      white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4;
+      margin: 0; padding: 10px; font: 12px/1.5 ui-monospace, monospace;
+      background: rgba(127, 127, 127, 0.10); border-radius: 6px;
+      user-select: text;
+    }
+    #text-note { display: none; margin-top: 5px; font-size: 11px; opacity: 0.65; }
     #status { opacity: 0.8; }
     #details { display: none; margin-top: 7px; font-size: 12px; opacity: 0.7; }
-    #link { display: none; margin-top: 8px; }
+    #link, #full-link { display: none; margin-top: 8px; }
   </style>
 </head>
 <body>
   <div id="frame">
     <div id="filename"></div>
     <div id="picture"><img id="image" alt="CCM published image"></div>
+    <pre id="text-preview"></pre>
+    <div id="text-note"></div>
     <div id="status">Loading published file…</div>
     <div id="details"></div>
+    <a id="full-link" target="_blank" rel="noopener noreferrer">View full text</a>
     <a id="link" target="_blank" rel="noopener noreferrer">Download file</a>
   </div>
   <script>
@@ -40,9 +51,12 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
       const filename = document.getElementById('filename');
       const picture = document.getElementById('picture');
       const image = document.getElementById('image');
+      const textPreview = document.getElementById('text-preview');
+      const textNote = document.getElementById('text-note');
       const status = document.getElementById('status');
       const details = document.getElementById('details');
       const link = document.getElementById('link');
+      const fullLink = document.getElementById('full-link');
       let seq = 1;
       const pending = new Map();
       let lastUrl = '';
@@ -82,26 +96,30 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
               .test(parsed.pathname);
         } catch { return false; }
       }
-      link.addEventListener('click', (event) => {
-        const url = link.href;
-        if (!validUrl(url, 'download')) { event.preventDefault(); return; }
+      function enableExternalLink(anchor, kind) {
+        anchor.addEventListener('click', (event) => {
+        const url = anchor.href;
+        if (!validUrl(url, kind)) { event.preventDefault(); return; }
         if (window.openai?.openExternal) {
           event.preventDefault();
           Promise.resolve(window.openai.openExternal({ href: url, redirectUrl: false }))
             .catch(() => request('ui/open-link', { url }).catch(() => {
               status.style.display = '';
-              status.textContent = 'Could not open the link. Use the download URL from the tool response.';
+              status.textContent = 'Could not open the link. Use the URL from the tool response.';
               sizeChanged();
             }));
         } else {
           event.preventDefault();
           request('ui/open-link', { url }).catch(() => {
             status.style.display = '';
-            status.textContent = 'Could not open the link. Use the download URL from the tool response.';
+            status.textContent = 'Could not open the link. Use the URL from the tool response.';
             sizeChanged();
           });
         }
-      });
+        });
+      }
+      enableExternalLink(link, 'download');
+      enableExternalLink(fullLink, 'text');
       function show(result) {
         const value = result?.structuredContent || result;
         if (value?.capability !== 'publish_worker_file') return;
@@ -120,6 +138,28 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
         link.style.display = 'block';
         picture.style.display = 'none';
         details.style.display = 'none';
+        textPreview.style.display = 'none';
+        textNote.style.display = 'none';
+        fullLink.style.display = 'none';
+        const fullTextUrl = value.text_url;
+        if (validUrl(fullTextUrl, 'text') &&
+            new URL(fullTextUrl).origin === new URL(downloadUrl).origin &&
+            fullTextUrl.split('/').at(-1) === downloadUrl.split('/').at(-1) &&
+            typeof value.text_preview === 'string') {
+          image.removeAttribute('src');
+          textPreview.textContent = value.text_preview;
+          textPreview.scrollTop = 0;
+          textPreview.style.display = 'block';
+          textNote.textContent = value.text_truncated
+            ? 'Showing the beginning of the file. Open full text to read more.'
+            : 'Full text shown in the scrollable preview.';
+          textNote.style.display = 'block';
+          fullLink.href = fullTextUrl;
+          fullLink.style.display = 'block';
+          status.style.display = 'none';
+          sizeChanged();
+          return;
+        }
         const previewUrl = value.preview_url;
         if (!validUrl(previewUrl, 'preview') ||
             previewUrl.split('/').at(-1) !== downloadUrl.split('/').at(-1)) {

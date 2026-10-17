@@ -150,6 +150,28 @@ test('publish_worker_file uses the same file UI for images and non-images', asyn
   runtime.fileTransferStore.close();
 });
 
+test('publish_worker_file inlines only a bounded UTF-8 text prefix with full-text link', async () => {
+  const runtime = fakeRuntime();
+  const registry = new ToolRegistry();
+  registerSpecializedTools(registry, runtime);
+  const content = '标题😀\n' + 'hello\n'.repeat(1900);
+  const bytes = Buffer.from(content);
+  runtime.fileService.sendFile = async () => ({
+    environment_id: 'worker-a', filename: 'readme.md', mime_type: 'text/markdown',
+    byte_length: bytes.length, data: bytes.toString('base64'),
+  });
+  const result = await registry.get('ccm-extra.publish_worker_file').handler({
+    path: 'readme.md', workspace_context: '00000000-0000-4000-8000-000000000001',
+  });
+  const token = result.structuredContent.download_url.split('/').at(-1);
+  assert.equal(result.structuredContent.text_url, 'https://example.test/ccm/text/' + token);
+  assert.equal(result.structuredContent.text_truncated, true);
+  assert.ok(Buffer.byteLength(result.structuredContent.text_preview) <= 8192);
+  assert.match(result.structuredContent.text_preview, /^标题😀/);
+  assert.equal(result.structuredContent.preview_url, undefined);
+  runtime.fileTransferStore.close();
+});
+
 test('receive_file is Deferred + Code Mode and preserves native file objects through exec', async () => {
   const runtime = fakeRuntime();
   const registry = new ToolRegistry();

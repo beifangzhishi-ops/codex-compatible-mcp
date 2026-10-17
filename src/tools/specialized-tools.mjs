@@ -1,5 +1,6 @@
 ﻿import * as z from 'zod/v4';
 import { PUBLISHED_FILE_UI_URI } from '../ui/published-file-app.mjs';
+import { textPreviewFromBase64 } from '../controller/text-file-preview.mjs';
 function toolError(error) {
   return {
     content: [{ type: 'text', text: String(error?.message || error) }],
@@ -44,6 +45,9 @@ function fileResourceResult(value, environmentId, runtime) {
   const url = origin + '/ccm/download/' + transfer.token;
   const previewUrl = /^image\/(png|jpeg|webp)$/i.test(transfer.mime_type)
     ? origin + '/ccm/preview/' + transfer.token : undefined;
+  const textPreview = textPreviewFromBase64(value.data, transfer.mime_type);
+  const textUrl = textPreview
+    ? origin + '/ccm/text/' + transfer.token : undefined;
   return {
     content: [{ type: 'text', text: 'Download ' + transfer.filename + ': ' + url +
       (previewUrl ? '\nImage preview: ' + previewUrl : '') +
@@ -53,6 +57,11 @@ function fileResourceResult(value, environmentId, runtime) {
       environment_id: environmentId,
       download_url: url,
       ...(previewUrl ? { preview_url: previewUrl } : {}),
+      ...(textUrl ? {
+        text_url: textUrl,
+        text_preview: textPreview.text,
+        text_truncated: textPreview.truncated,
+      } : {}),
       filename: transfer.filename,
       mime_type: transfer.mime_type,
       byte_length: transfer.byte_length,
@@ -161,11 +170,11 @@ export function registerSpecializedTools(registry, runtime) {
     },
     supportsParallel: false,
     description: [
-      'Publish one Worker file as a temporary HTTPS download link (up to 72 hours), and display one MCP App file card in chat. For PNG/JPEG/WebP, the card displays the actual image and its download link; for other file types, it shows the filename and download link. This is not a native ChatGPT attachment.',
+      'Publish one Worker file as a temporary HTTPS download link (up to 72 hours), and display one MCP App card in chat. PNG/JPEG/WebP show the image, UTF-8 text/Markdown/JSON/code show a bounded scrollable preview with a full-text link, and other formats show the filename and download link. This is not a native ChatGPT attachment.',
       'When a user asks to create a PPT, PDF, image, report or other artifact, you may proactively publish the finished result and useful preview images for the user without a separate request to send it. Stage previews are permitted and further CCM work may continue after publishing. Do not publish files merely for model-side inspection.',
       'workspace_context is required and determines the Worker. Relative paths are resolved from that context root; absolute paths remain absolute on the selected Worker.',
       'For a genuinely projectless task, automatically obtain a projectless context first through ccm.create_projectless_context; do not ask the user to choose or register a temporary directory. If select_workspace or register_workspace is awaiting approval for the intended real project, wait for that action to resolve and use its registered workspace_context instead.',
-      'view_image is only for model-side image inspection. One publication creates one useful file card; images fit inside the card, other files link to download. Avoid publishing unnecessary intermediate files. PPT/PDF require separately rendered image files to show their pages visually.',
+      'view_image is only for model-side image inspection. One publication creates one useful file card; images fit inside the card, text has a compact scrollable preview and a browser full-text link, and other files show a download link. Avoid publishing unnecessary intermediate files. PPT/PDF require separately rendered images for visual page preview.',
       'The original bytes are preserved. Publish one file at a time, sequentially; public links are bearer capabilities and anyone possessing them can download during their lifetime.',
     ].join('\n\n'),
     inputSchema: {
