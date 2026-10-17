@@ -21,12 +21,16 @@ The v0.1 release gate is defined in [PROJECT.md](PROJECT.md). v0.1 is intended t
 
 ### MCP server icon
 
-CCM includes `assets/ccm-icon.png`, its square 512×512 PNG brand icon. The MCP
-`initialize` response advertises `serverInfo.icons` with a
+CCM includes `assets/ccm-icon.png`, its square 512×512 PNG brand icon. The
+tracked PNG is optimized to 9,617 bytes, below the 10,000-byte upload limit
+observed in ChatGPT's plugin creation UI. **When creating the CCM plugin in
+ChatGPT, manually upload `assets/ccm-icon.png` as its icon.** ChatGPT does not
+currently use the MCP URL metadata to fill that icon field automatically.
+
+The MCP `initialize` response advertises `serverInfo.icons` with a
 same-origin, permanent HTTPS URL: `<CCM_RESOURCE origin>/ccm/preview/icon.png`. The public
 OAuth sidecar serves that path as `image/png` without credentials, so MCP clients
-can retrieve it as soon as they connect by URL. Clients decide whether to show
-server icons; providing the standard metadata cannot force a client UI to render it.
+that support the standard icon metadata can retrieve the same image by URL.
 
 The public Tailscale Funnel routes the existing `/ccm/preview/*` prefix, but not
 arbitrary new `/ccm/*` paths. Serving the static icon under that existing prefix
@@ -36,7 +40,8 @@ therefore works without a Funnel configuration change. The reserved filename
 The current artwork was generated with the independent CPA ImgGen Skill using
 `gpt-image-2.5` and the authoritative full prompt in
 `assets/ccm-icon-prompt.txt`, reviewed visually, and converted to a clean 512×512
-PNG for use at icon sizes. Update the prompt before any new CPA generation and
+PNG for use at icon sizes, then palette-optimized below 10,000 bytes for manual
+ChatGPT upload. Update the prompt before any new CPA generation and
 visually review the result before replacing this asset. CPA API credentials are
 never stored in this repository. The static icon URL is stable and is independent
 of the temporary published-file download system.

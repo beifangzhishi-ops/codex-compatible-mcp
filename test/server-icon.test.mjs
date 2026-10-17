@@ -13,12 +13,12 @@ import { createCcmOAuthServer, listenCcmOAuthServer, closeCcmOAuthServer } from 
 
 const ICON_BYTES = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==', 'base64');
 
-test('the tracked CCM icon is a 512x512 PNG within the delivery limit', () => {
+test('the tracked CCM icon is a 512x512 PNG below ChatGPT upload limit', () => {
   const icon = readCcmIcon();
   assert.ok(icon);
   assert.equal(icon.readUInt32BE(16), 512);
   assert.equal(icon.readUInt32BE(20), 512);
-  assert.ok(icon.length <= 512 * 1024);
+  assert.ok(icon.length < 10_000);
 });
 
 test('initialize exposes the stable same-origin server icon when its PNG exists', async () => {
