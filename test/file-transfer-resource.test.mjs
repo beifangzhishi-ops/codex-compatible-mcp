@@ -41,15 +41,14 @@ test('Controller streams original file bytes and safe attachment headers', async
   assert.deepEqual(Buffer.from(await tracked.arrayBuffer()), bytes);
   assert.equal((await fetch(uri + '?leak=1', { method: 'POST' })).status, 405);
   assert.equal((await fetch(origin + '/ccm/download/not-a-token')).status, 404);
-  assert.equal((await fetch(origin + '/ccm/preview/' + entry.token)).status, 404);
-  const text = await fetch(origin + '/ccm/text/' + entry.token);
+  const text = await fetch(origin + '/ccm/preview/' + entry.token);
   assert.equal(text.status, 200);
   assert.equal(text.headers.get('content-type'), 'text/plain; charset=utf-8');
   assert.equal(text.headers.get('content-disposition'), 'inline');
   assert.equal(text.headers.get('x-content-type-options'), 'nosniff');
   assert.deepEqual(Buffer.from(await text.arrayBuffer()), bytes);
-  assert.equal((await fetch(origin + '/ccm/text/' + entry.token + '?utm_source=chatgpt.com')).status, 200);
-  assert.equal((await fetch(origin + '/ccm/text/' + entry.token, { method: 'POST' })).status, 405);
+  assert.equal((await fetch(origin + '/ccm/preview/' + entry.token + '?utm_source=chatgpt.com')).status, 200);
+  assert.equal((await fetch(origin + '/ccm/preview/' + entry.token, { method: 'POST' })).status, 405);
 }));
 test('Controller serves inline only allowlisted PNG/JPEG/WebP image types', async () => withController(async ({ store, origin }) => {
   const entry = put(store, Buffer.from('fake-png'), 'image/png');
@@ -62,13 +61,13 @@ test('Controller serves inline only allowlisted PNG/JPEG/WebP image types', asyn
   assert.equal(tracked.status, 200);
   assert.equal(tracked.headers.get('content-disposition'), 'inline');
   assert.equal(await tracked.text(), 'fake-png');
-  assert.equal((await fetch(origin + '/ccm/text/' + entry.token)).status, 404);
+  assert.equal((await fetch(origin + '/ccm/preview/' + entry.token)).status, 200);
 }));
 
 test('HTML source is displayed as plain text rather than executable markup', async () => withController(async ({ store, origin }) => {
   const html = Buffer.from('<script>alert(1)</script>\n<h1>Safe source</h1>');
   const entry = put(store, html, 'text/html');
-  const res = await fetch(origin + '/ccm/text/' + entry.token);
+  const res = await fetch(origin + '/ccm/preview/' + entry.token);
   assert.equal(res.status, 200);
   assert.equal(res.headers.get('content-type'), 'text/plain; charset=utf-8');
   assert.equal(res.headers.get('content-disposition'), 'inline');

@@ -1,4 +1,4 @@
-export const PUBLISHED_FILE_UI_URI = 'ui://ccm/published-file-v2.html';
+export const PUBLISHED_FILE_UI_URI = 'ui://ccm/published-file-v3.html';
 
 // Every publication gets one useful card: images render inline, text shows a
 // bounded scrollable snippet, and all files retain a download link.
@@ -119,7 +119,7 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
         });
       }
       enableExternalLink(link, 'download');
-      enableExternalLink(fullLink, 'text');
+      enableExternalLink(fullLink, 'preview');
       function show(result) {
         const value = result?.structuredContent || result;
         if (value?.capability !== 'publish_worker_file') return;
@@ -142,7 +142,7 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
         textNote.style.display = 'none';
         fullLink.style.display = 'none';
         const fullTextUrl = value.text_url;
-        if (validUrl(fullTextUrl, 'text') &&
+        if (validUrl(fullTextUrl, 'preview') &&
             new URL(fullTextUrl).origin === new URL(downloadUrl).origin &&
             fullTextUrl.split('/').at(-1) === downloadUrl.split('/').at(-1) &&
             typeof value.text_preview === 'string') {

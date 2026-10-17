@@ -139,7 +139,7 @@ export function createHttpController({
   const protocolServers = new Map();
 
   const download = (req, res) => {
-    const match = /^\/ccm\/(download|preview|text)\/([^/]+)$/.exec(req.path);
+    const match = /^\/ccm\/(download|preview)\/([^/]+)$/.exec(req.path);
     if (!match || !FILE_TOKEN_RE.test(match[2])) {
       res.status(404).end();
       return;
@@ -153,12 +153,9 @@ export function createHttpController({
     if (!acquired) { res.status(404).end(); return; }
     const { entry, stream, release } = acquired;
     const preview = match[1] === 'preview';
-    const textView = match[1] === 'text';
-    if (preview && !/^image\/(png|jpeg|webp)$/i.test(entry.mime_type)) {
-      stream.destroy(); release();
-      res.status(404).end(); return;
-    }
-    if (textView && !isPreviewableTextMime(entry.mime_type)) {
+    const textView = preview && isPreviewableTextMime(entry.mime_type);
+    const imageView = preview && /^image\/(png|jpeg|webp)$/i.test(entry.mime_type);
+    if (preview && !textView && !imageView) {
       stream.destroy(); release();
       res.status(404).end(); return;
     }
@@ -168,7 +165,7 @@ export function createHttpController({
     res.status(200);
     res.setHeader('Content-Length', entry.byte_length);
     res.setHeader('Content-Type', textView ? 'text/plain; charset=utf-8' : preview ? entry.mime_type : mime);
-    res.setHeader('Content-Disposition', (preview || textView) ? 'inline' : 'attachment; filename="' + asciiName + '"; filename*=UTF-8\'\'' + encodeURIComponent(safeFilename));
+    res.setHeader('Content-Disposition', preview ? 'inline' : 'attachment; filename="' + asciiName + '"; filename*=UTF-8\'\'' + encodeURIComponent(safeFilename));
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
@@ -177,7 +174,7 @@ export function createHttpController({
     res.on('close', () => stream.destroy());
     stream.pipe(res);
   };
-  app.all(/^\/ccm\/(?:download|preview|text)(?:\/.*)?$/, download);
+  app.all(/^\/ccm\/(?:download|preview)(?:\/.*)?$/, download);
 
   app.get('/ccm/health', (_req, res) => {
     const extraHealth = typeof healthProvider === 'function'

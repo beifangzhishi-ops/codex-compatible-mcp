@@ -16,7 +16,7 @@ const MAX_BODY_BYTES = 1024 * 1024;
 const UPSTREAM_TIMEOUT_MS = 120000;
 const MAX_UPSTREAM_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_DOWNLOAD_BYTES = 12 * 1024 * 1024;
-const DOWNLOAD_ROUTE = /^\/ccm\/(download|preview|text)\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i;
+const DOWNLOAD_ROUTE = /^\/ccm\/(download|preview)\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i;
 const MCP_SESSION_HEADER = 'mcp-session-id';
 const REQUEST_HOP_HEADERS = new Set([
   'connection',
@@ -1174,8 +1174,7 @@ async function handleProtectedMcp(request, response, runtime, url) {
 async function handleRequest(request, response, runtime) {
   const url = new URL(request.url || '/', 'http://127.0.0.1');
   if (url.pathname === '/ccm/download' || url.pathname.startsWith('/ccm/download/') ||
-      url.pathname === '/ccm/preview' || url.pathname.startsWith('/ccm/preview/') ||
-      url.pathname === '/ccm/text' || url.pathname.startsWith('/ccm/text/')) {
+      url.pathname === '/ccm/preview' || url.pathname.startsWith('/ccm/preview/')) {
     proxyPublishedFile(request, response, url, runtime);
     return;
   }
@@ -1271,7 +1270,7 @@ export function createCcmOAuthServer(options = {}) {
   runtime.upstreamSession = new UpstreamSessionManager(runtime);
   const server = http.createServer((request, response) => {
     const requestPath = new URL(request.url || '/', 'http://127.0.0.1').pathname;
-    const safePath = /^\/ccm\/(?:download|preview|text)(?:\/|$)/.test(requestPath)
+    const safePath = /^\/ccm\/(?:download|preview)(?:\/|$)/.test(requestPath)
       ? '/ccm/file/[redacted]' : requestPath;
     response.on('finish', () => appendHttpTrace(runtime, 'HTTP ' + request.method + ' ' + safePath + ' status=' + response.statusCode));
     handleRequest(request, response, runtime).catch((error) => {

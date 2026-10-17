@@ -164,7 +164,7 @@ test('publish_worker_file inlines only a bounded UTF-8 text prefix with full-tex
     path: 'readme.md', workspace_context: '00000000-0000-4000-8000-000000000001',
   });
   const token = result.structuredContent.download_url.split('/').at(-1);
-  assert.equal(result.structuredContent.text_url, 'https://example.test/ccm/text/' + token);
+  assert.equal(result.structuredContent.text_url, 'https://example.test/ccm/preview/' + token);
   assert.equal(result.structuredContent.text_truncated, true);
   assert.ok(Buffer.byteLength(result.structuredContent.text_preview) <= 8192);
   assert.match(result.structuredContent.text_preview, /^标题😀/);

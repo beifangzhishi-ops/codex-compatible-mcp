@@ -47,7 +47,7 @@ function fileResourceResult(value, environmentId, runtime) {
     ? origin + '/ccm/preview/' + transfer.token : undefined;
   const textPreview = textPreviewFromBase64(value.data, transfer.mime_type);
   const textUrl = textPreview
-    ? origin + '/ccm/text/' + transfer.token : undefined;
+    ? origin + '/ccm/preview/' + transfer.token : undefined;
   return {
     content: [{ type: 'text', text: 'Download ' + transfer.filename + ': ' + url +
       (previewUrl ? '\nImage preview: ' + previewUrl : '') +

@@ -73,12 +73,12 @@ test('File sidecar blocks oversized upstream Content-Length and redirects', asyn
   }
 });
 
-test('Sidecar proxies plain-text full view without tracking query, preserving safe headers', async () => {
+test('Sidecar proxies safe plain-text view over existing preview route', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-text-proxy-'));
   const token = '12345678-1234-4234-8234-123456789abc';
   const payload = Buffer.from('<script>non-executable source</script>');
   const upstream = http.createServer((req, res) => {
-    if (req.url !== '/ccm/text/' + token) { res.writeHead(404); res.end(); return; }
+    if (req.url !== '/ccm/preview/' + token) { res.writeHead(404); res.end(); return; }
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8',
       'Content-Length': payload.length, 'Content-Disposition': 'inline' });
     res.end(payload);
@@ -91,7 +91,7 @@ test('Sidecar proxies plain-text full view without tracking query, preserving sa
   try {
     await listenCcmOAuthServer(server, 0);
     const base = 'http://127.0.0.1:' + server.server.address().port;
-    const url = base + '/ccm/text/' + token;
+    const url = base + '/ccm/preview/' + token;
     const result = await fetch(url + '?utm_source=chatgpt.com');
     assert.equal(result.status, 200);
     assert.equal(result.headers.get('content-type'), 'text/plain; charset=utf-8');
@@ -99,7 +99,7 @@ test('Sidecar proxies plain-text full view without tracking query, preserving sa
     assert.equal(result.headers.get('x-content-type-options'), 'nosniff');
     assert.equal(await result.text(), payload.toString());
     assert.equal((await fetch(url, { method: 'POST' })).status, 405);
-    assert.equal((await fetch(base + '/ccm/text/not-a-token')).status, 404);
+    assert.equal((await fetch(base + '/ccm/preview/not-a-token')).status, 404);
   } finally {
     await closeCcmOAuthServer(server);
     await new Promise((resolve) => upstream.close(resolve));

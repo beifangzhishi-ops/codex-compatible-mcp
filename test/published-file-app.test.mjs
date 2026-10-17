@@ -5,7 +5,7 @@ import { PUBLISHED_FILE_UI_HTML } from '../src/ui/published-file-app.mjs';
 
 const downloadUrl = 'https://example.test/ccm/download/12345678-1234-4234-8234-123456789abc';
 const previewUrl = 'https://example.test/ccm/preview/12345678-1234-4234-8234-123456789abc';
-const fullTextUrl = 'https://example.test/ccm/text/12345678-1234-4234-8234-123456789abc';
+const fullTextUrl = 'https://example.test/ccm/preview/12345678-1234-4234-8234-123456789abc';
 
 function mountCard() {
   const elements = Object.fromEntries(
