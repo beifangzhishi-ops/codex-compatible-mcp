@@ -397,7 +397,7 @@ npm run worker
 | `CCM_PROXY` | unset | Optional explicit HTTP(S) proxy URL used in child-process `proxy` mode before standard proxy environment variables or the enabled Windows user proxy. |
 | `CCM_MAX_MCP_TOOL_RESULT_BYTES` | 2 MiB | Serialized MCP tool-result limit for ordinary results. |
 | `CCM_MAX_MCP_FILE_RESULT_BYTES` | 24 MiB | Serialized MCP result limit when returning an embedded file resource. |
-| `CCM_MAX_VIEW_IMAGE_BYTES` | 1 MiB | Maximum raw image size returned by `view_image`. |
+| `CCM_MAX_VIEW_IMAGE_BYTES` | 1 MiB | Maximum encoded image size returned by `view_image`. Oversized images are automatically compressed on the Worker. |
 | `CCM_MAX_SEND_FILE_BYTES` | 12 MiB | Maximum raw Worker file size published by `ccm-extra.publish_worker_file`. |
 | `CCM_MAX_RECEIVE_FILE_BYTES` | 512 MiB | Maximum raw file size accepted by `ccm-extra.import_chatgpt_file`. |
 | Download link TTL | 72 hours (fixed) | Links expire from creation time; retries do not extend lifetime. |
@@ -507,7 +507,7 @@ CCM treats oversized output as a reliability and context-safety problem.
 
 The OAuth/public sidecar also isolates MCP request identity. Downstream clients that initialize separate MCP sessions receive separate upstream sessions, and downstream POST calls that omit `Mcp-Session-Id` use request-scoped transient upstream sessions instead of sharing one persistent request-id namespace. This prevents concurrent clients that reuse the same JSON-RPC id (for example `id=0`) from overwriting each other's upstream response routing.
 
-Command capture is bounded, model-facing command output has a token budget, live process reads are incremental, Worker protocol messages have a hard serialized-size ceiling, final MCP tool results have an absolute byte limit, and `view_image` checks file size before reading/encoding it.
+Command capture is bounded, model-facing command output has a token budget, live process reads are incremental, Worker protocol messages have a hard serialized-size ceiling, and final MCP tool results have an absolute byte limit. `view_image` reads local PNG/JPEG/GIF/WebP still images up to 64 MiB and 64 megapixels. Images exceeding the configured 1 MiB output budget are recompressed on the Worker as full-resolution WebP at quality 95, 90, or 85; only if the full-resolution result still exceeds the budget does the Worker progressively scale down dimensions (85% per step, WebP quality 90/85) until it fits. This preserves transparency and prioritizes detail. Files already within the byte budget are returned unchanged, regardless of their dimensions. The source file is never modified; for animated images the compressed preview represents the first frame.
 
 If a hard transport limit would be exceeded, CCM returns or triggers a compact failure instead of attempting to send an oversized response.
 
@@ -525,7 +525,8 @@ the standard optional structured companion to `content`.
 Code Mode for nested/batched dispatch. `exec` passes nested MCP `image` content
 through directly while compacting the duplicate structured result, so the
 model can receive the image without attaching an MCP Apps output template or
-creating a widget card for every image.
+creating a widget card for every image. Result `_meta` includes whether the
+image was compressed and its original dimensions and byte length.
 
 ## Security notes
 

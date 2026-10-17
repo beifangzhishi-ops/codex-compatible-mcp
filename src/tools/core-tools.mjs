@@ -327,6 +327,10 @@ function imageResult(value) {
       width: value.width,
       height: value.height,
       byte_length: value.byte_length,
+      source_byte_length: value.source_byte_length,
+      source_width: value.source_width,
+      source_height: value.source_height,
+      compressed: value.compressed,
       ...(value.workspace_context ? {
         workspace_context: value.workspace_context,
         environment_id: value.environment_id,
@@ -819,7 +823,7 @@ export function registerCoreTools(registry, runtime) {
     environmentRequirements: { capabilities: ['viewImage'] },
     supportsParallel: true,
     description: [
-      'Read a bounded image from the selected CCM context root and return it as MCP image content.',
+      'Read a local image and return bounded MCP image content. When the output byte budget is exceeded, the Worker first tries full-resolution low-loss WebP (quality 95/90/85), then progressively reduces dimensions if necessary to fit the budget. The source file is never modified. Source files are limited to 64 MiB.',
       'For a genuinely projectless task, automatically obtain a projectless context first through ccm.create_projectless_context; do not ask the user to choose or register a temporary directory. If select_workspace or register_workspace is awaiting approval for the user\'s current intended real project, wait for that action and use its registered workspace_context instead of bypassing it with projectless context. If the user explicitly changes to another real project, obtain the new target\'s workspace_context; the older pending approval does not block that new workspace action.',
       'This direct tool is also available through exec for nested or batched image calls.',
     ].join(' '),

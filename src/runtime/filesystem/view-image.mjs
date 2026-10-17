@@ -1,7 +1,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import sharp from 'sharp';
 
 export const DEFAULT_MAX_VIEW_IMAGE_BYTES = 1024 * 1024;
+export const MAX_VIEW_IMAGE_SOURCE_BYTES = 64 * 1024 * 1024;
+const MAX_VIEW_IMAGE_PIXELS = 64_000_000;
 
 function resolveImagePath(environment, requestedPath) {
   return path.isAbsolute(requestedPath)
@@ -150,6 +153,32 @@ function imageMetadata(buffer) {
     webpMetadata(buffer);
 }
 
+async function compressImage(bytes, maxBytes) {
+  // Try low-loss encoding at full resolution before sacrificing any pixels.
+  const image = sharp(bytes, { limitInputPixels: MAX_VIEW_IMAGE_PIXELS }).rotate();
+  for (const quality of [95, 90, 85]) {
+    const output = await image.clone().webp({ quality, effort: 4 }).toBuffer();
+    if (output.length <= maxBytes) return output;
+  }
+
+  // Only then shrink dimensions in small steps; never replace or modify the source.
+  const { width, height } = await sharp(bytes).metadata();
+  let scale = 1;
+  while (Math.max(Math.round(width * scale), Math.round(height * scale)) > 1) {
+    scale *= 0.85;
+    const nextWidth = Math.max(1, Math.round(width * scale));
+    const nextHeight = Math.max(1, Math.round(height * scale));
+    for (const quality of [90, 85]) {
+      const output = await image.clone()
+        .resize({ width: nextWidth, height: nextHeight, fit: 'inside', withoutEnlargement: true })
+        .webp({ quality, effort: 4 })
+        .toBuffer();
+      if (output.length <= maxBytes) return output;
+    }
+  }
+  throw new Error('CCM view_image output limit is too small to hold a valid image');
+}
+
 export async function viewImageFromEnvironment({
   environment,
   path: requestedPath,
@@ -168,10 +197,10 @@ export async function viewImageFromEnvironment({
   if (!stat.isFile()) {
     throw new Error('image path is not a file: ' + absolutePath);
   }
-  if (stat.size > maxBytes) {
+  if (stat.size > MAX_VIEW_IMAGE_SOURCE_BYTES) {
     throw new Error(
-      'image exceeds CCM view_image limit (' + stat.size + ' > ' +
-      maxBytes + ' bytes): ' + absolutePath,
+      'image exceeds CCM view_image source limit (' + stat.size + ' > ' +
+      MAX_VIEW_IMAGE_SOURCE_BYTES + ' bytes): ' + absolutePath,
     );
   }
 
@@ -181,12 +210,27 @@ export async function viewImageFromEnvironment({
     throw new Error('unable to process image: invalid or unsupported image data');
   }
 
+  if (metadata.width * metadata.height > MAX_VIEW_IMAGE_PIXELS) {
+    throw new Error('image exceeds CCM view_image pixel limit (' + MAX_VIEW_IMAGE_PIXELS + ')');
+  }
+
+  const needsPreview = bytes.length > maxBytes;
+  const output = needsPreview ? await compressImage(bytes, maxBytes) : bytes;
+  const resultMetadata = needsPreview ? imageMetadata(output) : metadata;
+  if (!resultMetadata) {
+    throw new Error('unable to process compressed image');
+  }
+
   return {
     path: absolutePath,
-    mime_type: metadata.mimeType,
-    width: metadata.width,
-    height: metadata.height,
-    byte_length: bytes.length,
-    data: bytes.toString('base64'),
+    mime_type: resultMetadata.mimeType,
+    width: resultMetadata.width,
+    height: resultMetadata.height,
+    byte_length: output.length,
+    source_byte_length: bytes.length,
+    source_width: metadata.width,
+    source_height: metadata.height,
+    compressed: needsPreview,
+    data: output.toString('base64'),
   };
 }
