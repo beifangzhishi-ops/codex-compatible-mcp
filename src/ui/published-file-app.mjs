@@ -1,4 +1,4 @@
-export const PUBLISHED_FILE_UI_URI = 'ui://ccm/published-file-v4.html';
+export const PUBLISHED_FILE_UI_URI = 'ui://ccm/published-file-v5.html';
 
 // Every publication gets one useful card: images render inline, text shows a
 // bounded plain-text excerpt, and all files retain a download link.
@@ -14,18 +14,13 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
     body { font: 13px/1.4 system-ui, sans-serif; color: var(--color-text-primary, inherit); }
     #frame { width: 100%; padding: 8px; overflow-wrap: anywhere; }
     #filename { display: none; font-weight: 600; margin-bottom: 7px; }
-    #picture { display: none; width: 100%; }
-    #viewport {
-      position: relative; width: 100%; overflow: hidden; border-radius: 6px;
-      touch-action: none; user-select: none; -webkit-user-select: none;
+    #picture { display: none; width: 100%; text-align: center; }
+    #picture img {
+      display: block; width: auto; height: auto; max-width: 100%;
+      max-height: 520px; object-fit: contain;
+      margin: auto; border-radius: 6px;
     }
-    #image { position: absolute; left: 50%; top: 50%; display: block;
-      max-width: none; max-height: none; pointer-events: none; user-select: none; }
-    #image-controls { display: flex; align-items: center; gap: 9px; margin-top: 7px; flex-wrap: wrap; }
-    #reset { display: none; font: inherit; padding: 3px 7px; cursor: pointer;
-      border: 1px solid rgba(127,127,127,.4); border-radius: 5px;
-      color: inherit; background: transparent; }
-    #image-link { display: none; }
+    @media (max-width: 600px) { #picture img { max-height: 360px; } }
     #text-preview {
       display: none; max-height: 220px; max-width: 100%; overflow: hidden;
       white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4;
@@ -36,19 +31,14 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
     #text-note { display: none; margin-top: 5px; font-size: 11px; opacity: 0.65; }
     #status { opacity: 0.8; }
     #details { display: none; margin-top: 7px; font-size: 12px; opacity: 0.7; }
-    #link, #full-link { display: none; margin-top: 8px; }
+    #link, #full-link, #image-link { display: none; margin-top: 8px; }
   </style>
 </head>
 <body>
   <div id="frame">
     <div id="filename"></div>
-    <div id="picture">
-      <div id="viewport"><img id="image" alt="CCM published image" draggable="false"></div>
-      <div id="image-controls">
-        <button id="reset" type="button">Fit image</button>
-        <a id="image-link" target="_blank" rel="noopener noreferrer">View original</a>
-      </div>
-    </div>
+    <div id="picture"><img id="image" alt="CCM published image"></div>
+    <a id="image-link" target="_blank" rel="noopener noreferrer">View image</a>
     <pre id="text-preview"></pre>
     <div id="text-note"></div>
     <div id="status">Loading published file…</div>
@@ -61,9 +51,7 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
       const frame = document.getElementById('frame');
       const filename = document.getElementById('filename');
       const picture = document.getElementById('picture');
-      const viewport = document.getElementById('viewport');
       const image = document.getElementById('image');
-      const reset = document.getElementById('reset');
       const imageLink = document.getElementById('image-link');
       const textPreview = document.getElementById('text-preview');
       const textNote = document.getElementById('text-note');
@@ -74,124 +62,7 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
       let seq = 1;
       const pending = new Map();
       let lastUrl = '';
-      const pointers = new Map();
-      let mouseDrag = null;
-      let zoom = 1;
-      let offsetX = 0;
-      let offsetY = 0;
-      let baseWidth = 0;
-      let baseHeight = 0;
-      let viewportWidth = 0;
-      let viewportHeight = 0;
       let textWasTruncated = false;
-      const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-      const localPoint = (e) => {
-        const rect = viewport.getBoundingClientRect();
-        return { x: e.clientX - rect.left - rect.width / 2,
-          y: e.clientY - rect.top - rect.height / 2 };
-      };
-      function renderImage() {
-        const maxX = Math.max(0, (baseWidth * zoom - viewportWidth) / 2);
-        const maxY = Math.max(0, (baseHeight * zoom - viewportHeight) / 2);
-        offsetX = clamp(offsetX, -maxX, maxX);
-        offsetY = clamp(offsetY, -maxY, maxY);
-        image.style.transform = 'translate(calc(-50% + ' + offsetX + 'px), calc(-50% + ' +
-          offsetY + 'px)) scale(' + zoom + ')';
-        reset.style.display = zoom > 1 ? 'inline-block' : 'none';
-      }
-      function resetImage() {
-        zoom = 1; offsetX = 0; offsetY = 0;
-        renderImage();
-      }
-      function clearGestures() {
-        const ids = [...pointers.keys()];
-        if (mouseDrag) ids.push(mouseDrag.id);
-        pointers.clear();
-        mouseDrag = null;
-        for (const id of ids) {
-          try { if (viewport.hasPointerCapture(id)) viewport.releasePointerCapture(id); } catch {}
-        }
-      }
-      function layoutImage() {
-        if (picture.style.display !== 'block' || !image.naturalWidth || !image.naturalHeight) return;
-        const width = viewport.getBoundingClientRect().width;
-        if (!width) return;
-        const maxHeight = window.matchMedia?.('(max-width: 600px)').matches ? 360 : 520;
-        const fit = Math.min(1, width / image.naturalWidth, maxHeight / image.naturalHeight);
-        baseWidth = image.naturalWidth * fit;
-        baseHeight = image.naturalHeight * fit;
-        viewportWidth = width;
-        viewportHeight = baseHeight;
-        image.style.width = baseWidth + 'px';
-        image.style.height = baseHeight + 'px';
-        viewport.style.height = baseHeight + 'px';
-        renderImage();
-      }
-      function zoomAt(nextZoom, point) {
-        const next = clamp(nextZoom, 1, 6);
-        const ratio = next / zoom;
-        offsetX = point.x - (point.x - offsetX) * ratio;
-        offsetY = point.y - (point.y - offsetY) * ratio;
-        zoom = next;
-        renderImage();
-      }
-      function pair() {
-        const [a, b] = [...pointers.values()];
-        return { center: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
-          distance: Math.hypot(a.x - b.x, a.y - b.y) };
-      }
-      viewport.addEventListener('pointerdown', (e) => {
-        if (e.pointerType === 'touch' && pointers.size < 2) {
-          pointers.set(e.pointerId, localPoint(e));
-          try { viewport.setPointerCapture(e.pointerId); } catch {}
-        } else if (e.pointerType === 'mouse' && e.button === 1 && mouseDrag === null) {
-          e.preventDefault();
-          mouseDrag = { id: e.pointerId, point: localPoint(e) };
-          try { viewport.setPointerCapture(e.pointerId); } catch {}
-        }
-      });
-      viewport.addEventListener('pointermove', (e) => {
-        if (e.pointerType === 'touch' && pointers.has(e.pointerId)) {
-          const previous = pointers.size === 2 ? pair() : null;
-          const old = pointers.get(e.pointerId);
-          const next = localPoint(e);
-          pointers.set(e.pointerId, next);
-          if (previous) {
-            const current = pair();
-            if (previous.distance > 0) zoomAt(zoom * current.distance / previous.distance, previous.center);
-            offsetX += current.center.x - previous.center.x;
-            offsetY += current.center.y - previous.center.y;
-            renderImage();
-          } else if (zoom > 1) {
-            offsetX += next.x - old.x;
-            offsetY += next.y - old.y;
-            renderImage();
-          }
-        } else if (mouseDrag?.id === e.pointerId) {
-          const next = localPoint(e);
-          offsetX += next.x - mouseDrag.point.x;
-          offsetY += next.y - mouseDrag.point.y;
-          mouseDrag.point = next;
-          renderImage();
-        }
-      });
-      function endPointer(e) {
-        pointers.delete(e.pointerId);
-        if (mouseDrag?.id === e.pointerId) mouseDrag = null;
-      }
-      for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
-        viewport.addEventListener(type, endPointer);
-      }
-      viewport.addEventListener('wheel', (e) => {
-        if (!baseWidth) return;
-        e.preventDefault();
-        const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? viewportHeight : 1;
-        zoomAt(zoom * Math.exp(-e.deltaY * unit / 300), localPoint(e));
-      }, { passive: false });
-      for (const type of ['mousedown', 'auxclick']) {
-        viewport.addEventListener(type, (e) => { if (e.button === 1) e.preventDefault(); });
-      }
-      reset.addEventListener('click', resetImage);
       function updateTextNote() {
         if (textPreview.style.display !== 'block') return;
         const clipped = textPreview.scrollHeight > textPreview.clientHeight + 1;
@@ -222,8 +93,8 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
           try { window.openai?.notifyIntrinsicHeight?.(); } catch {}
         });
       }
-      new ResizeObserver(() => { layoutImage(); updateTextNote(); sizeChanged(); }).observe(frame);
-      window.addEventListener('resize', () => { clearGestures(); layoutImage(); updateTextNote(); sizeChanged(); });
+      new ResizeObserver(() => { updateTextNote(); sizeChanged(); }).observe(frame);
+      window.addEventListener('resize', () => { updateTextNote(); sizeChanged(); });
       function validUrl(url, kind) {
         if (typeof url !== 'string') return false;
         try {
@@ -271,16 +142,12 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
         }
         if (downloadUrl === lastUrl) return;
         lastUrl = downloadUrl;
-        clearGestures();
-        zoom = 1; offsetX = 0; offsetY = 0;
-        baseWidth = 0; baseHeight = 0;
         filename.textContent = typeof value.filename === 'string' ? value.filename : 'Published file';
         filename.style.display = 'block';
         link.href = downloadUrl;
         link.textContent = 'Download file';
         link.style.display = 'block';
         picture.style.display = 'none';
-        reset.style.display = 'none';
         imageLink.style.display = 'none';
         details.style.display = 'none';
         textPreview.style.display = 'none';
@@ -311,22 +178,20 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
           sizeChanged();
           return;
         }
+        imageLink.href = previewUrl;
+        imageLink.style.display = 'block';
         status.style.display = '';
         status.textContent = 'Loading image preview…';
         image.onload = () => {
           picture.style.display = 'block';
-          imageLink.href = previewUrl;
-          imageLink.style.display = 'inline';
           status.style.display = 'none';
           details.textContent = image.naturalWidth + ' × ' + image.naturalHeight;
           details.style.display = 'block';
-          layoutImage();
           sizeChanged();
         };
         image.onerror = () => {
           picture.style.display = 'none';
-          imageLink.style.display = 'none';
-          status.textContent = 'Image preview unavailable; download link is still available.';
+          status.textContent = 'Inline image unavailable; use View image or Download file.';
           sizeChanged();
         };
         image.src = previewUrl;
