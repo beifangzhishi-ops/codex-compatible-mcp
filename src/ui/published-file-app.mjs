@@ -1,4 +1,4 @@
-export const PUBLISHED_FILE_UI_URI = 'ui://ccm/published-file-v3.html';
+export const PUBLISHED_FILE_UI_URI = 'ui://ccm/published-file-v6.html';
 
 // Every publication gets one useful card: images render inline, text shows a
 // bounded scrollable snippet, and all files retain a download link.
@@ -31,13 +31,14 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
     #text-note { display: none; margin-top: 5px; font-size: 11px; opacity: 0.65; }
     #status { opacity: 0.8; }
     #details { display: none; margin-top: 7px; font-size: 12px; opacity: 0.7; }
-    #link, #full-link { display: none; margin-top: 8px; }
+    #link, #full-link, #image-link { display: none; margin-top: 8px; }
   </style>
 </head>
 <body>
   <div id="frame">
     <div id="filename"></div>
     <div id="picture"><img id="image" alt="CCM published image"></div>
+    <a id="image-link" target="_blank" rel="noopener noreferrer">View image</a>
     <pre id="text-preview"></pre>
     <div id="text-note"></div>
     <div id="status">Loading published file…</div>
@@ -51,6 +52,7 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
       const filename = document.getElementById('filename');
       const picture = document.getElementById('picture');
       const image = document.getElementById('image');
+      const imageLink = document.getElementById('image-link');
       const textPreview = document.getElementById('text-preview');
       const textNote = document.getElementById('text-note');
       const status = document.getElementById('status');
@@ -120,6 +122,7 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
       }
       enableExternalLink(link, 'download');
       enableExternalLink(fullLink, 'preview');
+      enableExternalLink(imageLink, 'preview');
       function show(result) {
         const value = result?.structuredContent || result;
         if (value?.capability !== 'publish_worker_file') return;
@@ -137,6 +140,7 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
         link.textContent = 'Download file';
         link.style.display = 'block';
         picture.style.display = 'none';
+        imageLink.style.display = 'none';
         details.style.display = 'none';
         textPreview.style.display = 'none';
         textNote.style.display = 'none';
@@ -167,6 +171,10 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
           image.removeAttribute('src');
           sizeChanged();
           return;
+        }
+        if (new URL(previewUrl).origin === new URL(downloadUrl).origin) {
+          imageLink.href = previewUrl;
+          imageLink.style.display = 'block';
         }
         status.style.display = '';
         status.textContent = 'Loading image preview…';
