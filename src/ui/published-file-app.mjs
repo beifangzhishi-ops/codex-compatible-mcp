@@ -1,7 +1,7 @@
-export const PUBLISHED_FILE_UI_URI = 'ui://ccm/published-file-v5.html';
+export const PUBLISHED_FILE_UI_URI = 'ui://ccm/published-file-v3.html';
 
 // Every publication gets one useful card: images render inline, text shows a
-// bounded plain-text excerpt, and all files retain a download link.
+// bounded scrollable snippet, and all files retain a download link.
 export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
 <html lang="en">
 <head>
@@ -22,7 +22,7 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
     }
     @media (max-width: 600px) { #picture img { max-height: 360px; } }
     #text-preview {
-      display: none; max-height: 220px; max-width: 100%; overflow: hidden;
+      display: none; height: 220px; max-width: 100%; overflow: auto;
       white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4;
       margin: 0; padding: 10px; font: 12px/1.5 ui-monospace, monospace;
       background: rgba(127, 127, 127, 0.10); border-radius: 6px;
@@ -31,14 +31,13 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
     #text-note { display: none; margin-top: 5px; font-size: 11px; opacity: 0.65; }
     #status { opacity: 0.8; }
     #details { display: none; margin-top: 7px; font-size: 12px; opacity: 0.7; }
-    #link, #full-link, #image-link { display: none; margin-top: 8px; }
+    #link, #full-link { display: none; margin-top: 8px; }
   </style>
 </head>
 <body>
   <div id="frame">
     <div id="filename"></div>
     <div id="picture"><img id="image" alt="CCM published image"></div>
-    <a id="image-link" target="_blank" rel="noopener noreferrer">View image</a>
     <pre id="text-preview"></pre>
     <div id="text-note"></div>
     <div id="status">Loading published file…</div>
@@ -52,7 +51,6 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
       const filename = document.getElementById('filename');
       const picture = document.getElementById('picture');
       const image = document.getElementById('image');
-      const imageLink = document.getElementById('image-link');
       const textPreview = document.getElementById('text-preview');
       const textNote = document.getElementById('text-note');
       const status = document.getElementById('status');
@@ -62,14 +60,6 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
       let seq = 1;
       const pending = new Map();
       let lastUrl = '';
-      let textWasTruncated = false;
-      function updateTextNote() {
-        if (textPreview.style.display !== 'block') return;
-        const clipped = textPreview.scrollHeight > textPreview.clientHeight + 1;
-        textNote.textContent = textWasTruncated || clipped
-          ? 'Showing an excerpt. Open full text to read more.' : '';
-        textNote.style.display = textWasTruncated || clipped ? 'block' : 'none';
-      }
       function post(message) { window.parent.postMessage(message, '*'); }
       function request(method, params) {
         const id = seq++;
@@ -93,8 +83,8 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
           try { window.openai?.notifyIntrinsicHeight?.(); } catch {}
         });
       }
-      new ResizeObserver(() => { updateTextNote(); sizeChanged(); }).observe(frame);
-      window.addEventListener('resize', () => { updateTextNote(); sizeChanged(); });
+      new ResizeObserver(sizeChanged).observe(frame);
+      window.addEventListener('resize', sizeChanged);
       function validUrl(url, kind) {
         if (typeof url !== 'string') return false;
         try {
@@ -130,7 +120,6 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
       }
       enableExternalLink(link, 'download');
       enableExternalLink(fullLink, 'preview');
-      enableExternalLink(imageLink, 'preview');
       function show(result) {
         const value = result?.structuredContent || result;
         if (value?.capability !== 'publish_worker_file') return;
@@ -148,7 +137,6 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
         link.textContent = 'Download file';
         link.style.display = 'block';
         picture.style.display = 'none';
-        imageLink.style.display = 'none';
         details.style.display = 'none';
         textPreview.style.display = 'none';
         textNote.style.display = 'none';
@@ -160,9 +148,12 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
             typeof value.text_preview === 'string') {
           image.removeAttribute('src');
           textPreview.textContent = value.text_preview;
-          textWasTruncated = !!value.text_truncated;
+          textPreview.scrollTop = 0;
           textPreview.style.display = 'block';
-          updateTextNote();
+          textNote.textContent = value.text_truncated
+            ? 'Showing the beginning of the file. Open full text to read more.'
+            : 'Full text shown in the scrollable preview.';
+          textNote.style.display = 'block';
           fullLink.href = fullTextUrl;
           fullLink.style.display = 'block';
           status.style.display = 'none';
@@ -171,27 +162,23 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
         }
         const previewUrl = value.preview_url;
         if (!validUrl(previewUrl, 'preview') ||
-            new URL(previewUrl).origin !== new URL(downloadUrl).origin ||
             previewUrl.split('/').at(-1) !== downloadUrl.split('/').at(-1)) {
           status.style.display = 'none';
           image.removeAttribute('src');
           sizeChanged();
           return;
         }
-        imageLink.href = previewUrl;
-        imageLink.style.display = 'block';
         status.style.display = '';
         status.textContent = 'Loading image preview…';
         image.onload = () => {
           picture.style.display = 'block';
           status.style.display = 'none';
-          details.textContent = image.naturalWidth + ' × ' + image.naturalHeight;
+          details.textContent = image.naturalWidth + ' × ' + image.naturalHeight + ' · fit entire image';
           details.style.display = 'block';
           sizeChanged();
         };
         image.onerror = () => {
-          picture.style.display = 'none';
-          status.textContent = 'Inline image unavailable; use View image or Download file.';
+          status.textContent = 'Image preview unavailable; download link is still available.';
           sizeChanged();
         };
         image.src = previewUrl;

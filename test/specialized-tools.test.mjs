@@ -104,6 +104,7 @@ test('publish_worker_file is Direct + Code Mode and yields an HTTPS URL through 
   assert.equal(publish.surfaces.deferred, false);
   assert.equal(publish.mcpMeta.ui.resourceUri, PUBLISHED_FILE_UI_URI);
   assert.equal(publish.mcpMeta['openai/outputTemplate'], PUBLISHED_FILE_UI_URI);
+  assert.equal(registry.get('ccm-extra.preview_published_image'), null);
   assert.match(publish.description, /proactively publish/i);
   assert.equal(publish.supportsParallel, false);
   assert.equal(registry.get('ccm-extra.send_file'), null);
