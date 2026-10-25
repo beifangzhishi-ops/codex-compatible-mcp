@@ -172,7 +172,9 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         title.textContent = workspaceAction
           ? (structured.operation === "register_workspace"
               ? "CCM requests workspace registration"
-              : "CCM requests workspace access")
+              : structured.operation === "unregister_workspace"
+                ? "CCM requests workspace deregistration"
+                : "CCM requests workspace access")
           : "CCM requests full-access execution";
         justification.textContent = structured.justification ||
           (workspaceAction
@@ -202,7 +204,9 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
               ? (structured.create_if_missing
                   ? "Create if missing, register, and enter this exact workspace."
                   : "Register and enter this exact workspace.")
-              : "Enter this exact registered workspace.")
+              : structured.operation === "unregister_workspace"
+                ? "Remove this workspace registration and revoke its contexts. Do not delete project files. Running processes are not stopped."
+                : "Enter this exact registered workspace.")
           : (structured.command || "");
         approve.textContent = workspaceAction ? "Approve" : "Approve once";
         approveAlways.hidden = !policyPersistable;

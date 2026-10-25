@@ -13,7 +13,7 @@ const UNIFIED_EXEC_OUTPUT_SCHEMA = {
   approval_id: z.string().optional(),
   operation_id: z.string().optional(),
   kind: z.enum(['execution', 'workspace']).optional(),
-  operation: z.enum(['select_workspace', 'register_workspace']).optional(),
+  operation: z.enum(['select_workspace', 'register_workspace', 'unregister_workspace']).optional(),
   state: z.enum([
     'pending',
     'approved',
@@ -35,6 +35,7 @@ const UNIFIED_EXEC_OUTPUT_SCHEMA = {
   workspace_id: z.string().optional(),
   workspace_kind: z.enum(['registered', 'projectless']).optional(),
   workspace_root: z.string().optional(),
+  workspace_created_at: z.string().optional(),
   create_if_missing: z.boolean().optional(),
   created_at: z.string().optional(),
   policy_auto_approved: z.boolean().optional(),
@@ -185,6 +186,36 @@ async function executeWorkspaceAction(runtime, action, {
     );
   }
   let workspace;
+  if (action.operation === 'unregister_workspace') {
+    const current = await runtime.workerHub.call(
+      environment.id,
+      'get_workspace',
+      { workspace_id: action.workspace_id },
+      { timeoutMs: 10_000 },
+    );
+    if (current.kind !== 'registered' ||
+        current.workspace_id !== action.workspace_id ||
+        current.root !== action.workspace_root ||
+        current.created_at !== action.workspace_created_at) {
+      throw new Error('Workspace registration changed since approval was requested.');
+    }
+    // Revoke Controller context handles before changing the Worker registry.
+    // A failed Controller state write must not leave an unrevoked old context.
+    runtime.workspaceContextManager.revokeRegistered(
+      environment.id, action.workspace_id,
+    );
+    await runtime.workerHub.call(
+      environment.id,
+      'unregister_workspace',
+      {
+        workspace_id: action.workspace_id,
+        expected_root: action.workspace_root,
+        expected_created_at: action.workspace_created_at,
+      },
+      { timeoutMs: 10_000 },
+    );
+    return null;
+  }
   if (action.operation === 'select_workspace') {
     workspace = await runtime.workerHub.call(
       environment.id,
@@ -280,9 +311,11 @@ async function resolvePendingWorkspaceAction(
     );
     return workspaceActionStatus(consumed, {
       workspaceContext,
-      output: action.operation === 'select_workspace'
-        ? 'Approved and entered the selected workspace.'
-        : 'Approved, registered, and entered the workspace.',
+      output: action.operation === 'unregister_workspace'
+        ? 'Approved and unregistered the workspace. Project files were not deleted; previous workspace contexts are invalid.'
+        : action.operation === 'select_workspace'
+          ? 'Approved and entered the selected workspace.'
+          : 'Approved, registered, and entered the workspace.',
     });
   } catch (error) {
     let consumed = claimed.request;
@@ -603,6 +636,57 @@ export function registerCoreTools(registry, runtime) {
             'do not retry the same target or create or switch to projectless context to bypass it. ' +
             'If the user explicitly changes to a different real project, select or register the new target directly; ' +
             'the older pending approval does not need to be denied or resolved first.',
+        });
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  });
+
+  registry.register({
+    name: 'unregister_workspace',
+    provider: 'ccm-core',
+    surfaces: { deferred: true, codeMode: true },
+    tags: ['workspace', 'project', 'approval', 'unregister'],
+    description: [
+      'Remove exactly one registered workspace from a Worker, without deleting its directory or files.',
+      'Always requires a one-shot CCM approval card, even in full-access environments. No Always allow policy is available.',
+      'Discover through tool_search and invoke through exec. If approval_required=true, pass its approval_id to the top-level request_approval tool and wait for the card decision; never manually retry or bypass it.',
+      'Approval freezes the environment, workspace id, root, and registration identity. Previously issued workspace_context handles for that registration are revoked. Existing running processes are not forcibly terminated.',
+      'Only registered workspaces may be unregistered. Projectless contexts are not registration entries.',
+    ].join('\n\n'),
+    inputSchema: {
+      environment_id: z.string().describe('Environment whose Worker owns the workspace.'),
+      workspace_id: z.string().min(1).describe('Exact registered workspace id on that Worker.'),
+    },
+    handler: async (args) => {
+      try {
+        const environment = runtime.environmentRegistry.resolve(args.environment_id);
+        const workspace = await runtime.workerHub.call(
+          environment.id,
+          'get_workspace',
+          { workspace_id: args.workspace_id },
+          { timeoutMs: 10_000 },
+        );
+        if (workspace.kind !== 'registered') {
+          throw new Error('unregister_workspace only accepts registered workspaces.');
+        }
+        const approval = runtime.approvalManager.requestWorkspaceAction(
+          'unregister_workspace',
+          {
+            environment_id: environment.id,
+            workspace_id: workspace.workspace_id,
+            workspace_root: workspace.root,
+            workspace_created_at: workspace.created_at,
+          },
+          'Allow CCM to unregister workspace ' + environment.id + ' / ' +
+          workspace.workspace_id + ' at ' + workspace.root +
+          '? The project directory and files will remain. Previously issued workspace contexts will be invalidated.',
+        );
+        return jsonResult({
+          approval_required: true,
+          ...approval,
+          instruction: 'Call the top-level request_approval tool with this approval_id. Do not retry or bypass this frozen unregister action.',
         });
       } catch (error) {
         return toolError(error);

@@ -257,6 +257,8 @@ export class RemoteWorkerClient {
         );
       case 'register_workspace':
         return this.runtime.workspaceRegistry.register(params);
+      case 'unregister_workspace':
+        return this.runtime.workspaceRegistry.unregister(params);
       case 'create_projectless_workspace':
         return this.runtime.workspaceRegistry.createProjectless();
       case 'terminate_session':

@@ -871,6 +871,7 @@ export class RemoteProcessManager {
         'write_stdin requires workspace_context from the exec_command result.',
       );
     }
+    this.workspaceContextManager.resolve(args.workspace_context);
     const session = this.sessions.get(args.session_id);
     if (!session) {
       throw new Error('Unknown or expired session_id: ' + args.session_id);

@@ -236,6 +236,11 @@ test('core tool surface exposes registered project key cards and centralizes app
     registry.get('register_workspace').description,
     /changes to a different real project.*without requiring the older pending approval/i,
   );
+  const unregisterTool = registry.get('unregister_workspace');
+  assert.equal(unregisterTool.surfaces.direct, false);
+  assert.equal(unregisterTool.surfaces.deferred, true);
+  assert.equal(unregisterTool.surfaces.codeMode, true);
+  assert.match(unregisterTool.description, /Always requires a one-shot CCM approval card/);
   assert.match(
     registry.get('exec_command').description,
     /does not narrow filesystem reads below the environment's sandbox_read_scope/,

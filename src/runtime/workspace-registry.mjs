@@ -88,8 +88,9 @@ export class WorkspaceRegistry {
     this.projectlessRoot = path.resolve(projectlessRoot);
     this.registered = new Map();
     this.projectless = new Map();
+    const hasPersistedRegistry = Boolean(this.stateFile && fs.existsSync(this.stateFile));
     this.#load();
-    if (seedBootstrapWorkspace) this.#seedBootstrapWorkspace();
+    if (seedBootstrapWorkspace && !hasPersistedRegistry) this.#seedBootstrapWorkspace();
   }
 
   #load() {
@@ -245,6 +246,26 @@ export class WorkspaceRegistry {
     };
     this.registered.set(id, workspace);
     this.#persist();
+    return publicWorkspace(workspace);
+  }
+
+  unregister({ workspace_id: workspaceId, expected_root: expectedRoot,
+    expected_created_at: expectedCreatedAt } = {}) {
+    const id = String(workspaceId || '');
+    const workspace = this.registered.get(id);
+    if (!workspace) throw new Error('Unknown registered workspace_id: ' + id);
+    if (!expectedRoot || !expectedCreatedAt ||
+        pathKey(workspace.root) !== pathKey(expectedRoot) ||
+        workspace.createdAt !== expectedCreatedAt) {
+      throw new Error('Workspace registration no longer matches the approved target.');
+    }
+    this.registered.delete(id);
+    try {
+      this.#persist();
+    } catch (error) {
+      this.registered.set(id, workspace);
+      throw error;
+    }
     return publicWorkspace(workspace);
   }
 

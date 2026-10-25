@@ -95,6 +95,25 @@ export class WorkspaceContextManager {
     return this.#create(environmentId, workspace);
   }
 
+  revokeRegistered(environmentId, workspaceId) {
+    const removed = [];
+    for (const [id, record] of this.contexts) {
+      if (record.kind === 'registered' &&
+          record.environmentId === environmentId &&
+          record.workspaceId === workspaceId) {
+        removed.push([id, record]);
+        this.contexts.delete(id);
+      }
+    }
+    try {
+      this.#persist();
+    } catch (error) {
+      for (const [id, record] of removed) this.contexts.set(id, record);
+      throw error;
+    }
+    return removed.length;
+  }
+
   resolve(contextId) {
     const id = String(contextId || '');
     const record = this.contexts.get(id);

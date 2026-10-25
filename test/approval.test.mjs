@@ -404,6 +404,34 @@ test('ApprovalManager freezes workspace creation permission into the pending act
   assert.equal(claimed.action.workspace_root, intent.workspace_root);
 });
 
+test('ApprovalManager freezes deregistration identity and rejects reusable approval', () => {
+  const approvals = new ApprovalManager();
+  const target = {
+    environment_id: 'worker',
+    workspace_id: 'to-remove',
+    workspace_root: 'C:\\projects\\to-remove',
+    workspace_created_at: '2026-10-26T01:00:00.000Z',
+  };
+  const pending = approvals.requestWorkspaceAction(
+    'unregister_workspace', target, 'Remove registration?',
+  );
+  assert.equal(pending.workspace_created_at, target.workspace_created_at);
+  const { approvalNonce } = approvals.prepareAppApproval(pending.approval_id);
+  assert.throws(
+    () => approvals.claimAppWorkspace(pending.approval_id, 'invalid'),
+    /nonce/,
+  );
+  const claimed = approvals.claimAppWorkspace(pending.approval_id, approvalNonce);
+  assert.equal(claimed.action.operation, 'unregister_workspace');
+  assert.equal(claimed.action.workspace_root, target.workspace_root);
+  assert.equal(claimed.action.workspace_created_at, target.workspace_created_at);
+  approvals.markAppWorkspaceConsumed(pending.approval_id);
+  assert.throws(
+    () => approvals.claimAppWorkspace(pending.approval_id, approvalNonce),
+    /state=consumed/,
+  );
+});
+
 test('ApprovalManager app workspace approvals require the card nonce and freeze the target', () => {
   const approvals = new ApprovalManager();
   const intent = {

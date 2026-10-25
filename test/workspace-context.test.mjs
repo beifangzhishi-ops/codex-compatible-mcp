@@ -134,6 +134,46 @@ test('WorkspaceRegistry creates a missing approved project directory only when r
   }
 });
 
+test('WorkspaceRegistry unregisters only the frozen registration and never deletes files or re-seeds it', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-unregister-'));
+  const project = path.join(tempRoot, 'project');
+  const stateFile = path.join(tempRoot, 'state.json');
+  await fs.mkdir(project);
+  await fs.writeFile(path.join(project, 'keep.txt'), 'keep');
+  const environmentRegistry = new EnvironmentRegistry({ resolvePaths: false });
+  environmentRegistry.register({ id: 'worker', cwd: project, permissionProfile: 'full-access' });
+  try {
+    const registry = new WorkspaceRegistry({ environmentRegistry, stateFile });
+    const [workspace] = registry.listRegistered();
+    assert.equal(workspace.root, await fs.realpath(project));
+    assert.throws(() => registry.unregister({
+      workspace_id: workspace.workspace_id,
+      expected_root: project,
+      expected_created_at: 'incorrect',
+    }), /no longer matches/);
+    assert.equal(registry.listRegistered().length, 1);
+    assert.deepEqual(registry.unregister({
+      workspace_id: workspace.workspace_id,
+      expected_root: workspace.root,
+      expected_created_at: workspace.created_at,
+    }), workspace);
+    assert.equal(registry.listRegistered().length, 0);
+    assert.equal(await fs.readFile(path.join(project, 'keep.txt'), 'utf8'), 'keep');
+    assert.throws(() => registry.resolve(workspace.workspace_id), /Unknown workspace_id/);
+    assert.throws(() => registry.unregister({
+      workspace_id: workspace.workspace_id,
+      expected_root: workspace.root,
+      expected_created_at: workspace.created_at,
+    }), /Unknown registered workspace_id/);
+
+    const reloaded = new WorkspaceRegistry({ environmentRegistry, stateFile });
+    assert.deepEqual(reloaded.listRegistered(), [], 'removed bootstrap is not restored');
+    assert.equal(await fs.readFile(path.join(project, 'keep.txt'), 'utf8'), 'keep');
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test('WorkspaceContextManager persists contexts across controller instances', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-context-state-'));
   const stateFile = path.join(tempRoot, 'workspace-contexts.json');
@@ -413,6 +453,85 @@ test('full-access Controller enters registered workspaces without approval', asy
     assert.match(resumedProjectless.output, /RESUMED_PROJECTLESS/);
     assert.equal(resumedProjectless.workspace_context, oldProjectlessContext);
     assert.equal(resumedProjectless.workspace_root, first.workspace_root);
+
+    const unregisterTool = tools.registry.get('unregister_workspace');
+    const resolveCard = tools.registry.get('resolve_pending_action');
+    const requestCard = tools.registry.get('request_approval');
+    const requested = await unregisterTool.handler({
+      environment_id: 'workspace-worker', workspace_id: 'new-project',
+    });
+    assert.equal(requested.structuredContent.approval_required, true,
+      'deregistration needs approval even in full-access');
+    assert.equal(requested.structuredContent.operation, 'unregister_workspace');
+    assert.equal(worker.workspaceRegistry.listRegistered().length, 2,
+      'request alone does not unregister');
+
+    const deniedCard = await requestCard.handler({
+      approval_id: requested.structuredContent.approval_id,
+    });
+    const denied = await resolveCard.handler({
+      approval_id: requested.structuredContent.approval_id,
+      approval_nonce: deniedCard._meta.approval_nonce,
+      decision: 'deny',
+    });
+    assert.equal(denied.structuredContent.state, 'denied');
+    assert.equal(worker.workspaceRegistry.listRegistered().length, 2);
+
+    const stale = await unregisterTool.handler({
+      environment_id: 'workspace-worker', workspace_id: 'new-project',
+    });
+    const staleCard = await requestCard.handler({
+      approval_id: stale.structuredContent.approval_id,
+    });
+    const priorRegistration = worker.workspaceRegistry.resolve('new-project');
+    worker.workspaceRegistry.unregister({
+      workspace_id: 'new-project',
+      expected_root: priorRegistration.root,
+      expected_created_at: priorRegistration.created_at,
+    });
+    const otherRoot = path.join(tempRoot, 'different-project');
+    await fs.mkdir(otherRoot);
+    worker.workspaceRegistry.register({ workspace_id: 'new-project', path: otherRoot });
+    const staleOutcome = await resolveCard.handler({
+      approval_id: stale.structuredContent.approval_id,
+      approval_nonce: staleCard._meta.approval_nonce,
+      decision: 'approve',
+    });
+    assert.equal(staleOutcome.structuredContent.action_failed, true);
+    assert.equal(worker.workspaceRegistry.resolve('new-project').root, await fs.realpath(otherRoot));
+
+    const toRemove = await unregisterTool.handler({
+      environment_id: 'workspace-worker', workspace_id: 'new-project',
+    });
+    const approvalCard = await requestCard.handler({
+      approval_id: toRemove.structuredContent.approval_id,
+    });
+    const removed = await resolveCard.handler({
+      approval_id: toRemove.structuredContent.approval_id,
+      approval_nonce: approvalCard._meta.approval_nonce,
+      decision: 'approve',
+    });
+    assert.equal(removed.structuredContent.state, 'consumed');
+    assert.match(removed.structuredContent.output, /unregistered/);
+    assert.equal(worker.workspaceRegistry.listRegistered().length, 1);
+    assert.throws(() => controller.workspaceContextManager.resolve(
+      registered.structuredContent.workspace_context,
+    ), /Unknown or expired/);
+    await assert.rejects(controller.processManager.execCommand({
+      workspace_context: registered.structuredContent.workspace_context,
+      cmd: 'Write-Output SHOULD_NOT_RUN',
+    }), /Unknown or expired workspace_context/);
+    assert.equal((await fs.stat(newRoot)).isDirectory(), true);
+    assert.equal((await fs.stat(otherRoot)).isDirectory(), true);
+
+    const persistedContexts = new WorkspaceContextManager({
+      environmentRegistry: controller.environmentRegistry,
+      workerHub: controller.workerHub,
+      stateFile: path.join(tempRoot, 'workspace-contexts.json'),
+    });
+    assert.throws(() => persistedContexts.resolve(
+      registered.structuredContent.workspace_context,
+    ), /Unknown or expired/);
   } finally {
     codeModeManager?.close();
     await client?.close().catch(() => {});
