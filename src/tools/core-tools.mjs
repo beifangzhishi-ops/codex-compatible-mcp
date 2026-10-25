@@ -1,5 +1,6 @@
 import * as z from 'zod/v4';
 import { APPROVAL_UI_URI } from '../ui/approval-app.mjs';
+import { WORKSPACE_KEY_UI_URI } from '../ui/workspace-key-app.mjs';
 
 const UNIFIED_EXEC_OUTPUT_SCHEMA = {
   chunk_id: z.string().optional(),
@@ -471,12 +472,16 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'select_workspace',
     provider: 'ccm-core',
-    surfaces: { deferred: true, codeMode: true },
+    surfaces: { direct: true, codeMode: true },
+    mcpMeta: {
+      ui: { resourceUri: WORKSPACE_KEY_UI_URI },
+      'openai/outputTemplate': WORKSPACE_KEY_UI_URI,
+    },
     tags: ['workspace', 'project', 'approval'],
     description: [
       'Enter one registered workspace. Full-access environments return the workspace_context directly; restricted environments return a frozen approval request.',
       'Use this only when the user explicitly intends to work in that registered project. Do not select a workspace merely to read or search a path; for a genuinely projectless task, use create_projectless_context for temporary execution context instead.',
-      'Discover through tool_search and invoke through exec. If approval_required=true, call the top-level request_approval tool with the returned approval_id. While that workspace remains the user\'s intended target, wait for the frozen action to resolve; do not retry the same target or switch to projectless context to bypass it. If the user explicitly changes to a different real project, directly select or register that new target without requiring the older pending approval to be denied or resolved first; pending workspace approvals are independent.',
+      'Call directly for a full-access environment so CCM itself displays a project-key card with the resulting workspace_context, without needing you to repeat the key. For restricted environments, prefer the Code Mode route through ccm.exec, followed by the top-level request_approval tool when approval_required=true; the approved card itself then displays the key. Do not send a separate key message. While that workspace remains the user\'s intended target, wait for the frozen action to resolve; do not retry the same target or switch to projectless context to bypass it. If the user explicitly changes to a different real project, directly select or register that new target without requiring the older pending approval to be denied or resolved first; pending workspace approvals are independent.',
       'Full-access skips user approval but keeps workspace identity validation, Worker routing, and workspace-context boundaries.',
     ].join('\n\n'),
     inputSchema: {
@@ -534,12 +539,16 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'register_workspace',
     provider: 'ccm-core',
-    surfaces: { deferred: true, codeMode: true },
+    surfaces: { direct: true, codeMode: true },
+    mcpMeta: {
+      ui: { resourceUri: WORKSPACE_KEY_UI_URI },
+      'openai/outputTemplate': WORKSPACE_KEY_UI_URI,
+    },
     tags: ['workspace', 'project', 'approval', 'register'],
     description: [
       'Register and enter one exact project directory. Full-access environments return the workspace_context directly; restricted environments return a frozen approval request.',
       'Use this only when the user explicitly intends to register that concrete directory as a project. Do not register a directory merely to gain read access; for a genuinely projectless task, use create_projectless_context instead.',
-      'Discover through tool_search and invoke through exec. If approval_required=true, call the top-level request_approval tool with the returned approval_id. While that workspace remains the user\'s intended target, wait for the frozen action to resolve; do not retry the same target or switch to projectless context to bypass it. If the user explicitly changes to a different real project, directly select or register that new target without requiring the older pending approval to be denied or resolved first; pending workspace approvals are independent.',
+      'Call directly for a full-access environment so CCM itself displays a project-key card with the resulting workspace_context, without needing you to repeat the key. For restricted environments, prefer the Code Mode route through ccm.exec, followed by the top-level request_approval tool when approval_required=true; the approved card itself then displays the key. Do not send a separate key message. While that workspace remains the user\'s intended target, wait for the frozen action to resolve; do not retry the same target or switch to projectless context to bypass it. If the user explicitly changes to a different real project, directly select or register that new target without requiring the older pending approval to be denied or resolved first; pending workspace approvals are independent.',
       'With create_if_missing=true, registration may create the exact missing directory before entry. Full-access skips user approval but keeps target revalidation and workspace-context boundaries.',
     ].join('\n\n'),
     inputSchema: {

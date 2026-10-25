@@ -16,6 +16,7 @@ import {
   APPROVAL_UI_HTML,
   APPROVAL_UI_URI,
 } from '../src/ui/approval-app.mjs';
+import { WORKSPACE_KEY_UI_HTML, WORKSPACE_KEY_UI_URI } from '../src/ui/workspace-key-app.mjs';
 import {
   PUBLISHED_FILE_UI_HTML,
   PUBLISHED_FILE_UI_URI,
@@ -153,8 +154,10 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       'exec',
       'exec_command',
       'publish_worker_file',
+      'register_workspace',
       'request_approval',
       'resolve_pending_action',
+      'select_workspace',
       'tool_search',
       'view_image',
       'wait',
@@ -188,8 +191,13 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(publishedFileUiTool?._meta?.ui?.resourceUri, PUBLISHED_FILE_UI_URI);
     assert.equal(publishedFileUiTool?._meta?.['openai/outputTemplate'], PUBLISHED_FILE_UI_URI);
     assert.equal(listed.tools.some((tool) => tool.name === 'preview_published_image'), false);
-    assert.equal(listed.tools.some((tool) => tool.name === 'select_workspace'), false);
-    assert.equal(listed.tools.some((tool) => tool.name === 'register_workspace'), false);
+    for (const name of ['select_workspace', 'register_workspace']) {
+      const tool = listed.tools.find((entry) => entry.name === name);
+      assert.equal(tool?._meta?.ui?.resourceUri, WORKSPACE_KEY_UI_URI);
+      assert.equal(tool?._meta?.['openai/outputTemplate'], WORKSPACE_KEY_UI_URI);
+    }
+    const keyResource = await client.readResource({ uri: WORKSPACE_KEY_UI_URI });
+    assert.equal(keyResource.contents[0].text, WORKSPACE_KEY_UI_HTML);
     assert.equal(listed.tools.some((tool) => tool.name === 'list_projects'), false);
     assert.equal(listed.tools.some((tool) => tool.name === 'send_file'), false);
     assert.equal(listed.tools.some((tool) => tool.name === 'receive_file'), false);

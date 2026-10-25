@@ -96,6 +96,9 @@ async function createApprovalAppHarness({
     'policyScope',
     'command',
     'status',
+    'contextRow',
+    'contextKey',
+    'copyKey',
     'approve',
     'approveAlways',
     'deny',
@@ -630,10 +633,44 @@ test('workspace approval publishes its workspace context before one follow-up', 
     contextCall.params.structuredContent.workspace_context,
     workspaceContext,
   );
+  assert.equal(harness.elements.contextRow.hidden, false);
+  assert.equal(harness.elements.contextKey.textContent, workspaceContext);
   assert.equal(
     harness.calls.filter((call) => call.method === 'ui/message').length,
     1,
   );
+});
+
+test('workspace key is not shown for denial, failure or absent context', async () => {
+  const failed = [
+    { state: 'denied', workspace_context: '00000000-0000-4000-8000-000000000099' },
+    { state: 'consumed', action_failed: true, workspace_context: '00000000-0000-4000-8000-000000000099' },
+    { state: 'consumed', workspace_context: undefined },
+  ];
+  for (const overrides of failed) {
+    const harness = await createApprovalAppHarness({
+      hostCapabilities: { message: { text: {} } },
+      initialApproval: executionApproval({ kind: 'workspace', operation: 'register_workspace' }),
+      toolResults: [terminalExecution({ kind: 'workspace', operation: 'register_workspace', exit_code: undefined, ...overrides })],
+    });
+    harness.click(overrides.state === 'denied' ? 'deny' : 'approve');
+    await waitFor(() => harness.calls.some((call) => call.method === 'ui/message'), 'workspace terminal decision');
+    assert.equal(harness.elements.contextRow.hidden, true);
+    assert.equal(harness.elements.contextKey.textContent, '');
+  }
+});
+
+test('successful workspace key remains visible even when host continuation fails', async () => {
+  const workspaceContext = '00000000-0000-4000-8000-000000000099';
+  const harness = await createApprovalAppHarness({
+    contextError: 'host unavailable',
+    initialApproval: executionApproval({ kind: 'workspace', operation: 'register_workspace' }),
+    toolResults: [terminalExecution({ kind: 'workspace', operation: 'register_workspace', workspace_context: workspaceContext, exit_code: undefined })],
+  });
+  harness.click('approve');
+  await waitFor(() => /handoff failed/i.test(harness.elements.status.textContent), 'handoff error');
+  assert.equal(harness.elements.contextRow.hidden, false);
+  assert.equal(harness.elements.contextKey.textContent, workspaceContext);
 });
 
 test('denial sends one continuation without introducing another resolver call', async () => {

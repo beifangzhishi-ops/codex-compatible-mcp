@@ -56,6 +56,15 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
       overflow-wrap: anywhere;
     }
     #status[data-error="true"] { opacity: 1; }
+    #contextRow { margin-top: 12px; }
+    #contextKey {
+      display: block; padding: 8px; margin-top: 5px;
+      font: 12px/1.5 ui-monospace, Consolas, monospace;
+      user-select: text; overflow-wrap: anywhere;
+      border-radius: 7px;
+      background: color-mix(in srgb, currentColor 7%, transparent);
+    }
+    #copyKey { margin-top: 7px; }
     #actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
     button {
       border: 0;
@@ -86,6 +95,11 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
     <div class="row" id="policyScopeRow" hidden><div class="label">Always allow</div><div class="value" id="policyScope"></div></div>
     <div id="command"></div>
     <div id="status" aria-live="polite">Waiting for your decision.</div>
+    <div id="contextRow" hidden>
+      <div class="label">Project key (workspace_context)</div>
+      <code id="contextKey"></code>
+      <button id="copyKey" type="button">Copy key</button>
+    </div>
     <div id="actions">
       <button id="deny" type="button">Deny</button>
       <button id="approve" type="button">Approve once</button>
@@ -113,6 +127,9 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
       const policyScope = document.getElementById("policyScope");
       const command = document.getElementById("command");
       const status = document.getElementById("status");
+      const contextRow = document.getElementById("contextRow");
+      const contextKey = document.getElementById("contextKey");
+      const copyKey = document.getElementById("copyKey");
       const approve = document.getElementById("approve");
       const approveAlways = document.getElementById("approveAlways");
       const deny = document.getElementById("deny");
@@ -148,6 +165,8 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         if (!structured) return false;
         approval = structured;
         approvalNonce = hidden.approval_nonce || null;
+        contextRow.hidden = true;
+        contextKey.textContent = '';
         retryDecision = null;
         const workspaceAction = structured.kind === "workspace";
         title.textContent = workspaceAction
@@ -219,6 +238,18 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         status.dataset.error = error ? "true" : "false";
         updateHeight();
       }
+
+      copyKey.addEventListener('click', async () => {
+        if (contextRow.hidden || !contextKey.textContent) return;
+        try {
+          if (!window.navigator?.clipboard?.writeText) throw new Error('Clipboard unavailable');
+          await window.navigator.clipboard.writeText(contextKey.textContent);
+          copyKey.textContent = 'Copied';
+        } catch {
+          copyKey.textContent = 'Select the key above to copy';
+        }
+        updateHeight();
+      });
 
       function appendContinuationWarning(text) {
         const current = status.textContent.trim();
@@ -410,6 +441,14 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
             setStatus(structured.output || "Approved and entered workspace.");
           } else {
             setStatus(structured.output || "Decision recorded.");
+          }
+          if (workspaceAction && decision === 'approve' &&
+              !structured.action_failed && structured.state === 'consumed' &&
+              typeof structured.workspace_context === 'string' &&
+              /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(structured.workspace_context)) {
+            contextKey.textContent = structured.workspace_context;
+            contextRow.hidden = false;
+            updateHeight();
           }
           approve.disabled = true;
           approveAlways.disabled = true;

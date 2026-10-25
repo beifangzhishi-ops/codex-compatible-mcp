@@ -175,15 +175,17 @@ function runtimeStub() {
   };
 }
 
-test('core tool surface keeps workspace lifecycle deferred and centralizes approval cards', async () => {
+test('core tool surface exposes registered project key cards and centralizes approval cards', async () => {
   const registry = registerCoreTools(new ToolRegistry(), runtimeStub());
 
   const direct = registry.listDirect().map((tool) => tool.name).sort();
   assert.deepEqual(direct, [
     'apply_patch',
     'exec_command',
+    'register_workspace',
     'request_approval',
     'resolve_pending_action',
+    'select_workspace',
     'view_image',
     'write_stdin',
   ]);
@@ -258,13 +260,18 @@ test('core tool surface keeps workspace lifecycle deferred and centralizes appro
   for (const name of [
     'list_projects',
     'create_projectless_context',
-    'select_workspace',
-    'register_workspace',
   ]) {
     const tool = registry.get(name);
     assert.equal(tool.surfaces.direct, false, name + ' should not be direct');
     assert.equal(tool.surfaces.deferred, true, name + ' should be deferred');
     assert.equal(tool.surfaces.codeMode, true, name + ' should support exec');
+  }
+  for (const name of ['select_workspace', 'register_workspace']) {
+    const tool = registry.get(name);
+    assert.equal(tool.surfaces.direct, true);
+    assert.equal(tool.surfaces.deferred, false);
+    assert.equal(tool.surfaces.codeMode, true);
+    assert.equal(tool.mcpMeta.ui.resourceUri, 'ui://ccm/workspace-key-v1.html');
   }
   assert.deepEqual(
     Object.keys(registry.get('request_approval').inputSchema),
@@ -421,8 +428,10 @@ test('core tool surface keeps workspace lifecycle deferred and centralizes appro
         'apply_patch',
         'exec',
         'exec_command',
+        'register_workspace',
         'request_approval',
         'resolve_pending_action',
+        'select_workspace',
         'tool_search',
         'view_image',
         'wait',
