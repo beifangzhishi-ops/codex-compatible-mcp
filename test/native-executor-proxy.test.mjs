@@ -15,7 +15,7 @@ function fakeChild() {
   return child;
 }
 
-function createHarness({ childEnvPath } = {}) {
+function createHarness({ workerEnvPath } = {}) {
   const spawned = [];
   let mode = 'proxy';
   const executor = new NativeEnvironmentExecutor({
@@ -30,7 +30,7 @@ function createHarness({ childEnvPath } = {}) {
       PATH: 'test-path',
     },
     ptyProxyPath: 'ccm-pty-proxy.exe',
-    childEnvPath,
+    workerEnvPath,
     fileExists: () => true,
     spawnProcess(file, args, options) {
       spawned.push({ file, args, options });
@@ -74,22 +74,23 @@ test('native executor applies proxy/direct mode to each newly spawned process', 
 test('native executor reads machine-local CURL_CA_BUNDLE for each pipe and PTY child', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-child-env-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const config = path.join(dir, 'child.env');
+  const config = path.join(dir, 'worker.env');
   const bundle = path.join(dir, 'ca-bundle.crt');
   fs.writeFileSync(bundle, 'test certificate');
-  const harness = createHarness({ childEnvPath: config });
+  const harness = createHarness({ workerEnvPath: config });
 
   harness.start();
   assert.equal('CURL_CA_BUNDLE' in harness.spawned[0].options.env, false);
 
-  fs.writeFileSync(config, `# local CA\nCURL_CA_BUNDLE=${bundle}\n`);
+  fs.writeFileSync(config, `# local CA\nCCM_ENVIRONMENT_ID=local-worker\nCURL_CA_BUNDLE=${bundle}\n`);
   harness.start();
   harness.start(true);
   assert.equal(harness.spawned[1].options.env.CURL_CA_BUNDLE, bundle);
   assert.equal(harness.spawned[2].options.env.CURL_CA_BUNDLE, bundle);
 
+  assert.equal('CCM_ENVIRONMENT_ID' in harness.spawned[1].options.env, false);
   fs.writeFileSync(config, 'SSL_CERT_FILE=C:/invalid.pem\n');
-  assert.throws(() => harness.start(), /only CURL_CA_BUNDLE/);
+  assert.throws(() => harness.start(), /only CCM_\* and CURL_CA_BUNDLE/);
   fs.writeFileSync(config, 'CURL_CA_BUNDLE=C:/missing-bundle.crt\n');
   assert.throws(() => harness.start(), /file not found/);
 

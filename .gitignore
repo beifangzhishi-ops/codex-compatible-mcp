@@ -6,7 +6,6 @@ __pycache__/
 logs/
 config/ccm.env
 config/worker.env
-config/child.env
 .env
 .env.*
 !.env.example

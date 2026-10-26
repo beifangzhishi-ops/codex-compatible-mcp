@@ -35,6 +35,9 @@ function Import-WorkerEnv([string]$path){
         if($equals -lt 1){ throw "Invalid worker.env line: $line" }
         $name=$line.Substring(0,$equals).Trim()
         $value=$line.Substring($equals+1).Trim()
+        # The native executor reads CURL_CA_BUNDLE from worker.env for each
+        # new command. Do not freeze this command-only setting at Worker start.
+        if($name -eq 'CURL_CA_BUNDLE'){ continue }
         if($value.Length -ge 2){
             if(($value.StartsWith('"') -and $value.EndsWith('"')) -or
                ($value.StartsWith("'") -and $value.EndsWith("'"))){

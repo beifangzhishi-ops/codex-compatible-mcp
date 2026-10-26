@@ -10,11 +10,11 @@ import { buildProxyEnvironment } from '../proxy-env.mjs';
 const DEFAULT_PTY_PROXY_PATH = fileURLToPath(
   new URL('../../../native/bin/ccm-pty-proxy.exe', import.meta.url),
 );
-const DEFAULT_CHILD_ENV_PATH = fileURLToPath(
-  new URL('../../../config/child.env', import.meta.url),
+const DEFAULT_WORKER_ENV_PATH = fileURLToPath(
+  new URL('../../../config/worker.env', import.meta.url),
 );
 
-function readChildEnvironment(file) {
+function readWorkerChildEnvironment(file) {
   let text;
   try {
     text = fs.readFileSync(file, 'utf8');
@@ -26,15 +26,18 @@ function readChildEnvironment(file) {
   for (const [index, raw] of text.split(/\r?\n/).entries()) {
     const line = raw.trim();
     if (!line || line.startsWith('#')) continue;
-    const match = /^CURL_CA_BUNDLE\s*=\s*(.*)$/.exec(line);
-    if (!match) throw new Error(`Invalid config/child.env entry on line ${index + 1}: only CURL_CA_BUNDLE is supported.`);
-    let value = match[1].trim();
+    const match = /^([A-Za-z_][A-Za-z_0-9]*)\s*=\s*(.*)$/.exec(line);
+    if (!match || (match[1] !== 'CURL_CA_BUNDLE' && !/^CCM_[A-Z0-9_]+$/.test(match[1]))) {
+      throw new Error(`Invalid config/worker.env entry on line ${index + 1}: only CCM_* and CURL_CA_BUNDLE are supported.`);
+    }
+    if (match[1] !== 'CURL_CA_BUNDLE') continue;
+    let value = match[2].trim();
     if ((value.startsWith('"') && value.endsWith('"')) ||
         (value.startsWith("'") && value.endsWith("'"))) {
       value = value.slice(1, -1);
     }
     if (!value || !(path.isAbsolute(value) || path.win32.isAbsolute(value))) {
-      throw new Error('CURL_CA_BUNDLE in config/child.env must be an absolute path.');
+      throw new Error('CURL_CA_BUNDLE in config/worker.env must be an absolute path.');
     }
     if (!fs.existsSync(value)) {
       throw new Error(`CURL_CA_BUNDLE file not found: ${value}`);
@@ -96,7 +99,7 @@ export class NativeEnvironmentExecutor {
     sandboxBackend,
     childProxyPolicy,
     ptyProxyPath = DEFAULT_PTY_PROXY_PATH,
-    childEnvPath = DEFAULT_CHILD_ENV_PATH,
+    workerEnvPath = DEFAULT_WORKER_ENV_PATH,
     baseEnv = process.env,
     spawnProcess = spawnChild,
     fileExists = fs.existsSync,
@@ -104,7 +107,7 @@ export class NativeEnvironmentExecutor {
     this.sandboxBackend = sandboxBackend;
     this.childProxyPolicy = childProxyPolicy;
     this.ptyProxyPath = ptyProxyPath;
-    this.childEnvPath = childEnvPath;
+    this.workerEnvPath = workerEnvPath;
     this.baseEnv = baseEnv;
     this.spawnProcess = spawnProcess;
     this.fileExists = fileExists;
@@ -123,7 +126,7 @@ export class NativeEnvironmentExecutor {
     const childEnv = buildProxyEnvironment(this.baseEnv, {
       mode: this.childProxyPolicy?.getMode?.() || 'proxy',
     });
-    Object.assign(childEnv, readChildEnvironment(this.childEnvPath));
+    Object.assign(childEnv, readWorkerChildEnvironment(this.workerEnvPath));
     const invocation = this.sandboxBackend.buildInvocation({
       environment,
       command,
