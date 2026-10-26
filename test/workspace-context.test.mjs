@@ -174,6 +174,35 @@ test('WorkspaceRegistry unregisters only the frozen registration and never delet
   }
 });
 
+test('WorkspaceRegistry can inspect and unregister a registration whose directory was deleted', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-unregister-missing-'));
+  const bootstrap = path.join(tempRoot, 'bootstrap');
+  const missing = path.join(tempRoot, 'missing');
+  await fs.mkdir(bootstrap);
+  await fs.mkdir(missing);
+  const environmentRegistry = new EnvironmentRegistry({ resolvePaths: false });
+  environmentRegistry.register({ id: 'worker', cwd: bootstrap, permissionProfile: 'full-access' });
+  try {
+    const stateFile = path.join(tempRoot, 'state.json');
+    const registry = new WorkspaceRegistry({ environmentRegistry, stateFile });
+    const registered = registry.register({ workspace_id: 'gone', path: missing });
+    await fs.rm(missing, { recursive: true });
+    assert.throws(() => registry.resolve('gone'), /directory no longer exists/);
+    assert.deepEqual(registry.getRegistered('gone'), registered);
+    assert.deepEqual(registry.unregister({
+      workspace_id: 'gone',
+      expected_root: registered.root,
+      expected_created_at: registered.created_at,
+    }), registered);
+    assert.throws(() => registry.getRegistered('gone'), /Unknown registered workspace_id/);
+    const reloaded = new WorkspaceRegistry({ environmentRegistry, stateFile });
+    assert.equal(reloaded.listRegistered().some((workspace) => workspace.workspace_id === 'gone'), false);
+    await assert.rejects(fs.stat(missing), /ENOENT/);
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test('WorkspaceContextManager persists contexts across controller instances', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-context-state-'));
   const stateFile = path.join(tempRoot, 'workspace-contexts.json');
@@ -532,6 +561,39 @@ test('full-access Controller enters registered workspaces without approval', asy
     assert.throws(() => persistedContexts.resolve(
       registered.structuredContent.workspace_context,
     ), /Unknown or expired/);
+
+    // A missing directory must not block frozen approval for a Worker-local
+    // registration; the normal select/exec path still rejects that directory.
+    const goneRoot = path.join(tempRoot, 'gone-project');
+    await fs.mkdir(goneRoot);
+    const goneRegistration = worker.workspaceRegistry.register({
+      workspace_id: 'gone-project', path: goneRoot,
+    });
+    await fs.rm(goneRoot, { recursive: true });
+    assert.deepEqual(await controller.workerHub.call(
+      'workspace-worker', 'get_registered_workspace',
+      { workspace_id: 'gone-project' },
+    ), goneRegistration);
+    assert.equal((await unregisterTool.handler({
+      environment_id: 'workspace-worker', workspace_id: 'missing-name',
+    })).isError, true);
+    const goneRequest = await unregisterTool.handler({
+      environment_id: 'workspace-worker', workspace_id: 'gone-project',
+    });
+    assert.equal(goneRequest.structuredContent.approval_required, true);
+    assert.equal(worker.workspaceRegistry.listRegistered().some(
+      (workspace) => workspace.workspace_id === 'gone-project'), true);
+    const goneCard = await requestCard.handler({
+      approval_id: goneRequest.structuredContent.approval_id,
+    });
+    const goneOutcome = await resolveCard.handler({
+      approval_id: goneRequest.structuredContent.approval_id,
+      approval_nonce: goneCard._meta.approval_nonce,
+      decision: 'approve',
+    });
+    assert.equal(goneOutcome.structuredContent.state, 'consumed');
+    assert.equal(worker.workspaceRegistry.listRegistered().some(
+      (workspace) => workspace.workspace_id === 'gone-project'), false);
   } finally {
     codeModeManager?.close();
     await client?.close().catch(() => {});

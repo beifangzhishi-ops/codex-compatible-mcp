@@ -170,6 +170,13 @@ export class WorkspaceRegistry {
       .sort((left, right) => left.workspace_id.localeCompare(right.workspace_id));
   }
 
+  getRegistered(workspaceId) {
+    const id = String(workspaceId || '');
+    const workspace = this.registered.get(id);
+    if (!workspace) throw new Error('Unknown registered workspace_id: ' + id);
+    return publicWorkspace(workspace);
+  }
+
   listProjectless() {
     return [...this.projectless.values()]
       .map(publicWorkspace)

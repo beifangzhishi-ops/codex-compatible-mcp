@@ -189,7 +189,7 @@ async function executeWorkspaceAction(runtime, action, {
   if (action.operation === 'unregister_workspace') {
     const current = await runtime.workerHub.call(
       environment.id,
-      'get_workspace',
+      'get_registered_workspace',
       { workspace_id: action.workspace_id },
       { timeoutMs: 10_000 },
     );
@@ -653,7 +653,7 @@ export function registerCoreTools(registry, runtime) {
       'Always requires a one-shot CCM approval card, even in full-access environments. No Always allow policy is available.',
       'Discover through tool_search and invoke through exec. If approval_required=true, pass its approval_id to the top-level request_approval tool and wait for the card decision; never manually retry or bypass it.',
       'Approval freezes the environment, workspace id, root, and registration identity. Previously issued workspace_context handles for that registration are revoked. Existing running processes are not forcibly terminated.',
-      'Only registered workspaces may be unregistered. Projectless contexts are not registration entries.',
+      'Only registered workspaces may be unregistered. Projectless contexts are not registration entries. The project directory may already be missing; it is not needed for deregistration.',
     ].join('\n\n'),
     inputSchema: {
       environment_id: z.string().describe('Environment whose Worker owns the workspace.'),
@@ -664,7 +664,7 @@ export function registerCoreTools(registry, runtime) {
         const environment = runtime.environmentRegistry.resolve(args.environment_id);
         const workspace = await runtime.workerHub.call(
           environment.id,
-          'get_workspace',
+          'get_registered_workspace',
           { workspace_id: args.workspace_id },
           { timeoutMs: 10_000 },
         );

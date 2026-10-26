@@ -249,6 +249,8 @@ export class RemoteWorkerClient {
         };
       case 'get_workspace':
         return this.runtime.workspaceRegistry.resolve(params.workspace_id);
+      case 'get_registered_workspace':
+        return this.runtime.workspaceRegistry.getRegistered(params.workspace_id);
       case 'inspect_workspace_path':
         return this.runtime.workspaceRegistry.inspectPath(
           params.path,
