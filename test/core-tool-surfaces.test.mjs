@@ -182,6 +182,7 @@ test('core tool surface exposes registered project key cards and centralizes app
   assert.deepEqual(direct, [
     'apply_patch',
     'exec_command',
+    'get_approval_status',
     'register_workspace',
     'request_approval',
     'resolve_pending_action',
@@ -433,6 +434,7 @@ test('core tool surface exposes registered project key cards and centralizes app
         'apply_patch',
         'exec',
         'exec_command',
+        'get_approval_status',
         'register_workspace',
         'request_approval',
         'resolve_pending_action',

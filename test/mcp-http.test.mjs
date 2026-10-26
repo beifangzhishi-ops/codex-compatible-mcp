@@ -15,6 +15,7 @@ import { createHttpController } from '../src/controller/mcp-http-server.mjs';
 import {
   APPROVAL_UI_HTML,
   APPROVAL_UI_URI,
+  LEGACY_APPROVAL_UI_URI,
 } from '../src/ui/approval-app.mjs';
 import { WORKSPACE_KEY_UI_HTML, WORKSPACE_KEY_UI_URI } from '../src/ui/workspace-key-app.mjs';
 import {
@@ -153,6 +154,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       'apply_patch',
       'exec',
       'exec_command',
+      'get_approval_status',
       'publish_worker_file',
       'register_workspace',
       'request_approval',
@@ -180,6 +182,11 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     );
     assert.deepEqual(
       listed.tools.find((tool) => tool.name === 'resolve_pending_action')
+        ?._meta?.ui?.visibility,
+      ['app'],
+    );
+    assert.deepEqual(
+      listed.tools.find((tool) => tool.name === 'get_approval_status')
         ?._meta?.ui?.visibility,
       ['app'],
     );
@@ -301,6 +308,8 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const approvalResource = await client.readResource({ uri: APPROVAL_UI_URI });
     assert.equal(approvalResource.contents[0].text, APPROVAL_UI_HTML);
     assert.equal(approvalResource.contents[0]._meta.ui.prefersBorder, true);
+    const legacyApprovalResource = await client.readResource({ uri: LEGACY_APPROVAL_UI_URI });
+    assert.equal(legacyApprovalResource.contents[0].text, APPROVAL_UI_HTML);
     const fileResource = await client.readResource({ uri: PUBLISHED_FILE_UI_URI });
     assert.equal(fileResource.contents[0].text, PUBLISHED_FILE_UI_HTML);
     assert.deepEqual(fileResource.contents[0]._meta.ui.csp.resourceDomains, ['https://example.test']);
@@ -403,6 +412,27 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       selectedWorkspace.structuredContent.workspace_id,
       seededWorkspace.workspace_id,
     );
+    const recoveredApproval = await client.callTool({
+      name: 'get_approval_status',
+      arguments: {
+        approval_id: workspacePending.approval_id,
+        approval_nonce: workspaceApproval._meta.approval_nonce,
+      },
+    });
+    assert.equal(recoveredApproval.isError, undefined);
+    assert.equal(recoveredApproval.structuredContent.state, 'consumed');
+    assert.equal(
+      recoveredApproval.structuredContent.workspace_context,
+      selectedWorkspace.structuredContent.workspace_context,
+    );
+    const deniedStatusRead = await client.callTool({
+      name: 'get_approval_status',
+      arguments: {
+        approval_id: workspacePending.approval_id,
+        approval_nonce: 'not-the-real-card-secret-000000',
+      },
+    });
+    assert.equal(deniedStatusRead.isError, true);
 
     const result = await client.callTool({
       name: 'exec_command',

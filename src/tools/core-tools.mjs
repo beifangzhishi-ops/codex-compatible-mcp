@@ -791,6 +791,30 @@ export function registerCoreTools(registry, runtime) {
   });
 
   registry.register({
+    name: 'get_approval_status',
+    provider: 'ccm-core',
+    surfaces: { direct: true },
+    mcpMeta: { ui: { visibility: ['app'] }, 'openai/widgetAccessible': true },
+    tags: ['approval', 'status', 'app-only'],
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    description: 'App-only authenticated read of a frozen CCM approval card state. Never dispatches an action.',
+    inputSchema: {
+      approval_id: z.string().uuid(),
+      approval_nonce: z.string().min(20),
+    },
+    handler: async (args, context) => {
+      try {
+        const hostSession = context?.extra?._meta?.['openai/session'] || null;
+        return jsonResult(runtime.approvalManager.readAppStatus(
+          args.approval_id, args.approval_nonce, { hostSession },
+        ));
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  });
+
+  registry.register({
     name: 'resolve_pending_action',
     provider: 'ccm-core',
     surfaces: { direct: true },
@@ -819,19 +843,31 @@ export function registerCoreTools(registry, runtime) {
       try {
         const hostSession = context?.extra?._meta?.['openai/session'] || null;
         const pending = runtime.approvalManager.getRequest(args.approval_id);
+        let resolved;
         if (pending.kind === 'workspace') {
-          return execResult(await resolvePendingWorkspaceAction(
+          resolved = await resolvePendingWorkspaceAction(
             runtime,
             args,
             { hostSession },
-          ));
-        }
-        return execResult(
-          await runtime.processManager.resolvePendingExecution(
+          );
+        } else {
+          resolved = await runtime.processManager.resolvePendingExecution(
             args,
             { hostSession },
-          ),
-        );
+          );
+        }
+        try {
+          runtime.approvalManager.recordAppOutcome(args.approval_id, resolved);
+        } catch (receiptError) {
+          // An already-executed one-shot action must not be reported as failed.
+          runtime.audit?.({
+            component: 'approval',
+            event: 'receipt_persist_failed',
+            approval_id: args.approval_id,
+            error: String(receiptError?.message || receiptError),
+          });
+        }
+        return execResult(resolved);
       } catch (error) {
         return toolError(error);
       }

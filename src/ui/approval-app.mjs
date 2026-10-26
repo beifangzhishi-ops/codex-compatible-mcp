@@ -1,4 +1,5 @@
-export const APPROVAL_UI_URI = 'ui://ccm/approval-v1.html';
+export const APPROVAL_UI_URI = 'ui://ccm/approval-v2.html';
+export const LEGACY_APPROVAL_UI_URI = 'ui://ccm/approval-v1.html';
 
 export const APPROVAL_UI_HTML = String.raw`<!doctype html>
 <html lang="en">
@@ -101,8 +102,8 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
       <button id="copyKey" type="button">Copy key</button>
     </div>
     <div id="actions">
-      <button id="deny" type="button">Deny</button>
-      <button id="approve" type="button">Approve once</button>
+      <button id="deny" type="button" disabled>Deny</button>
+      <button id="approve" type="button" disabled>Approve once</button>
       <button id="approveAlways" type="button">Always allow in workspace</button>
     </div>
   </div>
@@ -117,6 +118,11 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
       let retryDecision = null;
       let hostCapabilities = {};
       let continuationStarted = false;
+      let bridgeInitialized = false;
+      let verified = false;
+      let finalOutcome = null;
+      let activeApprovalId = null;
+      let queryGeneration = 0;
 
       const title = document.getElementById("title");
       const justification = document.getElementById("justification");
@@ -163,10 +169,19 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
           window.openai?.toolOutput || null;
         const hidden = envelope?._meta || {};
         if (!structured) return false;
+        if (structured.approval_id && structured.approval_id === activeApprovalId) {
+          // Replayed pending data cannot undo a later, confirmed terminal result.
+          return true;
+        }
+        activeApprovalId = structured.approval_id || null;
+        queryGeneration++;
         approval = structured;
         approvalNonce = hidden.approval_nonce || null;
+        verified = false;
+        finalOutcome = null;
         contextRow.hidden = true;
         contextKey.textContent = '';
+        copyKey.textContent = 'Copy key';
         retryDecision = null;
         const workspaceAction = structured.kind === "workspace";
         title.textContent = workspaceAction
@@ -223,12 +238,12 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
           return true;
         }
         if (!structured.approval_id) return false;
-        if (!approvalNonce) {
-          setStatus("Approval token is unavailable in this host.", true);
-          approve.disabled = true;
-          approveAlways.disabled = true;
-          deny.disabled = true;
-        }
+        setStatus("Verifying approval state...");
+        approve.disabled = true;
+        approveAlways.disabled = true;
+        deny.disabled = true;
+        restoreWidgetSnapshot();
+        if (bridgeInitialized) void verifyCardState();
         updateHeight();
         return true;
       }
@@ -241,6 +256,143 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         status.textContent = text || "";
         status.dataset.error = error ? "true" : "false";
         updateHeight();
+      }
+
+      function validKey(value) {
+        return typeof value === 'string' &&
+          /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value);
+      }
+
+      function isTerminal(value) {
+        return ['consumed', 'denied', 'execution_unknown'].includes(value?.state);
+      }
+
+      function renderTerminal(value, { unverified = false } = {}) {
+        verified = false;
+        finalOutcome = value;
+        approve.disabled = true;
+        approveAlways.disabled = true;
+        deny.disabled = true;
+        contextRow.hidden = true;
+        contextKey.textContent = '';
+        const workspaceSuccess = value.kind === 'workspace' &&
+          ['select_workspace', 'register_workspace'].includes(value.operation) &&
+          value.state === 'consumed' && value.action_failed !== true &&
+          validKey(value.workspace_context);
+        if (workspaceSuccess) {
+          contextKey.textContent = value.workspace_context;
+          contextRow.hidden = false;
+        }
+        const message = value.result_unavailable
+          ? 'Approval has finished; the original outcome is no longer available.'
+          : value.state === 'denied'
+            ? 'Denied. No action was performed.'
+            : value.state === 'execution_unknown'
+              ? 'Execution outcome is unknown. Do not retry automatically.'
+              : value.action_failed
+                ? 'Approved, but the action failed.'
+                : workspaceSuccess
+                  ? 'Approved and entered the workspace.'
+                  : value.state === 'consumed'
+                    ? 'Approved action completed.'
+                    : 'Approval finished.';
+        setStatus(message + (unverified ? '\nSaved card state; server verification unavailable.' : ''));
+      }
+
+      function snapshotFor(value) {
+        return {
+          version: 1,
+          approval_id: approval?.approval_id,
+          operation_id: approval?.operation_id,
+          kind: approval?.kind,
+          operation: approval?.operation || null,
+          state: value.state,
+          action_failed: value.action_failed === true,
+          ...(value.kind === 'workspace' &&
+            ['select_workspace', 'register_workspace'].includes(value.operation) &&
+            value.state === 'consumed' && !value.action_failed &&
+            validKey(value.workspace_context)
+            ? { workspace_context: value.workspace_context } : {}),
+        };
+      }
+
+      function saveWidgetSnapshot(value) {
+        const openai = window.openai;
+        if (typeof openai?.setWidgetState !== 'function') return;
+        try { Promise.resolve(openai.setWidgetState(snapshotFor(value))).catch(() => {}); }
+        catch {}
+      }
+
+      function restoreWidgetSnapshot() {
+        const saved = window.openai?.widgetState;
+        if (!saved || saved.version !== 1 ||
+            saved.approval_id !== approval?.approval_id ||
+            saved.operation_id !== approval?.operation_id ||
+            saved.kind !== approval?.kind ||
+            saved.operation !== (approval?.operation || null) ||
+            !isTerminal(saved)) return;
+        renderTerminal(saved, { unverified: true });
+      }
+
+      async function verifyCardState() {
+        if (!bridgeInitialized || !approval?.approval_id || !approvalNonce) {
+          setStatus('Approval capability unavailable. This card cannot approve again.', true);
+          return;
+        }
+        const generation = ++queryGeneration;
+        try {
+          const result = await request('tools/call', {
+            name: 'get_approval_status',
+            arguments: {
+              approval_id: approval.approval_id,
+              approval_nonce: approvalNonce
+            }
+          }, 12000);
+          if (generation !== queryGeneration) return;
+          if (result?.isError === true || !result?.structuredContent)
+            throw new Error('Status not available');
+          const value = result.structuredContent;
+          if (value.approval_id !== approval.approval_id ||
+              value.operation_id !== approval.operation_id ||
+              value.kind !== approval.kind ||
+              (value.operation || null) !== (approval.operation || null)) {
+            throw new Error('Approval identity mismatch');
+          }
+          if (isTerminal(value)) {
+            if (value.result_unavailable && finalOutcome && isTerminal(finalOutcome)) {
+              renderTerminal(finalOutcome, { unverified: true });
+            } else {
+              renderTerminal(value);
+              if (!value.result_unavailable) saveWidgetSnapshot(value);
+            }
+          } else if (value.state === 'pending' || value.state === 'approved_retryable') {
+            // A valid nonce-authenticated Controller result is authoritative.
+            finalOutcome = null;
+            contextRow.hidden = true;
+            contextKey.textContent = '';
+            verified = true;
+            busy = false;
+            approve.disabled = false;
+            deny.disabled = false;
+            approveAlways.disabled = approval?.kind === 'workspace' ||
+              approval?.policy_persistable !== true;
+            approve.textContent = value.state === 'approved_retryable'
+              ? 'Retry approved action'
+              : approval.kind === 'workspace' ? 'Approve' : 'Approve once';
+            setStatus(value.state === 'approved_retryable'
+              ? 'Previously approved action can be retried.'
+              : 'Waiting for your decision.');
+          } else {
+            setStatus('Approval is being processed. Reopen later to check its result.');
+          }
+        } catch {
+          if (generation !== queryGeneration) return;
+          if (finalOutcome && isTerminal(finalOutcome)) {
+            renderTerminal(finalOutcome, { unverified: true });
+          } else {
+            setStatus('Approval status cannot be verified. This card cannot approve again.', true);
+          }
+        }
       }
 
       copyKey.addEventListener('click', async () => {
@@ -372,7 +524,9 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
       }
 
       async function resolve(decision) {
-        if (busy || !approval || !approvalNonce) return;
+        if (busy || !verified || finalOutcome || !approval || !approvalNonce) return;
+        verified = false;
+        queryGeneration++;
         if (approval.kind === "workspace" && decision === "approve_workspace") {
           return;
         }
@@ -412,6 +566,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
               true
             );
             setBusy(false);
+            verified = true;
             deny.disabled = false;
             return;
           }
@@ -457,14 +612,19 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
           approve.disabled = true;
           approveAlways.disabled = true;
           deny.disabled = true;
+          if (isTerminal(structured)) {
+            finalOutcome = structured;
+            saveWidgetSnapshot(structured);
+          }
           await notifyModel(decision, structured);
         } catch (error) {
-          setStatus(
-            "Approval action failed: " +
-              String(error && error.message ? error.message : error),
-            true
-          );
           setBusy(false);
+          approve.disabled = true;
+          approveAlways.disabled = true;
+          deny.disabled = true;
+          setStatus('Approval result needs verification: ' +
+            String(error?.message || error), true);
+          void verifyCardState();
         }
       }
 
@@ -515,6 +675,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
             appCapabilities: {}
           }, 5000);
           hostCapabilities = initialized?.hostCapabilities || {};
+          bridgeInitialized = true;
           post({ jsonrpc: "2.0", method: "ui/notifications/initialized" });
           if (!readInitialResult()) {
             setStatus("Waiting for approval details…");

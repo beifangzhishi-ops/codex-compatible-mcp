@@ -16,6 +16,7 @@ import { TrustedPackageScriptStore } from './trusted-package-script-store.mjs';
 import { defaultControllerStateFile } from './controller-state.mjs';
 import { WorkerQuarantinePolicy } from './worker-quarantine-policy.mjs';
 import { ControlledRestart } from './controlled-restart.mjs';
+import { ApprovalReceiptStore } from './approval-receipt-store.mjs';
 
 const installRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -46,9 +47,13 @@ export function createControllerRuntime(options = {}) {
     takeoverToken: options.workerTakeoverToken,
     quarantinePolicy: workerQuarantinePolicy,
   });
+  const approvalReceiptStore = options.approvalReceiptStore || new ApprovalReceiptStore({
+    stateFile: options.approvalReceiptStateFile || defaultControllerStateFile('approval-receipts.json'),
+  });
   const approvalManager = options.approvalManager || new ApprovalManager({
     audit,
     ttlMs: process.env.CCM_APPROVAL_TTL_MS,
+    receiptStore: approvalReceiptStore,
   });
   const execPolicyStore = options.execPolicyStore || new ExecPolicyStore({
     stateFile: options.execPolicyStateFile ||
@@ -71,6 +76,7 @@ export function createControllerRuntime(options = {}) {
     environmentRegistry,
     workerHub,
     approvalManager,
+    approvalReceiptStore,
     workspaceContextManager,
     execPolicyStore,
     trustedPackageScriptStore,

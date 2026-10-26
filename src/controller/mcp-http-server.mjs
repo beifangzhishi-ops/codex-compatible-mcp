@@ -18,6 +18,7 @@ import {
 import {
   APPROVAL_UI_HTML,
   APPROVAL_UI_URI,
+  LEGACY_APPROVAL_UI_URI,
 } from '../ui/approval-app.mjs';
 import {
   WORKSPACE_KEY_UI_HTML,
@@ -85,6 +86,20 @@ function createProtocolServer(
         mimeType: 'text/html;profile=mcp-app',
         text: APPROVAL_UI_HTML,
         _meta: { ui: { prefersBorder: true } },
+      }],
+    }),
+  );
+  // Old conversations may retain the original URI. Serve one implementation,
+  // not two diverging approval code paths.
+  server.registerResource(
+    'ccm-approval-legacy-ui',
+    LEGACY_APPROVAL_UI_URI,
+    { title: 'CCM approval (legacy URI)', mimeType: 'text/html;profile=mcp-app' },
+    async () => ({
+      contents: [{
+        uri: LEGACY_APPROVAL_UI_URI,
+        mimeType: 'text/html;profile=mcp-app',
+        text: APPROVAL_UI_HTML,
       }],
     }),
   );

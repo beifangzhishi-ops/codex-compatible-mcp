@@ -107,6 +107,7 @@ export class ApprovalManager {
     terminalRetentionMs = DEFAULT_TERMINAL_RETENTION_MS,
     now = () => Date.now(),
     audit = null,
+    receiptStore = null,
   } = {}) {
     this.ttlMs = normalizePositiveDuration(ttlMs, DEFAULT_APPROVAL_TTL_MS);
     this.terminalRetentionMs = normalizePositiveDuration(
@@ -115,6 +116,7 @@ export class ApprovalManager {
     );
     this.now = now;
     this.audit = typeof audit === 'function' ? audit : null;
+    this.receiptStore = receiptStore;
     this.requests = new Map();
   }
 
@@ -218,6 +220,51 @@ export class ApprovalManager {
     const request = this.requests.get(String(approvalId));
     if (!request) throw new Error('Unknown or expired approval_id.');
     return this.#publicRequest(request);
+  }
+
+  readAppStatus(approvalId, approvalNonce, { hostSession = null } = {}) {
+    this.#prune();
+    const request = this.requests.get(String(approvalId));
+    if (!request) {
+      const receipt = this.receiptStore?.read(approvalId, approvalNonce, hostSession);
+      if (!receipt) throw new Error('Unknown or expired approval_id.');
+      return receipt;
+    }
+    if (!secretMatches(approvalNonce, request.approvalNonceHash) ||
+        (request.hostSession && request.hostSession !== String(hostSession || ''))) {
+      throw new Error('Approval card capability is invalid.');
+    }
+    // A consumed live record also reads from the archived, outcome-aware receipt.
+    const receipt = this.receiptStore?.read(approvalId, approvalNonce, hostSession);
+    if (receipt) return receipt;
+    if (['consumed', 'denied', 'execution_unknown'].includes(request.state)) {
+      return {
+        approval_id: request.approvalId,
+        operation_id: request.operationId,
+        state: request.state,
+        kind: request.kind,
+        operation: request.kind === 'workspace' ? request.intent.operation : null,
+        approval_required: false,
+        // No archived result means a prior terminal outcome cannot be attested.
+        result_unavailable: true,
+      };
+    }
+    return {
+      approval_id: request.approvalId,
+      operation_id: request.operationId,
+      state: request.state,
+      kind: request.kind,
+      operation: request.kind === 'workspace' ? request.intent.operation : null,
+      approval_required: request.state === 'pending' || request.state === 'approved_retryable',
+    };
+  }
+
+  recordAppOutcome(approvalId, result) {
+    this.#prune();
+    const request = this.requests.get(String(approvalId));
+    if (!request || request.state !== result?.state ||
+        !['consumed', 'denied', 'execution_unknown'].includes(request.state)) return;
+    this.receiptStore?.save(request, result);
   }
 
   prepareAppApproval(approvalId, { hostSession = null } = {}) {

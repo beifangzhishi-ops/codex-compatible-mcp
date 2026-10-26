@@ -84,6 +84,9 @@ async function createApprovalAppHarness({
   messageError = null,
   contextError = null,
   alias = 'success',
+  statusResult = null,
+  widgetState = null,
+  nonce = 'secret-card-capability-1234567890',
 } = {}) {
   const calls = [];
   const elements = Object.fromEntries([
@@ -148,6 +151,16 @@ async function createApprovalAppHarness({
         return;
       }
       if (message.method === 'tools/call') {
+        if (message.params.name === 'get_approval_status') {
+          respond({ structuredContent: statusResult || {
+            approval_id: initialApproval.approval_id,
+            operation_id: initialApproval.operation_id,
+            kind: initialApproval.kind,
+            operation: initialApproval.operation || null,
+            state: 'pending',
+          } });
+          return;
+        }
         const structuredContent = toolResults[
           Math.min(toolResultIndex, toolResults.length - 1)
         ];
@@ -176,11 +189,13 @@ async function createApprovalAppHarness({
   };
 
   const openai = {
+    widgetState,
+    setWidgetState: async (value) => { openai.widgetState = value; },
     toolResponseMetadata: {
       mcp_tool_result: {
         structuredContent: initialApproval,
         _meta: {
-          approval_nonce: 'secret-card-capability-1234567890',
+          approval_nonce: nonce,
         },
       },
     },
@@ -232,11 +247,72 @@ async function createApprovalAppHarness({
   return {
     calls,
     elements,
+    openai,
     click(id) {
       elements[id].dispatch('click');
     },
+    replayInitial() {
+      for (const listener of eventListeners.get('openai:set_globals') || []) listener();
+    },
   };
 }
+
+test('reopened approved project restores the Key from read-only status, never reapproves or continues', async () => {
+  const context = '00000000-0000-4000-8000-000000000099';
+  const initial = executionApproval({ kind: 'workspace', operation: 'register_workspace' });
+  const final = terminalExecution({
+    ...initial,
+    state: 'consumed',
+    approval_required: false,
+    workspace_context: context,
+    workspace_kind: 'registered',
+    exit_code: undefined,
+  });
+  const card = await createApprovalAppHarness({ initialApproval: initial, statusResult: final });
+  await waitFor(() => card.elements.contextKey.textContent === context, 'recovered key');
+  assert.equal(card.elements.approve.disabled, true);
+  assert.equal(card.elements.deny.disabled, true);
+  card.replayInitial();
+  card.click('approve');
+  assert.equal(card.elements.contextKey.textContent, context);
+  assert.equal(card.elements.contextRow.hidden, false);
+  assert.equal(card.openai.widgetState?.workspace_context, context);
+  assert.equal(card.calls.filter(x => x.params?.name === 'resolve_pending_action').length, 0);
+  assert.equal(card.calls.filter(x => x.method === 'ui/message').length, 0);
+});
+
+test('reopened card restores matching widgetState while a status query is unavailable, but cannot approve', async () => {
+  const context = '00000000-0000-4000-8000-000000000099';
+  const initial = executionApproval({ kind: 'workspace', operation: 'select_workspace' });
+  const card = await createApprovalAppHarness({
+    initialApproval: initial,
+    nonce: null,
+    widgetState: {
+      version: 1,
+      approval_id: initial.approval_id,
+      operation_id: initial.operation_id,
+      kind: 'workspace',
+      operation: 'select_workspace',
+      state: 'consumed',
+      action_failed: false,
+      workspace_context: context,
+    },
+  });
+  assert.equal(card.elements.contextKey.textContent, context);
+  assert.equal(card.elements.approve.disabled, true);
+  card.replayInitial();
+  assert.equal(card.elements.contextKey.textContent, context);
+  card.click('approve');
+  assert.equal(card.calls.filter(x => x.params?.name === 'resolve_pending_action').length, 0);
+});
+
+test('reopened pending card requires an authenticated query before enabling approval', async () => {
+  const card = await createApprovalAppHarness({ nonce: null });
+  assert.equal(card.elements.approve.disabled, true);
+  card.click('approve');
+  assert.equal(card.calls.filter(x => x.params?.name === 'resolve_pending_action').length, 0);
+  assert.match(card.elements.status.textContent, /capability unavailable/i);
+});
 
 test('approval app keeps its capability in result _meta and resolves only the frozen action', async () => {
   const workspaceContext = '00000000-0000-4000-8000-000000000001';
@@ -522,7 +598,8 @@ test('approval app reports manual continuation when no follow-up route works', a
     /Send a message to continue/,
   );
   assert.equal(
-    harness.calls.filter((call) => call.method === 'tools/call').length,
+    harness.calls.filter((call) => call.method === 'tools/call' &&
+      call.params?.name === 'resolve_pending_action').length,
     1,
   );
 });
@@ -550,7 +627,8 @@ test('approval app does not trigger a follow-up when model context handoff fails
     0,
   );
   assert.equal(
-    harness.calls.filter((call) => call.method === 'tools/call').length,
+    harness.calls.filter((call) => call.method === 'tools/call' &&
+      call.params?.name === 'resolve_pending_action').length,
     1,
   );
 });
@@ -592,7 +670,8 @@ test('approval app does not continue while an approved action is retryable', asy
     'follow-up after successful retry',
   );
   assert.equal(
-    harness.calls.filter((call) => call.method === 'tools/call').length,
+    harness.calls.filter((call) => call.method === 'tools/call' &&
+      call.params?.name === 'resolve_pending_action').length,
     2,
   );
   assert.equal(
@@ -691,7 +770,8 @@ test('denial sends one continuation without introducing another resolver call', 
   );
 
   const resolverCalls = harness.calls.filter(
-    (call) => call.method === 'tools/call',
+    (call) => call.method === 'tools/call' &&
+      call.params?.name === 'resolve_pending_action',
   );
   assert.equal(resolverCalls.length, 1);
   assert.equal(resolverCalls[0].params.arguments.decision, 'deny');
