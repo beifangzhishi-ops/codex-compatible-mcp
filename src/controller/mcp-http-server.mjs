@@ -19,6 +19,7 @@ import {
   APPROVAL_UI_HTML,
   APPROVAL_UI_URI,
   LEGACY_APPROVAL_UI_URI,
+  PREVIOUS_APPROVAL_UI_URI,
 } from '../ui/approval-app.mjs';
 import {
   WORKSPACE_KEY_UI_HTML,
@@ -98,6 +99,19 @@ function createProtocolServer(
     async () => ({
       contents: [{
         uri: LEGACY_APPROVAL_UI_URI,
+        mimeType: 'text/html;profile=mcp-app',
+        text: APPROVAL_UI_HTML,
+      }],
+    }),
+  );
+
+  server.registerResource(
+    'ccm-approval-v2-ui',
+    PREVIOUS_APPROVAL_UI_URI,
+    { title: 'CCM approval (previous URI)', mimeType: 'text/html;profile=mcp-app' },
+    async () => ({
+      contents: [{
+        uri: PREVIOUS_APPROVAL_UI_URI,
         mimeType: 'text/html;profile=mcp-app',
         text: APPROVAL_UI_HTML,
       }],

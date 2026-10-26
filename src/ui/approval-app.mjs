@@ -1,4 +1,5 @@
-export const APPROVAL_UI_URI = 'ui://ccm/approval-v2.html';
+export const APPROVAL_UI_URI = 'ui://ccm/approval-v3.html';
+export const PREVIOUS_APPROVAL_UI_URI = 'ui://ccm/approval-v2.html';
 export const LEGACY_APPROVAL_UI_URI = 'ui://ccm/approval-v1.html';
 
 export const APPROVAL_UI_HTML = String.raw`<!doctype html>
@@ -675,10 +676,16 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
             appCapabilities: {}
           }, 5000);
           hostCapabilities = initialized?.hostCapabilities || {};
+          // Some hosts deliver openai:set_globals before ui/initialize finishes.
+          // The same approval_id then makes readInitialResult() a no-op; in
+          // that case the initial verification must start here instead.
+          const alreadyLoaded = Boolean(activeApprovalId);
           bridgeInitialized = true;
           post({ jsonrpc: "2.0", method: "ui/notifications/initialized" });
           if (!readInitialResult()) {
             setStatus("Waiting for approval details…");
+          } else if (alreadyLoaded) {
+            void verifyCardState();
           }
         } catch (error) {
           setStatus(

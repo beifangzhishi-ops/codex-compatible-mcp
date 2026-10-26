@@ -16,6 +16,7 @@ import {
   APPROVAL_UI_HTML,
   APPROVAL_UI_URI,
   LEGACY_APPROVAL_UI_URI,
+  PREVIOUS_APPROVAL_UI_URI,
 } from '../src/ui/approval-app.mjs';
 import { WORKSPACE_KEY_UI_HTML, WORKSPACE_KEY_UI_URI } from '../src/ui/workspace-key-app.mjs';
 import {
@@ -310,6 +311,8 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(approvalResource.contents[0]._meta.ui.prefersBorder, true);
     const legacyApprovalResource = await client.readResource({ uri: LEGACY_APPROVAL_UI_URI });
     assert.equal(legacyApprovalResource.contents[0].text, APPROVAL_UI_HTML);
+    const previousApprovalResource = await client.readResource({ uri: PREVIOUS_APPROVAL_UI_URI });
+    assert.equal(previousApprovalResource.contents[0].text, APPROVAL_UI_HTML);
     const fileResource = await client.readResource({ uri: PUBLISHED_FILE_UI_URI });
     assert.equal(fileResource.contents[0].text, PUBLISHED_FILE_UI_HTML);
     assert.deepEqual(fileResource.contents[0]._meta.ui.csp.resourceDomains, ['https://example.test']);

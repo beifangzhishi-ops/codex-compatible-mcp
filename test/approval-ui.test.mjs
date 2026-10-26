@@ -87,6 +87,7 @@ async function createApprovalAppHarness({
   statusResult = null,
   widgetState = null,
   nonce = 'secret-card-capability-1234567890',
+  globalsBeforeInitialize = false,
 } = {}) {
   const calls = [];
   const elements = Object.fromEntries([
@@ -139,7 +140,7 @@ async function createApprovalAppHarness({
       };
 
       if (message.method === 'ui/initialize') {
-        respond({
+        const initializedResult = {
           protocolVersion: '2026-01-26',
           hostCapabilities,
           hostContext: {},
@@ -147,7 +148,15 @@ async function createApprovalAppHarness({
             name: 'test-host',
             version: '1',
           },
-        });
+        };
+        if (globalsBeforeInitialize) {
+          queueMicrotask(() => {
+            for (const listener of eventListeners.get('openai:set_globals') || []) listener();
+            respond(initializedResult);
+          });
+        } else {
+          respond(initializedResult);
+        }
         return;
       }
       if (message.method === 'tools/call') {
@@ -279,6 +288,40 @@ test('reopened approved project restores the Key from read-only status, never re
   assert.equal(card.openai.widgetState?.workspace_context, context);
   assert.equal(card.calls.filter(x => x.params?.name === 'resolve_pending_action').length, 0);
   assert.equal(card.calls.filter(x => x.method === 'ui/message').length, 0);
+});
+
+test('web-style globals before initialize still trigger one authenticated terminal lookup', async () => {
+  const context = '00000000-0000-4000-8000-000000000088';
+  const initial = executionApproval({ kind: 'workspace', operation: 'select_workspace' });
+  const card = await createApprovalAppHarness({
+    globalsBeforeInitialize: true,
+    initialApproval: initial,
+    statusResult: {
+      approval_id: initial.approval_id,
+      operation_id: initial.operation_id,
+      kind: initial.kind,
+      operation: initial.operation,
+      state: 'consumed',
+      workspace_context: context,
+      workspace_kind: 'registered',
+    },
+  });
+  await waitFor(() => card.elements.contextKey.textContent === context, 'terminal lookup after early globals');
+  assert.equal(card.elements.contextRow.hidden, false);
+  assert.equal(card.elements.approve.disabled, true);
+  assert.equal(card.elements.deny.disabled, true);
+  assert.equal(card.calls.filter((call) => call.params?.name === 'get_approval_status').length, 1);
+  assert.equal(card.calls.filter((call) => call.params?.name === 'resolve_pending_action').length, 0);
+  assert.equal(card.calls.filter((call) => call.method === 'ui/message').length, 0);
+});
+
+test('web-style globals before initialize verify a pending card without duplicating queries', async () => {
+  const card = await createApprovalAppHarness({ globalsBeforeInitialize: true });
+  await waitFor(() => card.elements.status.textContent === 'Waiting for your decision.', 'pending verification after early globals');
+  assert.equal(card.elements.approve.disabled, false);
+  assert.equal(card.elements.deny.disabled, false);
+  assert.equal(card.calls.filter((call) => call.params?.name === 'get_approval_status').length, 1);
+  assert.equal(card.calls.filter((call) => call.params?.name === 'resolve_pending_action').length, 0);
 });
 
 test('reopened card restores matching widgetState while a status query is unavailable, but cannot approve', async () => {
