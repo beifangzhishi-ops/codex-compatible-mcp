@@ -120,7 +120,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     );
     assert.match(
       client.getInstructions(),
-      /Do NOT call select_workspace, register_workspace, or create_projectless_context merely to obtain another handle/i,
+      /Do NOT call select_workspace, register_workspace, or create_projectless_handle merely to obtain another handle/i,
     );
     assert.match(
       client.getInstructions(),
@@ -132,7 +132,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     );
     assert.match(
       client.getInstructions(),
-      /user's intended target.*wait for the frozen action.*do not use projectless context/i,
+      /user's intended target.*wait for the frozen action.*do not use projectless workspace/i,
     );
     assert.match(
       client.getInstructions(),
@@ -313,7 +313,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(
       Object.hasOwn(
         nestedProjectDiscovery.environments[0],
-        'projectless_contexts',
+        'projectless_workspaces',
       ),
       false,
     );
@@ -337,7 +337,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       name: 'exec',
       arguments: {
         calls: [{
-          tool: 'ccm.create_projectless_context',
+          tool: 'ccm.create_projectless_handle',
           arguments: {},
         }],
         yield_time_ms: 1000,
@@ -362,7 +362,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       completeProjectDiscovery.structuredContent.calls[0].result.structured_content;
     assert.equal(
       nestedCompleteProjectDiscovery.environments[0]
-        .projectless_contexts[0].projectless_id,
+        .projectless_workspaces[0].projectless_id,
       projectlessResult.workspace_id,
     );
 

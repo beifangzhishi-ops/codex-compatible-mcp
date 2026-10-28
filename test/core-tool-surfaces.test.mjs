@@ -67,7 +67,7 @@ function runtimeStub() {
             }],
             ...(params.all
               ? {
-                  projectless_contexts: [{
+                  projectless_workspaces: [{
                     projectless_id: 'projectless-' + environmentId,
                     root: 'C:\\temp\\' + environmentId,
                     created_at: '2026-09-24T00:00:00.000Z',
@@ -202,15 +202,15 @@ test('core tool surface exposes registered workspace handle cards and centralize
   assert.equal(registry.get('list_projects').surfaces.deferred, true);
   assert.equal(registry.get('list_projects').surfaces.codeMode, true);
   assert.match(
-    registry.get('create_projectless_context').description,
+    registry.get('create_projectless_handle').description,
     /absolute paths outside the projectless root/,
   );
   assert.match(
-    registry.get('create_projectless_context').description,
-    /current intended real project.*wait.*instead of creating projectless context/i,
+    registry.get('create_projectless_handle').description,
+    /current intended real project.*wait.*instead of creating projectless workspace/i,
   );
   assert.match(
-    registry.get('create_projectless_context').description,
+    registry.get('create_projectless_handle').description,
     /changes to a different real project.*older pending workspace action does not block/i,
   );
   assert.match(
@@ -223,7 +223,7 @@ test('core tool surface exposes registered workspace handle cards and centralize
   );
   assert.match(
     registry.get('select_workspace').description,
-    /user's intended target.*do not retry the same target.*projectless context/i,
+    /user's intended target.*do not retry the same target.*projectless workspace/i,
   );
   assert.match(
     registry.get('select_workspace').description,
@@ -244,7 +244,7 @@ test('core tool surface exposes registered workspace handle cards and centralize
   assert.equal(Object.hasOwn(registry.get('exec_command').inputSchema, 'environment_id'), false);
   assert.match(
     registry.get('register_workspace').description,
-    /user's intended target.*do not retry the same target.*projectless context/i,
+    /user's intended target.*do not retry the same target.*projectless workspace/i,
   );
   assert.match(
     registry.get('register_workspace').description,
@@ -261,7 +261,7 @@ test('core tool surface exposes registered workspace handle cards and centralize
   );
   assert.match(
     registry.get('exec_command').description,
-    /current intended real project.*wait for that action.*instead of bypassing it with projectless context/i,
+    /current intended real project.*wait for that action.*instead of bypassing it with projectless workspace/i,
   );
   assert.match(
     registry.get('exec_command').description,
@@ -278,7 +278,7 @@ test('core tool surface exposes registered workspace handle cards and centralize
 
   for (const name of [
     'list_projects',
-    'create_projectless_context',
+    'create_projectless_handle',
   ]) {
     const tool = registry.get(name);
     assert.equal(tool.surfaces.direct, false, name + ' should not be direct');
@@ -305,7 +305,7 @@ test('core tool surface exposes registered workspace handle cards and centralize
   );
   assert.equal(projects.structuredContent.environments[0].projects[0].project_id, 'primary-project');
   assert.equal(
-    Object.hasOwn(projects.structuredContent.environments[0], 'projectless_contexts'),
+    Object.hasOwn(projects.structuredContent.environments[0], 'projectless_workspaces'),
     false,
   );
   assert.equal(projects.structuredContent.environments[0].sandbox_read_scope, 'host');
@@ -321,7 +321,7 @@ test('core tool surface exposes registered workspace handle cards and centralize
 
   const allProjects = await registry.get('list_projects').handler({ all: true });
   assert.equal(
-    allProjects.structuredContent.environments[0].projectless_contexts[0].projectless_id,
+    allProjects.structuredContent.environments[0].projectless_workspaces[0].projectless_id,
     'projectless-primary',
   );
 
@@ -369,13 +369,13 @@ test('core tool surface exposes registered workspace handle cards and centralize
   });
   assert.equal(
     partialAllProjects.structuredContent.environments[0]
-      .projectless_contexts[0].projectless_id,
+      .projectless_workspaces[0].projectless_id,
     'projectless-primary',
   );
   assert.equal(
     Object.hasOwn(
       partialAllProjects.structuredContent.environments[1],
-      'projectless_contexts',
+      'projectless_workspaces',
     ),
     false,
   );
@@ -385,7 +385,7 @@ test('core tool surface exposes registered workspace handle cards and centralize
   assert.equal(strictProjects.isError, true);
   assert.match(strictProjects.content[0].text, /Unknown Remote Worker method/);
 
-  const created = await registry.get('create_projectless_context').handler({
+  const created = await registry.get('create_projectless_handle').handler({
     environment_id: 'noha',
   });
   assert.equal(created.structuredContent.environment_id, 'noha');
@@ -431,7 +431,7 @@ test('core tool surface exposes registered workspace handle cards and centralize
   );
   assert.match(
     workspacePending.structuredContent.instruction,
-    /do not retry the same target.*projectless context to bypass it/i,
+    /do not retry the same target.*projectless workspace to bypass it/i,
   );
   assert.match(
     workspacePending.structuredContent.instruction,
@@ -460,12 +460,12 @@ test('core tool surface exposes registered workspace handle cards and centralize
     );
 
     const search = await registry.get('tool_search').handler({
-      query: 'projectless context',
+      query: 'projectless workspace',
       limit: 5,
     });
     assert.ok(
       search.structuredContent.tools.some(
-        (tool) => tool.qualified_name === 'ccm.create_projectless_context',
+        (tool) => tool.qualified_name === 'ccm.create_projectless_handle',
       ),
     );
 
@@ -481,7 +481,7 @@ test('core tool surface exposes registered workspace handle cards and centralize
 
     const projectless = await registry.get('exec').handler({
       calls: [{
-        tool: 'ccm.create_projectless_context',
+        tool: 'ccm.create_projectless_handle',
         arguments: { environment_id: 'noha' },
       }],
       yield_time_ms: 1000,
@@ -502,7 +502,7 @@ test('core tool surface exposes registered workspace handle cards and centralize
       nestedProjects.structuredContent.calls[0].result.structured_content;
     assert.equal(nestedProjectResult.environments[0].id, 'noha');
     assert.equal(
-      nestedProjectResult.environments[0].projectless_contexts[0].projectless_id,
+      nestedProjectResult.environments[0].projectless_workspaces[0].projectless_id,
       'projectless-noha',
     );
 
@@ -543,7 +543,7 @@ test('core tool surface exposes registered workspace handle cards and centralize
     );
     assert.match(
       registerPending.instruction,
-      /do not retry the same target.*projectless context to bypass it/i,
+      /do not retry the same target.*projectless workspace to bypass it/i,
     );
     assert.match(
       registerPending.instruction,

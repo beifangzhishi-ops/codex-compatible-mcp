@@ -23,13 +23,13 @@ test('authenticated terminal receipt survives Controller restart and active Map 
     });
     manager.claimAppWorkspace(pending.approval_id, approvalNonce, 'conversation-a');
     const consumed = manager.markAppWorkspaceConsumed(pending.approval_id);
-    const key = '00000000-0000-4000-8000-000000000099';
+    const handle = '00000000-0000-4000-8000-000000000099';
     manager.recordAppOutcome(pending.approval_id, {
-      ...consumed, workspace_handle: key, workspace_kind: 'registered',
+      ...consumed, workspace_handle: handle, workspace_kind: 'registered',
     });
     assert.equal(manager.readAppStatus(pending.approval_id, approvalNonce, {
       hostSession: 'conversation-a',
-    }).workspace_handle, key);
+    }).workspace_handle, handle);
 
     time += 200;
     const recovered = new ApprovalManager({
@@ -40,7 +40,7 @@ test('authenticated terminal receipt survives Controller restart and active Map 
       hostSession: 'conversation-a',
     });
     assert.equal(status.state, 'consumed');
-    assert.equal(status.workspace_handle, key);
+    assert.equal(status.workspace_handle, handle);
     assert.equal(status.approval_required, false);
     assert.equal(status.operation, 'register_workspace');
     assert.equal(Object.hasOwn(status, 'nonce_hash'), false);
@@ -56,7 +56,7 @@ test('authenticated terminal receipt survives Controller restart and active Map 
   }
 });
 
-test('terminal receipts never publish a Key for failures, unregister or execution', async () => {
+test('terminal receipts never publish a workspace handle for failures, unregister or execution', async () => {
   const manager = new ApprovalManager({ receiptStore: new ApprovalReceiptStore() });
   for (const operation of ['select_workspace', 'unregister_workspace']) {
     const pending = manager.requestWorkspaceAction(operation, {

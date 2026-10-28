@@ -236,7 +236,7 @@ export class RemoteWorkerClient {
           ),
           ...(params.all
             ? {
-                projectless_contexts:
+                projectless_workspaces:
                   this.runtime.workspaceRegistry.listProjectless().map(
                     (workspace) => ({
                       projectless_id: workspace.workspace_id,

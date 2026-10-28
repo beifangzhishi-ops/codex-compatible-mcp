@@ -25,21 +25,13 @@ export class ApprovalReceiptStore {
     this.receipts = new Map();
     if (this.stateFile && fs.existsSync(this.stateFile)) {
       const data = JSON.parse(fs.readFileSync(this.stateFile, 'utf8').replace(/^\uFEFF/, ''));
-      let migrated = false;
       for (const receipt of data?.receipts || []) {
         if (receipt && typeof receipt.approval_id === 'string' &&
             Number.isFinite(receipt.saved_at) && receipt.saved_at + this.retentionMs > this.now()) {
-          const value = { ...receipt };
-          if (typeof value.workspace_context === 'string') {
-            value.workspace_handle = value.workspace_context;
-            delete value.workspace_context;
-            migrated = true;
-          }
-          this.receipts.set(value.approval_id, value);
+          this.receipts.set(receipt.approval_id, receipt);
         }
       }
       this.#prune();
-      if (migrated) this.#persist();
     }
   }
 
@@ -82,7 +74,7 @@ export class ApprovalReceiptStore {
       state: result.state,
       action_failed: result.action_failed === true,
       decision: result.state === 'denied' ? 'deny' : 'approve',
-      // Never store execution output, command text, or a projectless context.
+      // Never store execution output, command text, or a projectless workspace.
       ...(request.kind === 'workspace' &&
           ['select_workspace', 'register_workspace'].includes(request.intent.operation) &&
           result.state === 'consumed' && !result.action_failed &&

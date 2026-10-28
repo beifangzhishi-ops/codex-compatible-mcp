@@ -28,13 +28,10 @@ export class WorkspaceHandleManager {
   }
 
   #load() {
-    if (!this.stateFile) return;
-    const previousFile = path.join(path.dirname(this.stateFile), 'workspace-contexts.json');
-    const migrate = !fs.existsSync(this.stateFile) && fs.existsSync(previousFile);
-    if (!migrate && !fs.existsSync(this.stateFile)) return;
-    const text = fs.readFileSync(migrate ? previousFile : this.stateFile, 'utf8').replace(/^\uFEFF/, '');
+    if (!this.stateFile || !fs.existsSync(this.stateFile)) return;
+    const text = fs.readFileSync(this.stateFile, 'utf8').replace(/^\uFEFF/, '');
     const parsed = JSON.parse(text);
-    for (const value of migrate ? (parsed?.contexts || []) : (parsed?.handles || [])) {
+    for (const value of parsed?.handles || []) {
       if (!value?.id || !value?.environment_id || !value?.workspace_id ||
           !value?.kind || !value?.root) continue;
       this.handles.set(String(value.id), {
@@ -46,7 +43,6 @@ export class WorkspaceHandleManager {
         createdAt: String(value.created_at || new Date().toISOString()),
       });
     }
-    if (migrate) this.#persist();
   }
 
   #persist() {

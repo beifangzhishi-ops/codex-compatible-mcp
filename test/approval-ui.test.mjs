@@ -266,7 +266,7 @@ async function createApprovalAppHarness({
   };
 }
 
-test('reopened approved project restores the Key from read-only status, never reapproves or continues', async () => {
+test('reopened approved project restores the workspace handle from read-only status, never reapproves or continues', async () => {
   const context = '00000000-0000-4000-8000-000000000099';
   const initial = executionApproval({ kind: 'workspace', operation: 'register_workspace' });
   const final = terminalExecution({
@@ -278,7 +278,7 @@ test('reopened approved project restores the Key from read-only status, never re
     exit_code: undefined,
   });
   const card = await createApprovalAppHarness({ initialApproval: initial, statusResult: final });
-  await waitFor(() => card.elements.handleElement.textContent === context, 'recovered key');
+  await waitFor(() => card.elements.handleElement.textContent === context, 'recovered handle');
   assert.equal(card.elements.approve.disabled, true);
   assert.equal(card.elements.deny.disabled, true);
   card.replayInitial();
@@ -763,7 +763,7 @@ test('workspace approval publishes its workspace handle before one follow-up', a
   );
 });
 
-test('workspace key is not shown for denial, failure or absent context', async () => {
+test('workspace handle is not shown for denial, failure or absent context', async () => {
   const failed = [
     { state: 'denied', workspace_handle: '00000000-0000-4000-8000-000000000099' },
     { state: 'consumed', action_failed: true, workspace_handle: '00000000-0000-4000-8000-000000000099' },
@@ -782,7 +782,7 @@ test('workspace key is not shown for denial, failure or absent context', async (
   }
 });
 
-test('successful workspace key remains visible even when host continuation fails', async () => {
+test('successful workspace handle remains visible even when host continuation fails', async () => {
   const workspaceHandle = '00000000-0000-4000-8000-000000000099';
   const harness = await createApprovalAppHarness({
     contextError: 'host unavailable',
