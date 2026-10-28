@@ -20,7 +20,7 @@ $action=New-ScheduledTaskAction -Execute "$env:WINDIR\System32\wscript.exe" -Arg
 $trigger=New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $trigger.Delay='PT1M'
 $settings=New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -RestartCount 10 -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-$principal=New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+$principal=New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Highest
 
 Register-ScheduledTask -TaskName 'CCM Selfhost Gateway' -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
 Write-Output 'Installed scheduled task: CCM Selfhost Gateway'
