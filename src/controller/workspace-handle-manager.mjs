@@ -2,9 +2,9 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-function publicContext(record) {
+function publicHandle(record) {
   return {
-    workspace_context: record.id,
+    workspace_handle: record.id,
     environment_id: record.environmentId,
     workspace_id: record.workspaceId,
     workspace_kind: record.kind,
@@ -13,28 +13,31 @@ function publicContext(record) {
   };
 }
 
-export class WorkspaceContextManager {
+export class WorkspaceHandleManager {
   constructor({ environmentRegistry, workerHub, stateFile = null } = {}) {
     if (!environmentRegistry || !workerHub) {
       throw new Error(
-        'WorkspaceContextManager requires environmentRegistry and workerHub.',
+        'WorkspaceHandleManager requires environmentRegistry and workerHub.',
       );
     }
     this.environmentRegistry = environmentRegistry;
     this.workerHub = workerHub;
     this.stateFile = stateFile || null;
-    this.contexts = new Map();
+    this.handles = new Map();
     this.#load();
   }
 
   #load() {
-    if (!this.stateFile || !fs.existsSync(this.stateFile)) return;
-    const text = fs.readFileSync(this.stateFile, 'utf8').replace(/^\uFEFF/, '');
+    if (!this.stateFile) return;
+    const previousFile = path.join(path.dirname(this.stateFile), 'workspace-contexts.json');
+    const migrate = !fs.existsSync(this.stateFile) && fs.existsSync(previousFile);
+    if (!migrate && !fs.existsSync(this.stateFile)) return;
+    const text = fs.readFileSync(migrate ? previousFile : this.stateFile, 'utf8').replace(/^\uFEFF/, '');
     const parsed = JSON.parse(text);
-    for (const value of parsed?.contexts || []) {
+    for (const value of migrate ? (parsed?.contexts || []) : (parsed?.handles || [])) {
       if (!value?.id || !value?.environment_id || !value?.workspace_id ||
           !value?.kind || !value?.root) continue;
-      this.contexts.set(String(value.id), {
+      this.handles.set(String(value.id), {
         id: String(value.id),
         environmentId: String(value.environment_id),
         workspaceId: String(value.workspace_id),
@@ -43,14 +46,15 @@ export class WorkspaceContextManager {
         createdAt: String(value.created_at || new Date().toISOString()),
       });
     }
+    if (migrate) this.#persist();
   }
 
   #persist() {
     if (!this.stateFile) return;
     fs.mkdirSync(path.dirname(this.stateFile), { recursive: true });
     const payload = {
-      version: 1,
-      contexts: [...this.contexts.values()].map((record) => ({
+      version: 2,
+      handles: [...this.handles.values()].map((record) => ({
         id: record.id,
         environment_id: record.environmentId,
         workspace_id: record.workspaceId,
@@ -75,9 +79,9 @@ export class WorkspaceContextManager {
       root: String(workspace.root),
       createdAt: new Date().toISOString(),
     };
-    this.contexts.set(record.id, record);
+    this.handles.set(record.id, record);
     this.#persist();
-    return publicContext(record);
+    return publicHandle(record);
   }
 
   async createProjectless(environmentId = null) {
@@ -97,30 +101,30 @@ export class WorkspaceContextManager {
 
   revokeRegistered(environmentId, workspaceId) {
     const removed = [];
-    for (const [id, record] of this.contexts) {
+    for (const [id, record] of this.handles) {
       if (record.kind === 'registered' &&
           record.environmentId === environmentId &&
           record.workspaceId === workspaceId) {
         removed.push([id, record]);
-        this.contexts.delete(id);
+        this.handles.delete(id);
       }
     }
     try {
       this.#persist();
     } catch (error) {
-      for (const [id, record] of removed) this.contexts.set(id, record);
+      for (const [id, record] of removed) this.handles.set(id, record);
       throw error;
     }
     return removed.length;
   }
 
-  resolve(contextId) {
-    const id = String(contextId || '');
-    const record = this.contexts.get(id);
+  resolve(handleId) {
+    const id = String(handleId || '');
+    const record = this.handles.get(id);
     if (!record) {
-      throw new Error('Unknown or expired workspace_context: ' + id);
+      throw new Error('Unknown or expired workspace_handle: ' + id);
     }
-    return publicContext(record);
+    return publicHandle(record);
   }
 
   close() {

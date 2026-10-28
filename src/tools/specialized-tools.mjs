@@ -139,14 +139,14 @@ function toolPath(relativePath) {
 }
 
 async function run(runtime, args, command) {
-  if (!runtime.workspaceContextManager) {
-    throw new Error('Workspace context manager is unavailable.');
+  if (!runtime.workspaceHandleManager) {
+    throw new Error('Workspace handle manager is unavailable.');
   }
-  const context = await runtime.workspaceContextManager.createProjectless(
+  const context = await runtime.workspaceHandleManager.createProjectless(
     args.environment_id,
   );
   return runtime.processManager.execCommand({
-    workspace_context: context.workspace_context,
+    workspace_handle: context.workspace_handle,
     cmd: command,
     yield_time_ms: args.yield_time_ms,
     max_output_tokens: args.max_output_tokens,
@@ -172,8 +172,8 @@ export function registerSpecializedTools(registry, runtime) {
     description: [
       'Publish one Worker file as a temporary HTTPS download link (up to 72 hours), and display one MCP App card in chat. PNG/JPEG/WebP show the image, UTF-8 text/Markdown/JSON/code show a bounded scrollable preview with a full-text link, and other formats show the filename and download link. This is not a native ChatGPT attachment.',
       'When a user asks to create a PPT, PDF, image, report or other artifact, you may proactively publish the finished result and useful preview images for the user without a separate request to send it. Stage previews are permitted and further CCM work may continue after publishing. Do not publish files merely for model-side inspection.',
-      'workspace_context is required and determines the Worker. Relative paths are resolved from that context root; absolute paths remain absolute on the selected Worker.',
-      'For a genuinely projectless task, automatically obtain a projectless context first through ccm.create_projectless_context; do not ask the user to choose or register a temporary directory. If select_workspace or register_workspace is awaiting approval for the intended real project, wait for that action to resolve and use its registered workspace_context instead.',
+      'workspace_handle is required and determines the Worker. Relative paths are resolved from that context root; absolute paths remain absolute on the selected Worker.',
+      'For a genuinely projectless task, automatically obtain a projectless context first through ccm.create_projectless_context; do not ask the user to choose or register a temporary directory. If select_workspace or register_workspace is awaiting approval for the intended real project, wait for that action to resolve and use its registered workspace_handle instead.',
       'view_image is only for model-side image inspection. One publication creates one useful file card; images fit inside the card, text has a compact scrollable preview and a browser full-text link, and other files show a download link. Avoid publishing unnecessary intermediate files. PPT/PDF require separately rendered images for visual page preview.',
       'The original bytes are preserved. Publish one file at a time, sequentially; public links are bearer capabilities and anyone possessing them can download during their lifetime.',
     ].join('\n\n'),
@@ -181,14 +181,14 @@ export function registerSpecializedTools(registry, runtime) {
       path: z.string().min(1).describe(
         'Exactly one Worker file to publish for the user. Relative paths resolve from the selected context root; absolute paths remain absolute. Publish multiple files sequentially.',
       ),
-      workspace_context: z.string().uuid().describe(
-        'Existing workspace context used to determine the Worker that owns the file.',
+      workspace_handle: z.string().uuid().describe(
+        'Existing workspace handle used to determine the Worker that owns the file.',
       ),
     },
     handler: async (args) => {
       try {
         const value = await runtime.fileService.sendFile({
-          workspace_context: args.workspace_context,
+          workspace_handle: args.workspace_handle,
           path: args.path,
         });
         return fileResourceResult(
@@ -214,11 +214,11 @@ export function registerSpecializedTools(registry, runtime) {
     },
     supportsParallel: false,
     description: [
-      'Import exactly one ChatGPT file into the Worker selected by workspace_context; multiple imports must be sequential.',
+      'Import exactly one ChatGPT file into the Worker selected by workspace_handle; multiple imports must be sequential.',
       'For an ordinary conversation attachment, bind it through exec\'s top-level file parameter, then call ccm-extra.import_chatgpt_file once; exec injects the resolved native file object into this nested call.',
       'For a ChatGPT Library file, first materialize the exact Library object as raw_file with ChatGPT Files, then bind that materialized file through top-level exec.file and call ccm-extra.import_chatgpt_file once.',
       'Do not pass a Library/file ID, ref, or URI as nested arguments.file.',
-      'workspace_context is required and determines the Worker and context root. Imports write only inside that root. destination must be relative; absolute paths and workspace escapes are rejected.',
+      'workspace_handle is required and determines the Worker and context root. Imports write only inside that root. destination must be relative; absolute paths and workspace escapes are rejected.',
       'If destination is omitted, the sanitized ChatGPT file_name is used at the context root. Existing files are not replaced unless overwrite=true.',
       'The Worker downloads the temporary ChatGPT URL directly; CCM does not route the file bytes through BMG or the Controller file-transfer cache.',
     ].join('\\n\\n'),
@@ -231,8 +231,8 @@ export function registerSpecializedTools(registry, runtime) {
       }).strict().describe(
         'Exactly one ChatGPT file object. For multiple files, invoke import_chatgpt_file sequentially once per file; do not call in parallel.',
       ),
-      workspace_context: z.string().uuid().describe(
-        'Existing workspace context used to determine the target Worker and context root.',
+      workspace_handle: z.string().uuid().describe(
+        'Existing workspace handle used to determine the target Worker and context root.',
       ),
       destination: z.string().min(1).optional().describe(
         'Optional path relative to the selected context root. Absolute paths and workspace escapes are rejected. Defaults to the sanitized ChatGPT file_name.',
@@ -244,7 +244,7 @@ export function registerSpecializedTools(registry, runtime) {
     handler: async (args) => {
       try {
         const value = await runtime.fileService.receiveFile({
-          workspace_context: args.workspace_context,
+          workspace_handle: args.workspace_handle,
           file: args.file,
           destination: args.destination,
           overwrite: args.overwrite === true,
@@ -377,7 +377,7 @@ export function registerSpecializedTools(registry, runtime) {
       'Upload one or more files through the logged-in Quark Cloud Drive desktop client on the selected Windows Remote Worker.',
       'When the user asks to upload known local files to Quark Cloud Drive, discover this capability through tool_search and invoke it through exec after resolving the intended local paths.',
       'The bundled WCM-derived helper uses Quark Desktop local APIs and its in-memory WSG/account mapping. It does not print or persist account secrets.',
-      'By default it waits until every upload reports completion, 100% progress, and matching local/remote sizes. Long uploads may return a live session; poll that session through exec with nested ccm.write_stdin, reusing the returned workspace_context and session_id.',
+      'By default it waits until every upload reports completion, 100% progress, and matching local/remote sizes. Long uploads may return a live session; poll that session through exec with nested ccm.write_stdin, reusing the returned workspace_handle and session_id.',
       'Current implementation accepts files only, not directories.',
     ].join('\n\n'),
     inputSchema: {
@@ -451,7 +451,7 @@ export function registerSpecializedTools(registry, runtime) {
     description: [
       'Download signed Bilibili DASH video and audio URLs on a Windows Remote Worker and remux them losslessly with ffmpeg.',
       'Use an authenticated browser/BMG session to obtain the Bilibili playurl response and select the desired permitted video/audio representations first. Then pass those short-lived signed URLs here. CCM does not export browser cookies or bypass Bilibili account/quality permissions.',
-      'The resulting media is remuxed with ffmpeg -c copy. Long downloads may return a live session; poll that session through exec with nested ccm.write_stdin, reusing the returned workspace_context and session_id.',
+      'The resulting media is remuxed with ffmpeg -c copy. Long downloads may return a live session; poll that session through exec with nested ccm.write_stdin, reusing the returned workspace_handle and session_id.',
     ].join('\n\n'),
     inputSchema: {
       video_url: z.string().url().describe(

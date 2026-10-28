@@ -20,21 +20,21 @@ function fakeRuntime() {
         };
       },
     },
-    workspaceContextManager: {
+    workspaceHandleManager: {
       async createProjectless(environmentId = null) {
         const context = {
-          workspace_context: '00000000-0000-4000-8000-000000000001',
+          workspace_handle: '00000000-0000-4000-8000-000000000001',
           environment_id: environmentId || 'windows-worker',
           workspace_id: 'projectless-test',
           workspace_kind: 'projectless',
           workspace_root: 'C:\\temp\\projectless-test',
         };
-        contexts.set(context.workspace_context, context);
+        contexts.set(context.workspace_handle, context);
         return context;
       },
-      resolve(contextId) {
-        return contexts.get(contextId) || {
-          workspace_context: contextId,
+      resolve(handleId) {
+        return contexts.get(handleId) || {
+          workspace_handle: handleId,
           environment_id: 'worker-a',
           workspace_id: 'projectless-test',
           workspace_kind: 'projectless',
@@ -108,7 +108,7 @@ test('publish_worker_file is Direct + Code Mode and yields an HTTPS URL through 
   assert.match(publish.description, /proactively publish/i);
   assert.equal(publish.supportsParallel, false);
   assert.equal(registry.get('ccm-extra.send_file'), null);
-  const args = { workspace_context: '00000000-0000-4000-8000-000000000001', path: 'report.docx' };
+  const args = { workspace_handle: '00000000-0000-4000-8000-000000000001', path: 'report.docx' };
   const direct = await publish.handler(args);
   assert.equal(direct.isError, undefined);
   assert.equal(direct.structuredContent.capability, 'publish_worker_file');
@@ -140,7 +140,7 @@ test('publish_worker_file uses the same file UI for images and non-images', asyn
     byte_length: bytes.length, sha256: 'image-sha256', data: bytes.toString('base64'),
   });
   const result = await publish.handler({
-    path: 'portrait.png', workspace_context: '00000000-0000-4000-8000-000000000001',
+    path: 'portrait.png', workspace_handle: '00000000-0000-4000-8000-000000000001',
   });
   const token = result.structuredContent.download_url.split('/').at(-1);
   assert.equal(result.structuredContent.preview_url, 'https://example.test/ccm/preview/' + token);
@@ -161,7 +161,7 @@ test('publish_worker_file inlines only a bounded UTF-8 text prefix with full-tex
     byte_length: bytes.length, data: bytes.toString('base64'),
   });
   const result = await registry.get('ccm-extra.publish_worker_file').handler({
-    path: 'readme.md', workspace_context: '00000000-0000-4000-8000-000000000001',
+    path: 'readme.md', workspace_handle: '00000000-0000-4000-8000-000000000001',
   });
   const token = result.structuredContent.download_url.split('/').at(-1);
   assert.equal(result.structuredContent.text_url, 'https://example.test/ccm/preview/' + token);
@@ -195,7 +195,7 @@ test('receive_file is Deferred + Code Mode and preserves native file objects thr
     file_name: 'incoming.txt',
   };
   const result = await receiveFile.handler({
-    workspace_context: '00000000-0000-4000-8000-000000000001',
+    workspace_handle: '00000000-0000-4000-8000-000000000001',
     file: input,
     destination: 'incoming.txt',
   });
@@ -204,7 +204,7 @@ test('receive_file is Deferred + Code Mode and preserves native file objects thr
   assert.equal(result.structuredContent.file_id, 'file_incoming');
   assert.deepEqual(runtime.calls.at(-1), {
     receiveFile: {
-      workspace_context: '00000000-0000-4000-8000-000000000001',
+      workspace_handle: '00000000-0000-4000-8000-000000000001',
       file: input,
       destination: 'incoming.txt',
       overwrite: false,
@@ -218,7 +218,7 @@ test('receive_file is Deferred + Code Mode and preserves native file objects thr
     calls: [{
       tool: 'ccm-extra.import_chatgpt_file',
       arguments: {
-        workspace_context: '00000000-0000-4000-8000-000000000001',
+        workspace_handle: '00000000-0000-4000-8000-000000000001',
         file: input,
         destination: 'nested-incoming.txt',
       },
@@ -228,7 +228,7 @@ test('receive_file is Deferred + Code Mode and preserves native file objects thr
   assert.equal(nested.structuredContent.state, 'completed');
   assert.deepEqual(runtime.calls.at(-1), {
     receiveFile: {
-      workspace_context: '00000000-0000-4000-8000-000000000001',
+      workspace_handle: '00000000-0000-4000-8000-000000000001',
       file: input,
       destination: 'nested-incoming.txt',
       overwrite: false,
@@ -240,7 +240,7 @@ test('receive_file is Deferred + Code Mode and preserves native file objects thr
     calls: [{
       tool: 'ccm-extra.import_chatgpt_file',
       arguments: {
-        workspace_context: '00000000-0000-4000-8000-000000000001',
+        workspace_handle: '00000000-0000-4000-8000-000000000001',
         destination: 'bridged-incoming.txt',
       },
     }],
@@ -249,7 +249,7 @@ test('receive_file is Deferred + Code Mode and preserves native file objects thr
   assert.equal(bridged.structuredContent.state, 'completed');
   assert.deepEqual(runtime.calls.at(-1), {
     receiveFile: {
-      workspace_context: '00000000-0000-4000-8000-000000000001',
+      workspace_handle: '00000000-0000-4000-8000-000000000001',
       file: input,
       destination: 'bridged-incoming.txt',
       overwrite: false,
@@ -261,7 +261,7 @@ test('receive_file is Deferred + Code Mode and preserves native file objects thr
     calls: [{
       tool: 'ccm-extra.import_chatgpt_file',
       arguments: {
-        workspace_context: '00000000-0000-4000-8000-000000000001',
+        workspace_handle: '00000000-0000-4000-8000-000000000001',
         file: input,
       },
     }],
@@ -273,7 +273,7 @@ test('receive_file is Deferred + Code Mode and preserves native file objects thr
     calls: [{
       tool: 'ccm-extra.import_chatgpt_file',
       arguments: {
-        workspace_context: '00000000-0000-4000-8000-000000000001',
+        workspace_handle: '00000000-0000-4000-8000-000000000001',
         file: input,
       },
     }],

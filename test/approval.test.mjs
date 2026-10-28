@@ -73,12 +73,12 @@ test('ApprovalManager normalizes configured approval durations', () => {
   );
 });
 
-function fakeWorkspaceContextManager() {
+function fakeWorkspaceHandleManager() {
   return {
-    resolve(contextId) {
-      assert.equal(contextId, '00000000-0000-4000-8000-000000000001');
+    resolve(handleId) {
+      assert.equal(handleId, '00000000-0000-4000-8000-000000000001');
       return {
-        workspace_context: contextId,
+        workspace_handle: handleId,
         environment_id: 'approval-worker',
         workspace_id: 'approval-workspace',
         workspace_kind: 'registered',
@@ -95,13 +95,13 @@ test('ApprovalManager freezes one exact execution before binding an approval car
     now: () => now,
   });
   const workspace = {
-    workspace_context: '00000000-0000-4000-8000-000000000001',
+    workspace_handle: '00000000-0000-4000-8000-000000000001',
     workspace_id: 'approval-workspace',
     workspace_kind: 'registered',
     workspace_root: 'C:\\workspace',
   };
   const args = {
-    workspace_context: workspace.workspace_context,
+    workspace_handle: workspace.workspace_handle,
     cmd: 'Write-Output APPROVED',
     workdir: 'C:\\workspace',
     tty: false,
@@ -134,7 +134,7 @@ test('ApprovalManager freezes one exact execution before binding an approval car
     'chat-a',
   );
   assert.equal(claimed.action.cmd, 'Write-Output APPROVED');
-  assert.equal(claimed.action.workspace_context, workspace.workspace_context);
+  assert.equal(claimed.action.workspace_handle, workspace.workspace_handle);
   assert.equal(claimed.action.workspace_root, workspace.workspace_root);
 
   const expiring = approvals.requestExecution(
@@ -225,7 +225,7 @@ test('ApprovalManager allows independent pending workspace approvals to coexist'
 test('ApprovalManager app approvals require the card nonce and resume one frozen action', () => {
   const approvals = new ApprovalManager();
   const workspace = {
-    workspace_context: '00000000-0000-4000-8000-000000000001',
+    workspace_handle: '00000000-0000-4000-8000-000000000001',
     environment_id: 'approval-worker',
     workspace_id: 'approval-workspace',
     workspace_kind: 'registered',
@@ -233,7 +233,7 @@ test('ApprovalManager app approvals require the card nonce and resume one frozen
   };
   const pending = approvals.requestExecution(
     {
-      workspace_context: workspace.workspace_context,
+      workspace_handle: workspace.workspace_handle,
       cmd: 'Write-Output APP_APPROVED',
       yield_time_ms: 500,
       max_output_tokens: 1234,
@@ -317,7 +317,7 @@ test('ApprovalManager does not expire an action while it is dispatching', () => 
     now: () => now,
   });
   const workspace = {
-    workspace_context: '00000000-0000-4000-8000-000000000001',
+    workspace_handle: '00000000-0000-4000-8000-000000000001',
     environment_id: 'approval-worker',
     workspace_id: 'approval-workspace',
     workspace_kind: 'registered',
@@ -325,7 +325,7 @@ test('ApprovalManager does not expire an action while it is dispatching', () => 
   };
   const pending = approvals.requestExecution(
     {
-      workspace_context: workspace.workspace_context,
+      workspace_handle: workspace.workspace_handle,
       cmd: 'Write-Output LONG_RUNNING',
     },
     'approval-worker',
@@ -353,7 +353,7 @@ test('ApprovalManager terminal retention is independent of active approval TTL',
     now: () => now,
   });
   const args = {
-    workspace_context: '00000000-0000-4000-8000-000000000001',
+    workspace_handle: '00000000-0000-4000-8000-000000000001',
     cmd: 'Write-Output TERMINAL_RETENTION',
   };
   const pending = approvals.requestExecution(args, 'approval-worker');
@@ -502,10 +502,10 @@ test('RemoteProcessManager executes only the frozen action after approval', asyn
     environmentRegistry,
     workerHub,
     approvalManager,
-    workspaceContextManager: fakeWorkspaceContextManager(),
+    workspaceHandleManager: fakeWorkspaceHandleManager(),
   });
   const args = {
-    workspace_context: '00000000-0000-4000-8000-000000000001',
+    workspace_handle: '00000000-0000-4000-8000-000000000001',
     cmd: 'Write-Output ESCALATED_OK',
     sandbox_permissions: 'require_escalated',
     justification: 'Allow this command once?',
@@ -559,11 +559,11 @@ test('RemoteProcessManager app approval executes only the frozen action', async 
     environmentRegistry,
     workerHub,
     approvalManager,
-    workspaceContextManager: fakeWorkspaceContextManager(),
+    workspaceHandleManager: fakeWorkspaceHandleManager(),
   });
   try {
     const pending = await manager.execCommand({
-      workspace_context: '00000000-0000-4000-8000-000000000001',
+      workspace_handle: '00000000-0000-4000-8000-000000000001',
       cmd: 'Write-Output FROZEN_ACTION',
       workdir: '.',
       yield_time_ms: 250,
@@ -612,11 +612,11 @@ test('RemoteProcessManager marks app approval unknown after an in-flight Worker 
     environmentRegistry,
     workerHub: new RejectingWorkerHub(),
     approvalManager,
-    workspaceContextManager: fakeWorkspaceContextManager(),
+    workspaceHandleManager: fakeWorkspaceHandleManager(),
   });
   try {
     const pending = await manager.execCommand({
-      workspace_context: '00000000-0000-4000-8000-000000000001',
+      workspace_handle: '00000000-0000-4000-8000-000000000001',
       cmd: 'Write-Output MAYBE_STARTED',
       sandbox_permissions: 'require_escalated',
       justification: 'Run once?',
@@ -670,10 +670,10 @@ test('App approval remains retryable when Worker dispatch fails before send', as
     environmentRegistry,
     workerHub,
     approvalManager,
-    workspaceContextManager: fakeWorkspaceContextManager(),
+    workspaceHandleManager: fakeWorkspaceHandleManager(),
   });
   const args = {
-    workspace_context: '00000000-0000-4000-8000-000000000001',
+    workspace_handle: '00000000-0000-4000-8000-000000000001',
     cmd: 'Write-Output APP_RETRY_OK',
     sandbox_permissions: 'require_escalated',
     justification: 'Retryable dispatch test?',
@@ -718,12 +718,12 @@ test('RemoteProcessManager does not request approval for trusted remote Git', as
     environmentRegistry,
     workerHub,
     approvalManager,
-    workspaceContextManager: fakeWorkspaceContextManager(),
+    workspaceHandleManager: fakeWorkspaceHandleManager(),
   });
 
   try {
     const result = await manager.execCommand({
-      workspace_context: '00000000-0000-4000-8000-000000000001',
+      workspace_handle: '00000000-0000-4000-8000-000000000001',
       cmd: 'git push origin main',
       sandbox_permissions: 'require_escalated',
       justification: 'Caller requested escalation.',
@@ -750,11 +750,11 @@ test('RemoteProcessManager runs direct node --test through built-in Windows trus
         throw new Error('approval must not be requested');
       },
     },
-    workspaceContextManager: fakeWorkspaceContextManager(),
+    workspaceHandleManager: fakeWorkspaceHandleManager(),
   });
   try {
     const result = await manager.execCommand({
-      workspace_context: '00000000-0000-4000-8000-000000000001',
+      workspace_handle: '00000000-0000-4000-8000-000000000001',
       cmd: 'node --test test/approval.test.mjs',
     });
     assert.equal(result.exit_code, 0);
@@ -775,11 +775,11 @@ test('built-in node --test trust does not apply through an explicit cmd shell', 
   const manager = new RemoteProcessManager({
     environmentRegistry,
     workerHub,
-    workspaceContextManager: fakeWorkspaceContextManager(),
+    workspaceHandleManager: fakeWorkspaceHandleManager(),
   });
   try {
     const result = await manager.execCommand({
-      workspace_context: '00000000-0000-4000-8000-000000000001',
+      workspace_handle: '00000000-0000-4000-8000-000000000001',
       cmd: 'node --test test/approval.test.mjs',
       shell: 'cmd.exe',
     });
@@ -820,11 +820,11 @@ test('approval can persist a token-prefix workspace policy and reuse it for suff
     environmentRegistry,
     workerHub,
     approvalManager,
-    workspaceContextManager: fakeWorkspaceContextManager(),
+    workspaceHandleManager: fakeWorkspaceHandleManager(),
     execPolicyStore,
   });
   const args = {
-    workspace_context: '00000000-0000-4000-8000-000000000001',
+    workspace_handle: '00000000-0000-4000-8000-000000000001',
     cmd: 'wsl.exe --status',
     sandbox_permissions: 'require_escalated',
     prefix_rule: ['wsl.exe'],
@@ -885,12 +885,12 @@ test('invalid explicit prefix_rule is rejected before approval creation', async 
         throw new Error('must not create approval');
       },
     },
-    workspaceContextManager: fakeWorkspaceContextManager(),
+    workspaceHandleManager: fakeWorkspaceHandleManager(),
   });
   try {
     await assert.rejects(
       manager.execCommand({
-        workspace_context: '00000000-0000-4000-8000-000000000001',
+        workspace_handle: '00000000-0000-4000-8000-000000000001',
         cmd: 'wsl.exe --status',
         sandbox_permissions: 'require_escalated',
         prefix_rule: ['git'],
@@ -912,11 +912,11 @@ test('compound command without explicit prefix is not persistable', async () => 
     environmentRegistry,
     workerHub,
     approvalManager,
-    workspaceContextManager: fakeWorkspaceContextManager(),
+    workspaceHandleManager: fakeWorkspaceHandleManager(),
   });
   try {
     const pending = await manager.execCommand({
-      workspace_context: '00000000-0000-4000-8000-000000000001',
+      workspace_handle: '00000000-0000-4000-8000-000000000001',
       cmd: 'Write-Output ONE; Write-Output TWO',
       sandbox_permissions: 'require_escalated',
     });
@@ -938,7 +938,7 @@ test('escalated compound command can mix trusted Git and a saved prefix', async 
         throw new Error('approval must not be requested');
       },
     },
-    workspaceContextManager: fakeWorkspaceContextManager(),
+    workspaceHandleManager: fakeWorkspaceHandleManager(),
     execPolicyStore: {
       matchSegment({ tokens }) {
         if (tokens[0] !== 'wsl.exe') return null;
@@ -952,7 +952,7 @@ test('escalated compound command can mix trusted Git and a saved prefix', async 
   });
   try {
     const result = await manager.execCommand({
-      workspace_context: '00000000-0000-4000-8000-000000000001',
+      workspace_handle: '00000000-0000-4000-8000-000000000001',
       cmd: 'git fetch origin && wsl.exe --status',
       sandbox_permissions: 'require_escalated',
     });
@@ -987,10 +987,10 @@ test('Linux workspace-write does not inherit built-in Git trust in mixed escalat
     environmentRegistry,
     workerHub,
     approvalManager,
-    workspaceContextManager: {
-      resolve(contextId) {
+    workspaceHandleManager: {
+      resolve(handleId) {
         return {
-          workspace_context: contextId,
+          workspace_handle: handleId,
           environment_id: 'approval-worker',
           workspace_id: 'approval-workspace',
           workspace_kind: 'registered',
@@ -1011,7 +1011,7 @@ test('Linux workspace-write does not inherit built-in Git trust in mixed escalat
   });
   try {
     const result = await manager.execCommand({
-      workspace_context: '00000000-0000-4000-8000-000000000001',
+      workspace_handle: '00000000-0000-4000-8000-000000000001',
       cmd: 'git fetch origin && echo ok',
       sandbox_permissions: 'require_escalated',
     });
@@ -1039,12 +1039,12 @@ test('post-dispatch policy save failure is surfaced without redispatch', async (
     environmentRegistry,
     workerHub,
     approvalManager,
-    workspaceContextManager: fakeWorkspaceContextManager(),
+    workspaceHandleManager: fakeWorkspaceHandleManager(),
     execPolicyStore,
   });
   try {
     const pending = await manager.execCommand({
-      workspace_context: '00000000-0000-4000-8000-000000000001',
+      workspace_handle: '00000000-0000-4000-8000-000000000001',
       cmd: 'wsl.exe --status',
       sandbox_permissions: 'require_escalated',
       prefix_rule: ['wsl.exe'],
@@ -1117,14 +1117,14 @@ test('package-script workspace approval uses a restricted-sandbox-safe policy pr
     environmentRegistry,
     workerHub,
     approvalManager,
-    workspaceContextManager: fakeWorkspaceContextManager(),
+    workspaceHandleManager: fakeWorkspaceHandleManager(),
     execPolicyStore,
     trustedPackageScriptStore,
   });
 
   try {
     const pending = await manager.execCommand({
-      workspace_context: '00000000-0000-4000-8000-000000000001',
+      workspace_handle: '00000000-0000-4000-8000-000000000001',
       cmd: 'npm test',
       sandbox_permissions: 'require_escalated',
       justification: 'Persist npm test?',
@@ -1169,7 +1169,7 @@ test('package-script probe failure stays retryable without dispatching', async (
     environmentRegistry,
     workerHub,
     approvalManager,
-    workspaceContextManager: fakeWorkspaceContextManager(),
+    workspaceHandleManager: fakeWorkspaceHandleManager(),
     execPolicyStore: {
       match() {
         return null;
@@ -1187,7 +1187,7 @@ test('package-script probe failure stays retryable without dispatching', async (
 
   try {
     const pending = await manager.execCommand({
-      workspace_context: '00000000-0000-4000-8000-000000000001',
+      workspace_handle: '00000000-0000-4000-8000-000000000001',
       cmd: 'npm test',
       sandbox_permissions: 'require_escalated',
       justification: 'Persist npm test?',

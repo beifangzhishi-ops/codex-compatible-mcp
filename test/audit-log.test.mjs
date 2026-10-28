@@ -19,7 +19,7 @@ test('audit logger writes structured correlation fields without adding command o
       approval_id: 'approval-1',
       operation_id: 'operation-1',
       environment_id: 'worker-a',
-      workspace_context: 'workspace-context-a',
+      workspace_handle: 'workspace-handle-a',
       intent_sha256: 'a'.repeat(64),
     });
 

@@ -25,11 +25,11 @@ test('authenticated terminal receipt survives Controller restart and active Map 
     const consumed = manager.markAppWorkspaceConsumed(pending.approval_id);
     const key = '00000000-0000-4000-8000-000000000099';
     manager.recordAppOutcome(pending.approval_id, {
-      ...consumed, workspace_context: key, workspace_kind: 'registered',
+      ...consumed, workspace_handle: key, workspace_kind: 'registered',
     });
     assert.equal(manager.readAppStatus(pending.approval_id, approvalNonce, {
       hostSession: 'conversation-a',
-    }).workspace_context, key);
+    }).workspace_handle, key);
 
     time += 200;
     const recovered = new ApprovalManager({
@@ -40,7 +40,7 @@ test('authenticated terminal receipt survives Controller restart and active Map 
       hostSession: 'conversation-a',
     });
     assert.equal(status.state, 'consumed');
-    assert.equal(status.workspace_context, key);
+    assert.equal(status.workspace_handle, key);
     assert.equal(status.approval_required, false);
     assert.equal(status.operation, 'register_workspace');
     assert.equal(Object.hasOwn(status, 'nonce_hash'), false);
@@ -67,10 +67,10 @@ test('terminal receipts never publish a Key for failures, unregister or executio
     const consumed = manager.markAppWorkspaceConsumed(pending.approval_id);
     manager.recordAppOutcome(pending.approval_id, {
       ...consumed, action_failed: operation === 'select_workspace',
-      workspace_context: '00000000-0000-4000-8000-000000000099',
+      workspace_handle: '00000000-0000-4000-8000-000000000099',
       workspace_kind: 'registered',
     });
-    assert.equal(manager.readAppStatus(pending.approval_id, approvalNonce).workspace_context, undefined);
+    assert.equal(manager.readAppStatus(pending.approval_id, approvalNonce).workspace_handle, undefined);
   }
 });
 

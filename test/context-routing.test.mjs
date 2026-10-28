@@ -29,12 +29,12 @@ function environmentRegistry() {
   };
 }
 
-function workspaceContextManager() {
+function workspaceHandleManager() {
   return {
-    resolve(contextId) {
-      assert.equal(contextId, CONTEXT_ID);
+    resolve(handleId) {
+      assert.equal(handleId, CONTEXT_ID);
       return {
-        workspace_context: CONTEXT_ID,
+        workspace_handle: CONTEXT_ID,
         environment_id: 'worker-a',
         workspace_id: 'projectless-test',
         workspace_kind: 'projectless',
@@ -86,16 +86,16 @@ test('RemoteProcessManager requires context and rejects environment routing', as
   const manager = new RemoteProcessManager({
     environmentRegistry: environmentRegistry(),
     workerHub,
-    workspaceContextManager: workspaceContextManager(),
+    workspaceHandleManager: workspaceHandleManager(),
   });
   try {
     await assert.rejects(
       manager.execCommand({ cmd: 'echo no-context' }),
-      /requires workspace_context/,
+      /requires workspace_handle/,
     );
     await assert.rejects(
       manager.execCommand({
-        workspace_context: CONTEXT_ID,
+        workspace_handle: CONTEXT_ID,
         environment_id: 'worker-a',
         cmd: 'echo ambiguous',
       }),
@@ -112,16 +112,16 @@ test('send_file uses context to select Worker without imposing workspace read bo
   const fileService = new RemoteFileService({
     environmentRegistry: environmentRegistry(),
     workerHub,
-    workspaceContextManager: workspaceContextManager(),
+    workspaceHandleManager: workspaceHandleManager(),
   });
   const outsidePath = 'D:\\archive\\outside.pdf';
   const result = await fileService.sendFile({
-    workspace_context: CONTEXT_ID,
+    workspace_handle: CONTEXT_ID,
     path: outsidePath,
   });
 
   assert.equal(result.environment_id, 'worker-a');
-  assert.equal(result.workspace_context, CONTEXT_ID);
+  assert.equal(result.workspace_handle, CONTEXT_ID);
   assert.equal(workerHub.calls.length, 1);
   assert.deepEqual(workerHub.calls[0], {
     environmentId: 'worker-a',
@@ -136,7 +136,7 @@ test('send_file uses context to select Worker without imposing workspace read bo
 
   await assert.rejects(
     fileService.sendFile({ path: outsidePath }),
-    /requires workspace_context/,
+    /requires workspace_handle/,
   );
 });
 
@@ -145,7 +145,7 @@ test('receive_file uses context to select Worker and forwards only a relative de
   const fileService = new RemoteFileService({
     environmentRegistry: environmentRegistry(),
     workerHub,
-    workspaceContextManager: workspaceContextManager(),
+    workspaceHandleManager: workspaceHandleManager(),
   });
   const file = {
     download_url: 'https://files.example.test/download',
@@ -153,13 +153,13 @@ test('receive_file uses context to select Worker and forwards only a relative de
     file_name: 'route.txt',
   };
   const result = await fileService.receiveFile({
-    workspace_context: CONTEXT_ID,
+    workspace_handle: CONTEXT_ID,
     file,
     destination: 'nested\\route.txt',
   });
 
   assert.equal(result.environment_id, 'worker-a');
-  assert.equal(result.workspace_context, CONTEXT_ID);
+  assert.equal(result.workspace_handle, CONTEXT_ID);
   assert.deepEqual(workerHub.calls[0], {
     environmentId: 'worker-a',
     method: 'receive_file',
@@ -175,7 +175,7 @@ test('receive_file uses context to select Worker and forwards only a relative de
 
   await assert.rejects(
     fileService.receiveFile({ file }),
-    /requires workspace_context/,
+    /requires workspace_handle/,
   );
 });
 

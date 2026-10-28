@@ -10,8 +10,8 @@ import {
   parsePackageScriptCommand,
 } from '../src/controller/package-script-policy.mjs';
 
-const workspaceContext = {
-  workspace_context: '00000000-0000-4000-8000-000000000001',
+const workspaceHandle = {
+  workspace_handle: '00000000-0000-4000-8000-000000000001',
   environment_id: 'worker-a',
   workspace_id: 'workspace-a',
   workspace_kind: 'registered',
@@ -56,13 +56,13 @@ test('workspace prefix rule matches later suffix tokens', () => {
     shell: null,
   };
   const rule = store.allow({
-    workspaceContext,
+    workspaceHandle,
     environment,
     args,
     prefixTokens: ['wsl.exe'],
   });
   const match = store.match({
-    workspaceContext,
+    workspaceHandle,
     environment,
     args: {
       ...args,
@@ -82,28 +82,28 @@ test('prefix matching is token-based and bound to workspace execution context', 
     shell: null,
   };
   store.allow({
-    workspaceContext,
+    workspaceHandle,
     environment,
     args,
     prefixTokens: ['git', 'config', '--get'],
   });
   assert.ok(store.match({
-    workspaceContext,
+    workspaceHandle,
     environment,
     args: { ...args, cmd: 'git config --get user.email' },
   }));
   assert.equal(store.match({
-    workspaceContext,
+    workspaceHandle,
     environment,
     args: { ...args, cmd: 'git config --global --get user.name' },
   }), null);
   assert.equal(store.match({
-    workspaceContext: { ...workspaceContext, workspace_id: 'workspace-b' },
+    workspaceHandle: { ...workspaceHandle, workspace_id: 'workspace-b' },
     environment,
     args,
   }), null);
   assert.equal(store.match({
-    workspaceContext,
+    workspaceHandle,
     environment,
     args: { ...args, tty: true },
   }), null);
@@ -113,13 +113,13 @@ test('compound commands require every executable segment to match a rule', () =>
   const store = new ExecPolicyStore();
   const args = { cmd: 'wsl.exe --status', workdir: null, tty: false, shell: null };
   store.allow({
-    workspaceContext,
+    workspaceHandle,
     environment,
     args,
     prefixTokens: ['wsl.exe'],
   });
   assert.equal(store.match({
-    workspaceContext,
+    workspaceHandle,
     environment,
     args: { ...args, cmd: 'wsl.exe --status; whoami' },
   }), null);
@@ -129,14 +129,14 @@ test('rules bind the effective shell, including environment defaults', () => {
   const store = new ExecPolicyStore();
   const args = { cmd: 'wsl.exe --status', shell: null };
   store.allow({
-    workspaceContext,
+    workspaceHandle,
     environment,
     args,
     prefixTokens: ['wsl.exe'],
   });
-  assert.ok(store.match({ workspaceContext, environment, args }));
+  assert.ok(store.match({ workspaceHandle, environment, args }));
   assert.equal(store.match({
-    workspaceContext,
+    workspaceHandle,
     environment: {
       ...environment,
       shell: { path: 'cmd.exe', type: 'cmd' },

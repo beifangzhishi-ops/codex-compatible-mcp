@@ -30,7 +30,7 @@ export class RemoteProcessManager {
     environmentRegistry,
     workerHub,
     approvalManager = null,
-    workspaceContextManager = null,
+    workspaceHandleManager = null,
     execPolicyStore = null,
     trustedPackageScriptStore = null,
     audit = null,
@@ -41,7 +41,7 @@ export class RemoteProcessManager {
     this.environmentRegistry = environmentRegistry;
     this.workerHub = workerHub;
     this.approvalManager = approvalManager;
-    this.workspaceContextManager = workspaceContextManager;
+    this.workspaceHandleManager = workspaceHandleManager;
     this.execPolicyStore = execPolicyStore;
     this.trustedPackageScriptStore = trustedPackageScriptStore;
     this.audit = typeof audit === 'function' ? audit : null;
@@ -73,14 +73,14 @@ export class RemoteProcessManager {
     this.audit({ component: 'process', event, ...fields });
   }
 
-  #recordExecResult(result, environment, workspaceContext, operationId = null) {
+  #recordExecResult(result, environment, workspaceHandle, operationId = null) {
     if (result?.session_id !== undefined) {
       const publicSessionId = this.#allocateSessionId();
       this.sessions.set(publicSessionId, {
         environmentId: environment.id,
         remoteSessionId: result.session_id,
-        workspaceContext: workspaceContext.workspace_context,
-        workspace: { ...workspaceContext },
+        workspaceHandle: workspaceHandle.workspace_handle,
+        workspace: { ...workspaceHandle },
         operationId,
       });
       this.#emit('session_created', {
@@ -88,42 +88,42 @@ export class RemoteProcessManager {
         public_session_id: publicSessionId,
         remote_session_id: result.session_id,
         environment_id: environment.id,
-        workspace_context: workspaceContext.workspace_context,
-        workspace_id: workspaceContext.workspace_id,
+        workspace_handle: workspaceHandle.workspace_handle,
+        workspace_id: workspaceHandle.workspace_id,
       });
       return {
         ...result,
         session_id: publicSessionId,
         ...(operationId ? { operation_id: operationId } : {}),
-        ...workspaceContext,
+        ...workspaceHandle,
       };
     }
     this.#emit('exec_completed', {
       operation_id: operationId || undefined,
       environment_id: environment.id,
-      workspace_context: workspaceContext.workspace_context,
-      workspace_id: workspaceContext.workspace_id,
+      workspace_handle: workspaceHandle.workspace_handle,
+      workspace_id: workspaceHandle.workspace_id,
       exit_code: result?.exit_code,
     });
     return {
       ...result,
       ...(operationId ? { operation_id: operationId } : {}),
-      ...workspaceContext,
+      ...workspaceHandle,
     };
   }
 
-  #approvalStatusResult(approval, workspaceContext, output) {
+  #approvalStatusResult(approval, workspaceHandle, output) {
     return {
       chunk_id: 'approval',
       wall_time_seconds: 0,
       output,
       approval_required: approval.state === 'pending',
       ...approval,
-      ...(workspaceContext || {}),
+      ...(workspaceHandle || {}),
     };
   }
 
-  async #resolvePackageScriptBinding(args, workspaceContext, environment) {
+  async #resolvePackageScriptBinding(args, workspaceHandle, environment) {
     const parsed = parsePackageScriptCommand(args.cmd);
     if (!parsed) return null;
     if (environment.platform !== 'windows') {
@@ -145,8 +145,8 @@ export class RemoteProcessManager {
       {
         cmd: probe,
         environment_id: environment.id,
-        workspace_id: workspaceContext.workspace_id,
-        expected_workspace_root: workspaceContext.workspace_root,
+        workspace_id: workspaceHandle.workspace_id,
+        expected_workspace_root: workspaceHandle.workspace_root,
         sandbox_permissions: 'use_default',
         shell: 'powershell.exe',
         yield_time_ms: 2_000,
@@ -260,7 +260,7 @@ export class RemoteProcessManager {
 
   #matchEscalationSegments(
     args,
-    workspaceContext,
+    workspaceHandle,
     environment,
     parsed,
     {
@@ -286,7 +286,7 @@ export class RemoteProcessManager {
         continue;
       }
       const rule = this.execPolicyStore?.matchSegment?.({
-        workspaceContext,
+        workspaceHandle,
         environment,
         args,
         tokens: segment.tokens,
@@ -312,11 +312,11 @@ export class RemoteProcessManager {
     };
   }
 
-  async #matchTrustedPackageScript(args, workspaceContext, environment) {
+  async #matchTrustedPackageScript(args, workspaceHandle, environment) {
     if (!this.trustedPackageScriptStore ||
         environment.permissionProfile !== 'workspace-write' ||
         !this.trustedPackageScriptStore.mayMatch({
-          workspaceContext,
+          workspaceHandle,
           environment,
           args,
         })) {
@@ -325,11 +325,11 @@ export class RemoteProcessManager {
     try {
       const packageScript = await this.#resolvePackageScriptBinding(
         args,
-        workspaceContext,
+        workspaceHandle,
         environment,
       );
       return this.trustedPackageScriptStore.match({
-        workspaceContext,
+        workspaceHandle,
         environment,
         args,
         packageScript,
@@ -337,18 +337,18 @@ export class RemoteProcessManager {
     } catch (error) {
       this.#emit('trusted_package_script_probe_failed', {
         environment_id: environment.id,
-        workspace_context: workspaceContext.workspace_context,
-        workspace_id: workspaceContext.workspace_id,
+        workspace_handle: workspaceHandle.workspace_handle,
+        workspace_id: workspaceHandle.workspace_id,
         error_name: error?.name || 'Error',
       });
       return null;
     }
   }
 
-  isSessionLive(sessionId, workspaceContext = null) {
+  isSessionLive(sessionId, workspaceHandle = null) {
     const session = this.sessions.get(sessionId);
     if (!session) return false;
-    return !workspaceContext || session.workspaceContext === workspaceContext;
+    return !workspaceHandle || session.workspaceHandle === workspaceHandle;
   }
 
   sessionMetadata(sessionId) {
@@ -358,39 +358,39 @@ export class RemoteProcessManager {
       session_id: sessionId,
       operation_id: session.operationId || null,
       environment_id: session.environmentId,
-      workspace_context: session.workspaceContext,
+      workspace_handle: session.workspaceHandle,
       ...(session.workspace || {}),
     };
   }
 
   async execCommand(args) {
-    if (!args.workspace_context) {
+    if (!args.workspace_handle) {
       throw new Error(
-        'exec_command requires workspace_context. Obtain one explicitly before execution.',
+        'exec_command requires workspace_handle. Obtain one explicitly before execution.',
       );
     }
     if (args.environment_id) {
       throw new Error(
-        'exec_command does not accept environment_id; workspace_context already determines the environment.',
+        'exec_command does not accept environment_id; workspace_handle already determines the environment.',
       );
     }
-    if (!this.workspaceContextManager) {
-      throw new Error('Workspace context manager is not available.');
+    if (!this.workspaceHandleManager) {
+      throw new Error('Workspace handle manager is not available.');
     }
-    const workspaceContext = this.workspaceContextManager.resolve(
-      args.workspace_context,
+    const workspaceHandle = this.workspaceHandleManager.resolve(
+      args.workspace_handle,
     );
     const environment = this.environmentRegistry.resolve(
-      workspaceContext.environment_id,
+      workspaceHandle.environment_id,
     );
     const operationId = randomUUID();
     let forwardedArgs = {
       ...args,
       environment_id: environment.id,
-      workspace_id: workspaceContext.workspace_id,
-      expected_workspace_root: workspaceContext.workspace_root,
+      workspace_id: workspaceHandle.workspace_id,
+      expected_workspace_root: workspaceHandle.workspace_root,
     };
-    delete forwardedArgs.workspace_context;
+    delete forwardedArgs.workspace_handle;
     delete forwardedArgs.prefix_rule;
     const requestedYieldMs = clampInitialExecYield(args.yield_time_ms);
     forwardedArgs = {
@@ -437,7 +437,7 @@ export class RemoteProcessManager {
     const trustedNodeOrMixed = allBuiltInSegments && hasTrustedNodeTestSegment;
     const trustedPackageScriptRule = await this.#matchTrustedPackageScript(
       args,
-      workspaceContext,
+      workspaceHandle,
       environment,
     );
     const trustedPackageScript = Boolean(trustedPackageScriptRule);
@@ -466,8 +466,8 @@ export class RemoteProcessManager {
         rule_id: trustedPackageScriptRule.rule_id,
         operation_id: operationId,
         environment_id: environment.id,
-        workspace_context: workspaceContext.workspace_context,
-        workspace_id: workspaceContext.workspace_id,
+        workspace_handle: workspaceHandle.workspace_handle,
+        workspace_id: workspaceHandle.workspace_id,
       });
     }
 
@@ -480,8 +480,8 @@ export class RemoteProcessManager {
       this.#emit('node_test_builtin_auto_allowed', {
         operation_id: operationId,
         environment_id: environment.id,
-        workspace_context: workspaceContext.workspace_context,
-        workspace_id: workspaceContext.workspace_id,
+        workspace_handle: workspaceHandle.workspace_handle,
+        workspace_id: workspaceHandle.workspace_id,
         mixed_with_trusted_git: hasTrustedGitSegment || undefined,
       });
     }
@@ -492,7 +492,7 @@ export class RemoteProcessManager {
       }
       policyRule = this.#matchEscalationSegments(
         args,
-        workspaceContext,
+        workspaceHandle,
         environment,
         parsedCommand,
         {
@@ -512,8 +512,8 @@ export class RemoteProcessManager {
           prefix_tokens: policyRule.prefix_tokens,
           operation_id: operationId,
           environment_id: environment.id,
-          workspace_context: workspaceContext.workspace_context,
-          workspace_id: workspaceContext.workspace_id,
+          workspace_handle: workspaceHandle.workspace_handle,
+          workspace_id: workspaceHandle.workspace_id,
         });
       } else {
         const proposal = explicitPolicyProposal || this.#persistentPolicyProposal(
@@ -524,13 +524,13 @@ export class RemoteProcessManager {
         const approval = this.approvalManager.requestExecution(
           {
             ...args,
-            workspace_context: workspaceContext.workspace_context,
+            workspace_handle: workspaceHandle.workspace_handle,
             prefix_rule: proposal.prefix_rule,
             policy_kind: proposal.policy_kind,
             policy_persistable: proposal.policy_persistable,
           },
           environment.id,
-          { workspace: workspaceContext },
+          { workspace: workspaceHandle },
         );
         return {
           chunk_id: 'approval',
@@ -539,7 +539,7 @@ export class RemoteProcessManager {
             'Approval required before this command can run outside the sandbox.',
           approval_required: true,
           ...approval,
-          ...(workspaceContext || {}),
+          ...(workspaceHandle || {}),
         };
       }
     } else if (wantsEscalation) {
@@ -558,8 +558,8 @@ export class RemoteProcessManager {
       this.#emit('exec_dispatch', {
         operation_id: operationId,
         environment_id: environment.id,
-        workspace_context: workspaceContext.workspace_context,
-        workspace_id: workspaceContext.workspace_id,
+        workspace_handle: workspaceHandle.workspace_handle,
+        workspace_id: workspaceHandle.workspace_id,
       });
       dispatch = this.workerHub.call(
         environment.id,
@@ -571,8 +571,8 @@ export class RemoteProcessManager {
       this.#emit('exec_dispatch_failed_prestart', {
         operation_id: operationId,
         environment_id: environment.id,
-        workspace_context: workspaceContext.workspace_context,
-        workspace_id: workspaceContext.workspace_id,
+        workspace_handle: workspaceHandle.workspace_handle,
+        workspace_id: workspaceHandle.workspace_id,
         error_name: error?.name || 'Error',
       });
       throw error;
@@ -584,8 +584,8 @@ export class RemoteProcessManager {
       this.#emit('exec_dispatch_unknown', {
         operation_id: operationId,
         environment_id: environment.id,
-        workspace_context: workspaceContext.workspace_context,
-        workspace_id: workspaceContext.workspace_id,
+        workspace_handle: workspaceHandle.workspace_handle,
+        workspace_id: workspaceHandle.workspace_id,
         error_name: error?.name || 'Error',
       });
       throw error;
@@ -593,7 +593,7 @@ export class RemoteProcessManager {
     const recorded = this.#recordExecResult(
       result,
       environment,
-      workspaceContext,
+      workspaceHandle,
       operationId,
     );
     if (trustedPackageScriptRule) {
@@ -624,7 +624,7 @@ export class RemoteProcessManager {
     { approval_id: approvalId, approval_nonce: approvalNonce, decision },
     { hostSession = null } = {},
   ) {
-    if (!this.approvalManager || !this.workspaceContextManager) {
+    if (!this.approvalManager || !this.workspaceHandleManager) {
       throw new Error('Escalated execution services are not available.');
     }
     if (decision === 'deny') {
@@ -633,12 +633,12 @@ export class RemoteProcessManager {
         approvalNonce,
         hostSession,
       );
-      const workspaceContext = this.workspaceContextManager.resolve(
-        denied.workspace_context,
+      const workspaceHandle = this.workspaceHandleManager.resolve(
+        denied.workspace_handle,
       );
       return this.#approvalStatusResult(
         denied,
-        workspaceContext,
+        workspaceHandle,
         'The user denied this escalated command. It was not dispatched.',
       );
     }
@@ -654,23 +654,23 @@ export class RemoteProcessManager {
       hostSession,
     );
     const action = claimed.action;
-    let workspaceContext;
+    let workspaceHandle;
     let environment;
     let persistentPolicy = null;
     let persistentPolicyPackageScript = null;
     let policySaveError = null;
     try {
-      workspaceContext = this.workspaceContextManager.resolve(
-        action.workspace_context,
+      workspaceHandle = this.workspaceHandleManager.resolve(
+        action.workspace_handle,
       );
       environment = this.environmentRegistry.resolve(
         action.environment_id,
       );
-      if (workspaceContext.environment_id !== action.environment_id ||
-          workspaceContext.workspace_id !== action.workspace_id ||
-          workspaceContext.workspace_root !== action.workspace_root) {
+      if (workspaceHandle.environment_id !== action.environment_id ||
+          workspaceHandle.workspace_id !== action.workspace_id ||
+          workspaceHandle.workspace_root !== action.workspace_root) {
         throw new Error(
-          'Frozen workspace identity no longer matches the current workspace context.',
+          'Frozen workspace identity no longer matches the current workspace handle.',
         );
       }
       if (decision === 'approve_workspace') {
@@ -685,7 +685,7 @@ export class RemoteProcessManager {
           }
           persistentPolicyPackageScript = await this.#resolvePackageScriptBinding(
             action,
-            workspaceContext,
+            workspaceHandle,
             environment,
           );
         } else if (action.policy_kind === 'prefix') {
@@ -707,14 +707,14 @@ export class RemoteProcessManager {
         approval_id: approvalId,
         operation_id: claimed.request.operation_id,
         environment_id: action.environment_id,
-        workspace_context: action.workspace_context,
+        workspace_handle: action.workspace_handle,
         workspace_id: action.workspace_id,
         error_name: error?.name || 'Error',
       });
       return this.#approvalStatusResult(
         retryable,
-        workspaceContext || {
-          workspace_context: action.workspace_context,
+        workspaceHandle || {
+          workspace_handle: action.workspace_handle,
           environment_id: action.environment_id,
           workspace_id: action.workspace_id,
           workspace_kind: action.workspace_kind,
@@ -748,8 +748,8 @@ export class RemoteProcessManager {
         approval_id: approvalId,
         operation_id: claimed.request.operation_id,
         environment_id: environment.id,
-        workspace_context: workspaceContext.workspace_context,
-        workspace_id: workspaceContext.workspace_id,
+        workspace_handle: workspaceHandle.workspace_handle,
+        workspace_id: workspaceHandle.workspace_id,
       });
       dispatch = this.workerHub.call(
         environment.id,
@@ -765,13 +765,13 @@ export class RemoteProcessManager {
         approval_id: approvalId,
         operation_id: claimed.request.operation_id,
         environment_id: environment.id,
-        workspace_context: workspaceContext.workspace_context,
-        workspace_id: workspaceContext.workspace_id,
+        workspace_handle: workspaceHandle.workspace_handle,
+        workspace_id: workspaceHandle.workspace_id,
         error_name: error?.name || 'Error',
       });
       return this.#approvalStatusResult(
         retryable,
-        workspaceContext,
+        workspaceHandle,
         'Escalated execution was not dispatched: ' +
           String(error?.message || error),
       );
@@ -786,13 +786,13 @@ export class RemoteProcessManager {
         approval_id: approvalId,
         operation_id: claimed.request.operation_id,
         environment_id: environment.id,
-        workspace_context: workspaceContext.workspace_context,
-        workspace_id: workspaceContext.workspace_id,
+        workspace_handle: workspaceHandle.workspace_handle,
+        workspace_id: workspaceHandle.workspace_id,
         error_name: error?.name || 'Error',
       });
       return this.#approvalStatusResult(
         unknown,
-        workspaceContext,
+        workspaceHandle,
         'Escalated execution outcome is unknown; CCM will not retry automatically: ' +
           String(error?.message || error),
       );
@@ -801,21 +801,21 @@ export class RemoteProcessManager {
     const recorded = this.#recordExecResult(
       result,
       environment,
-      workspaceContext,
+      workspaceHandle,
       claimed.request.operation_id,
     );
     if (decision === 'approve_workspace') {
       try {
         if (action.policy_kind === 'package_script') {
           persistentPolicy = this.trustedPackageScriptStore.trust({
-            workspaceContext,
+            workspaceHandle,
             environment,
             args: action,
             packageScript: persistentPolicyPackageScript,
           });
         } else {
           persistentPolicy = this.execPolicyStore.allow({
-            workspaceContext,
+            workspaceHandle,
             environment,
             args: action,
             prefixTokens: action.prefix_rule,
@@ -827,8 +827,8 @@ export class RemoteProcessManager {
           approval_id: approvalId,
           operation_id: claimed.request.operation_id,
           environment_id: environment.id,
-          workspace_context: workspaceContext.workspace_context,
-          workspace_id: workspaceContext.workspace_id,
+          workspace_handle: workspaceHandle.workspace_handle,
+          workspace_id: workspaceHandle.workspace_id,
           error_name: error?.name || 'Error',
         });
       }
@@ -838,8 +838,8 @@ export class RemoteProcessManager {
       approval_id: approvalId,
       operation_id: consumed.operation_id,
       environment_id: environment.id,
-      workspace_context: workspaceContext.workspace_context,
-      workspace_id: workspaceContext.workspace_id,
+      workspace_handle: workspaceHandle.workspace_handle,
+      workspace_id: workspaceHandle.workspace_id,
       public_session_id: recorded.session_id,
       exit_code: recorded.exit_code,
     });
@@ -866,19 +866,19 @@ export class RemoteProcessManager {
   }
 
   async writeStdin(args) {
-    if (!args.workspace_context) {
+    if (!args.workspace_handle) {
       throw new Error(
-        'write_stdin requires workspace_context from the exec_command result.',
+        'write_stdin requires workspace_handle from the exec_command result.',
       );
     }
-    this.workspaceContextManager.resolve(args.workspace_context);
+    this.workspaceHandleManager.resolve(args.workspace_handle);
     const session = this.sessions.get(args.session_id);
     if (!session) {
       throw new Error('Unknown or expired session_id: ' + args.session_id);
     }
-    if (session.workspaceContext !== args.workspace_context) {
+    if (session.workspaceHandle !== args.workspace_handle) {
       throw new Error(
-        'workspace_context does not own session_id ' + args.session_id + '.',
+        'workspace_handle does not own session_id ' + args.session_id + '.',
       );
     }
 
@@ -888,7 +888,7 @@ export class RemoteProcessManager {
     );
     const timeoutMs = Math.max(15_000, requestedYield + 10_000);
     const forwardedArgs = { ...args, session_id: session.remoteSessionId };
-    delete forwardedArgs.workspace_context;
+    delete forwardedArgs.workspace_handle;
     let result;
     try {
       result = await this.workerHub.call(
@@ -918,7 +918,7 @@ export class RemoteProcessManager {
         public_session_id: args.session_id,
         remote_session_id: session.remoteSessionId,
         environment_id: session.environmentId,
-        workspace_context: session.workspaceContext,
+        workspace_handle: session.workspaceHandle,
       });
       return {
         ...result,
@@ -934,7 +934,7 @@ export class RemoteProcessManager {
       public_session_id: args.session_id,
       remote_session_id: session.remoteSessionId,
       environment_id: session.environmentId,
-      workspace_context: session.workspaceContext,
+      workspace_handle: session.workspaceHandle,
       exit_code: result?.exit_code,
     });
     return {

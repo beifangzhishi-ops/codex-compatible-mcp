@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import { WORKSPACE_KEY_UI_HTML } from '../src/ui/workspace-key-app.mjs';
+import { WORKSPACE_HANDLE_UI_HTML } from '../src/ui/workspace-handle-app.mjs';
 
-const PROJECT_KEY = '00000000-0000-4000-8000-000000000099';
+const PROJECT_HANDLE = '00000000-0000-4000-8000-000000000099';
 
-function mountKeyCard() {
+function mountHandleCard() {
   const elements = Object.fromEntries(
-    ['card', 'project', 'key', 'status', 'copy'].map((id) => [id, {
+    ['card', 'project', 'handle', 'status', 'copy'].map((id) => [id, {
       hidden: id === 'card',
       textContent: '',
       addEventListener(event, callback) { this[event] = callback; },
@@ -22,7 +22,7 @@ function mountKeyCard() {
     openai: { notifyIntrinsicHeight() {} },
     addEventListener(event, callback) { listeners[event] = callback; },
   };
-  const script = WORKSPACE_KEY_UI_HTML.match(/<script>\s*([\s\S]*?)<\/script>/)?.[1];
+  const script = WORKSPACE_HANDLE_UI_HTML.match(/<script>\s*([\s\S]*?)<\/script>/)?.[1];
   assert.ok(script);
   vm.runInNewContext(script, {
     window,
@@ -38,25 +38,25 @@ function mountKeyCard() {
   return { elements, copied, result };
 }
 
-test('registered project key appears directly from CCM tool result and can be copied', async () => {
-  const card = mountKeyCard();
+test('registered workspace handle appears directly from CCM tool result and can be copied', async () => {
+  const card = mountHandleCard();
   card.result({
-    workspace_context: PROJECT_KEY,
+    workspace_handle: PROJECT_HANDLE,
     workspace_kind: 'registered',
     environment_id: '6v',
     workspace_id: 'project-a',
   });
   assert.equal(card.elements.card.hidden, false);
   assert.equal(card.elements.project.textContent, '6v / project-a');
-  assert.equal(card.elements.key.textContent, PROJECT_KEY);
+  assert.equal(card.elements.handle.textContent, PROJECT_HANDLE);
   await card.elements.copy.click();
-  assert.deepEqual(card.copied, [PROJECT_KEY]);
+  assert.deepEqual(card.copied, [PROJECT_HANDLE]);
 });
 
-test('projectless and incomplete or pending project actions never show a key', () => {
-  const card = mountKeyCard();
+test('projectless and incomplete or pending project actions never show a handle', () => {
+  const card = mountHandleCard();
   const complete = {
-    workspace_context: PROJECT_KEY,
+    workspace_handle: PROJECT_HANDLE,
     workspace_kind: 'registered',
     environment_id: '6v',
     workspace_id: 'project-a',
@@ -65,11 +65,11 @@ test('projectless and incomplete or pending project actions never show a key', (
     { ...complete, workspace_kind: 'projectless' },
     { ...complete, approval_required: true },
     { ...complete, action_failed: true },
-    { ...complete, workspace_context: undefined },
+    { ...complete, workspace_handle: undefined },
   ]) {
     card.result(complete);
     card.result(value);
     assert.equal(card.elements.card.hidden, true);
-    assert.equal(card.elements.key.textContent, '');
+    assert.equal(card.elements.handle.textContent, '');
   }
 });

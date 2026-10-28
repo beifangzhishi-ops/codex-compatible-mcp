@@ -12,7 +12,7 @@ import {
 import { EnvironmentRegistry } from '../src/runtime/environment-registry.mjs';
 import { RemoteWorkerClient } from '../src/worker/remote-worker-client.mjs';
 import { createToolRegistry } from '../src/tools/index.mjs';
-import { WorkspaceContextManager } from '../src/controller/workspace-context-manager.mjs';
+import { WorkspaceHandleManager } from '../src/controller/workspace-handle-manager.mjs';
 
 test('WorkspaceRegistry keeps registered and projectless workspaces separate', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-workspaces-'));
@@ -203,9 +203,9 @@ test('WorkspaceRegistry can inspect and unregister a registration whose director
   }
 });
 
-test('WorkspaceContextManager persists contexts across controller instances', async () => {
+test('WorkspaceHandleManager persists handles across controller instances', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-context-state-'));
-  const stateFile = path.join(tempRoot, 'workspace-contexts.json');
+  const stateFile = path.join(tempRoot, 'workspace-handles.json');
   const environments = new EnvironmentRegistry({ resolvePaths: false });
   environments.register({
     id: 'context-worker',
@@ -216,7 +216,7 @@ test('WorkspaceContextManager persists contexts across controller instances', as
   });
 
   try {
-    const first = new WorkspaceContextManager({
+    const first = new WorkspaceHandleManager({
       environmentRegistry: environments,
       workerHub: {},
       stateFile,
@@ -228,12 +228,12 @@ test('WorkspaceContextManager persists contexts across controller instances', as
     });
     first.close();
 
-    const second = new WorkspaceContextManager({
+    const second = new WorkspaceHandleManager({
       environmentRegistry: environments,
       workerHub: {},
       stateFile,
     });
-    assert.deepEqual(second.resolve(created.workspace_context), created);
+    assert.deepEqual(second.resolve(created.workspace_handle), created);
     second.close();
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
@@ -281,7 +281,7 @@ test('WorkspaceRegistry accepts a UTF-8 BOM in persisted state', async () => {
 });
 
 test('full-access Controller enters registered workspaces without approval', async () => {
-  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-contexts-'));
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-handles-'));
   const bootstrapRoot = path.join(tempRoot, 'existing-project');
   const newRoot = path.join(tempRoot, 'new-project');
   const projectlessRoot = path.join(tempRoot, 'projectless');
@@ -292,7 +292,7 @@ test('full-access Controller enters registered workspaces without approval', asy
     auditLogFile: path.join(tempRoot, 'audit.jsonl'),
     execPolicyStateFile: path.join(tempRoot, 'exec-policy.json'),
     trustedPackageScriptStateFile: path.join(tempRoot, 'trusted-package-scripts.json'),
-    workspaceContextStateFile: path.join(tempRoot, 'workspace-contexts.json'),
+    workspaceHandleStateFile: path.join(tempRoot, 'workspace-handles.json'),
     fileTransferStateDir: path.join(tempRoot, 'file-transfers'),
     planStateDir: path.join(tempRoot, 'plans'),
   });
@@ -322,28 +322,28 @@ test('full-access Controller enters registered workspaces without approval', asy
       true,
     );
 
-    const projectless = await controller.workspaceContextManager.createProjectless(
+    const projectless = await controller.workspaceHandleManager.createProjectless(
       'workspace-worker',
     );
     const first = await controller.processManager.execCommand({
-      workspace_context: projectless.workspace_context,
+      workspace_handle: projectless.workspace_handle,
       cmd: 'Write-Output PROJECTLESS_OK',
     });
     assert.match(first.output, /PROJECTLESS_OK/);
     assert.equal(first.workspace_kind, 'projectless');
-    assert.equal(typeof first.workspace_context, 'string');
+    assert.equal(typeof first.workspace_handle, 'string');
     assert.equal(first.workspace_root.startsWith(projectlessRoot), true);
 
     const second = await controller.processManager.execCommand({
-      workspace_context: first.workspace_context,
+      workspace_handle: first.workspace_handle,
       cmd: 'Write-Output SAME_CONTEXT',
     });
-    assert.equal(second.workspace_context, first.workspace_context);
+    assert.equal(second.workspace_handle, first.workspace_handle);
     assert.equal(second.workspace_root, first.workspace_root);
 
     await assert.rejects(
       controller.processManager.execCommand({
-        workspace_context: first.workspace_context,
+        workspace_handle: first.workspace_handle,
         workdir: '..',
         cmd: 'Write-Output SHOULD_NOT_RUN',
       }),
@@ -353,7 +353,7 @@ test('full-access Controller enters registered workspaces without approval', asy
     const tools = createToolRegistry(controller);
     codeModeManager = tools.codeModeManager;
     const elevated = await tools.registry.get('exec_command').handler({
-      workspace_context: first.workspace_context,
+      workspace_handle: first.workspace_handle,
       cmd: 'Write-Output FULL_ACCESS_ESCALATED',
       sandbox_permissions: 'require_escalated',
     });
@@ -372,7 +372,7 @@ test('full-access Controller enters registered workspaces without approval', asy
       '*** End Patch',
     ].join('\n');
     const isolated = await applyPatch.handler({
-      workspace_context: first.workspace_context,
+      workspace_handle: first.workspace_handle,
       patch: isolatedPatch,
     });
     assert.equal(isolated.structuredContent.workspace_kind, 'projectless');
@@ -439,11 +439,11 @@ test('full-access Controller enters registered workspaces without approval', asy
     assert.equal(Object.hasOwn(nestedSelected, 'approval_required'), false);
     assert.equal(Object.hasOwn(nestedSelected, 'approval_id'), false);
 
-    const oldContext = selected.structuredContent.workspace_context;
-    const oldProjectlessContext = first.workspace_context;
+    const oldContext = selected.structuredContent.workspace_handle;
+    const oldProjectlessContext = first.workspace_handle;
     await client.close();
     assert.equal(
-      controller.workspaceContextManager.resolve(oldContext).workspace_context,
+      controller.workspaceHandleManager.resolve(oldContext).workspace_handle,
       oldContext,
     );
 
@@ -469,18 +469,18 @@ test('full-access Controller enters registered workspaces without approval', asy
       true,
     );
     const resumed = await controller.processManager.execCommand({
-      workspace_context: oldContext,
+      workspace_handle: oldContext,
       cmd: 'Write-Output RESUMED_CONTEXT',
     });
     assert.match(resumed.output, /RESUMED_CONTEXT/);
-    assert.equal(resumed.workspace_context, oldContext);
+    assert.equal(resumed.workspace_handle, oldContext);
 
     const resumedProjectless = await controller.processManager.execCommand({
-      workspace_context: oldProjectlessContext,
+      workspace_handle: oldProjectlessContext,
       cmd: 'Write-Output RESUMED_PROJECTLESS',
     });
     assert.match(resumedProjectless.output, /RESUMED_PROJECTLESS/);
-    assert.equal(resumedProjectless.workspace_context, oldProjectlessContext);
+    assert.equal(resumedProjectless.workspace_handle, oldProjectlessContext);
     assert.equal(resumedProjectless.workspace_root, first.workspace_root);
 
     const unregisterTool = tools.registry.get('unregister_workspace');
@@ -543,23 +543,23 @@ test('full-access Controller enters registered workspaces without approval', asy
     assert.equal(removed.structuredContent.state, 'consumed');
     assert.match(removed.structuredContent.output, /unregistered/);
     assert.equal(worker.workspaceRegistry.listRegistered().length, 1);
-    assert.throws(() => controller.workspaceContextManager.resolve(
-      registered.structuredContent.workspace_context,
+    assert.throws(() => controller.workspaceHandleManager.resolve(
+      registered.structuredContent.workspace_handle,
     ), /Unknown or expired/);
     await assert.rejects(controller.processManager.execCommand({
-      workspace_context: registered.structuredContent.workspace_context,
+      workspace_handle: registered.structuredContent.workspace_handle,
       cmd: 'Write-Output SHOULD_NOT_RUN',
-    }), /Unknown or expired workspace_context/);
+    }), /Unknown or expired workspace_handle/);
     assert.equal((await fs.stat(newRoot)).isDirectory(), true);
     assert.equal((await fs.stat(otherRoot)).isDirectory(), true);
 
-    const persistedContexts = new WorkspaceContextManager({
+    const persistedContexts = new WorkspaceHandleManager({
       environmentRegistry: controller.environmentRegistry,
       workerHub: controller.workerHub,
-      stateFile: path.join(tempRoot, 'workspace-contexts.json'),
+      stateFile: path.join(tempRoot, 'workspace-handles.json'),
     });
     assert.throws(() => persistedContexts.resolve(
-      registered.structuredContent.workspace_context,
+      registered.structuredContent.workspace_handle,
     ), /Unknown or expired/);
 
     // A missing directory must not block frozen approval for a Worker-local

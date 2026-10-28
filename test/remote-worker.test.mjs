@@ -351,7 +351,7 @@ test('Fresh Worker replaces a quarantined duplicate identity without a takeover 
     await staleClient.connect();
 
     const workspace = staleRuntime.workspaceRegistry.listRegistered()[0];
-    const context = controller.workspaceContextManager.createRegistered(
+    const context = controller.workspaceHandleManager.createRegistered(
       'worker-quarantine-reconnect',
       workspace,
     );
@@ -389,9 +389,9 @@ test('Fresh Worker replaces a quarantined duplicate identity without a takeover 
       { ok: true, worker_id: 'worker-quarantine-reconnect' },
     );
     assert.equal(
-      controller.workspaceContextManager.resolve(context.workspace_context)
-        .workspace_context,
-      context.workspace_context,
+      controller.workspaceHandleManager.resolve(context.workspace_handle)
+        .workspace_handle,
+      context.workspace_handle,
     );
   } finally {
     await staleClient?.close().catch(() => {});
@@ -476,26 +476,26 @@ test('Controller routes execution across Remote Workers', async () => {
     assert.equal(await controller.workerHub.waitForEnvironment('worker-a'), true);
     assert.equal(await controller.workerHub.waitForEnvironment('worker-b'), true);
 
-    const contextA = controller.workspaceContextManager.createRegistered(
+    const contextA = controller.workspaceHandleManager.createRegistered(
       'worker-a',
       workerA.workspaceRegistry.listRegistered()[0],
     );
-    const contextB = controller.workspaceContextManager.createRegistered(
+    const contextB = controller.workspaceHandleManager.createRegistered(
       'worker-b',
       workerB.workspaceRegistry.listRegistered()[0],
     );
     const a = await controller.processManager.execCommand({
-      workspace_context: contextA.workspace_context,
+      workspace_handle: contextA.workspace_handle,
       cmd: 'Write-Output WORKER_A',
     });
     const b = await controller.processManager.execCommand({
-      workspace_context: contextB.workspace_context,
+      workspace_handle: contextB.workspace_handle,
       cmd: 'Write-Output WORKER_B',
     });
     assert.match(a.output, /WORKER_A/);
     assert.match(b.output, /WORKER_B/);
     const first = await controller.processManager.execCommand({
-      workspace_context: contextA.workspace_context,
+      workspace_handle: contextA.workspace_handle,
       cmd: 'Write-Output before; Start-Sleep -Seconds 3; Write-Output after',
       yield_time_ms: 250,
     });
@@ -503,13 +503,13 @@ test('Controller routes execution across Remote Workers', async () => {
 
     const second = await controller.processManager.writeStdin({
       session_id: first.session_id,
-      workspace_context: contextA.workspace_context,
+      workspace_handle: contextA.workspace_handle,
       chars: '',
       yield_time_ms: 5000,
     });
     assert.equal(second.exit_code, 0);
     assert.equal(second.operation_id, first.operation_id);
-    assert.equal(second.workspace_context, contextA.workspace_context);
+    assert.equal(second.workspace_handle, contextA.workspace_handle);
     assert.equal(second.environment_id, 'worker-a');
     assert.match(first.output + second.output, /before/);
     assert.match(first.output + second.output, /after/);
@@ -534,14 +534,14 @@ test('Controller rejects cross-workspace write_stdin before contacting Worker', 
   });
 
   const contextA = {
-    workspace_context: '00000000-0000-4000-8000-00000000000a',
+    workspace_handle: '00000000-0000-4000-8000-00000000000a',
     environment_id: 'worker-session-scope',
     workspace_id: 'workspace-a',
     workspace_kind: 'registered',
     workspace_root: 'C:\\workspace',
   };
   const contextB = {
-    workspace_context: '00000000-0000-4000-8000-00000000000b',
+    workspace_handle: '00000000-0000-4000-8000-00000000000b',
     environment_id: 'worker-session-scope',
     workspace_id: 'workspace-b',
     workspace_kind: 'registered',
@@ -581,24 +581,24 @@ test('Controller rejects cross-workspace write_stdin before contacting Worker', 
   const manager = new RemoteProcessManager({
     environmentRegistry: registry,
     workerHub,
-    workspaceContextManager: {
-      resolve(contextId) {
-        if (contextId === contextA.workspace_context) return contextA;
-        if (contextId === contextB.workspace_context) return contextB;
-        throw new Error('Unknown context: ' + contextId);
+    workspaceHandleManager: {
+      resolve(handleId) {
+        if (handleId === contextA.workspace_handle) return contextA;
+        if (handleId === contextB.workspace_handle) return contextB;
+        throw new Error('Unknown context: ' + handleId);
       },
     },
   });
   try {
     const started = await manager.execCommand({
-      workspace_context: contextA.workspace_context,
+      workspace_handle: contextA.workspace_handle,
       cmd: 'long-running command',
     });
     assert.equal(typeof started.session_id, 'number');
     await assert.rejects(
       manager.writeStdin({
         session_id: started.session_id,
-        workspace_context: contextB.workspace_context,
+        workspace_handle: contextB.workspace_handle,
         chars: '',
       }),
       /does not own session_id/i,
@@ -607,11 +607,11 @@ test('Controller rejects cross-workspace write_stdin before contacting Worker', 
 
     const continued = await manager.writeStdin({
       session_id: started.session_id,
-      workspace_context: contextA.workspace_context,
+      workspace_handle: contextA.workspace_handle,
       chars: '',
     });
     assert.equal(workerHub.writeCalls, 1);
-    assert.equal(continued.workspace_context, contextA.workspace_context);
+    assert.equal(continued.workspace_handle, contextA.workspace_handle);
     assert.equal(continued.workspace_id, contextA.workspace_id);
   } finally {
     await manager.close();
@@ -629,7 +629,7 @@ test('Controller drops a public session when the Worker reports it expired', asy
     backend: 'remote-worker',
   });
   const context = {
-    workspace_context: '00000000-0000-4000-8000-000000000019',
+    workspace_handle: '00000000-0000-4000-8000-000000000019',
     environment_id: 'worker-expired-session',
     workspace_id: 'workspace-expired',
     workspace_kind: 'registered',
@@ -650,17 +650,17 @@ test('Controller drops a public session when the Worker reports it expired', asy
   const manager = new RemoteProcessManager({
     environmentRegistry: registry,
     workerHub: new FakeWorkerHub(),
-    workspaceContextManager: { resolve: () => context },
+    workspaceHandleManager: { resolve: () => context },
   });
   try {
     const started = await manager.execCommand({
-      workspace_context: context.workspace_context,
+      workspace_handle: context.workspace_handle,
       cmd: 'long-running command',
     });
     await assert.rejects(
       manager.writeStdin({
         session_id: started.session_id,
-        workspace_context: context.workspace_context,
+        workspace_handle: context.workspace_handle,
         chars: '',
       }),
       /Unknown or expired session_id/i,
@@ -700,11 +700,11 @@ test('Controller caps initial Remote Worker exec waits at five seconds', async (
   const manager = new RemoteProcessManager({
     environmentRegistry: registry,
     workerHub: new FakeWorkerHub(),
-    workspaceContextManager: {
-      resolve(contextId) {
-        assert.equal(contextId, '00000000-0000-4000-8000-000000000001');
+    workspaceHandleManager: {
+      resolve(handleId) {
+        assert.equal(handleId, '00000000-0000-4000-8000-000000000001');
         return {
-          workspace_context: contextId,
+          workspace_handle: handleId,
           environment_id: 'worker-cap',
           workspace_id: 'projectless-cap',
           workspace_kind: 'projectless',
@@ -715,7 +715,7 @@ test('Controller caps initial Remote Worker exec waits at five seconds', async (
   });
   try {
     const result = await manager.execCommand({
-      workspace_context: '00000000-0000-4000-8000-000000000001',
+      workspace_handle: '00000000-0000-4000-8000-000000000001',
       cmd: 'long-running command',
       yield_time_ms: 30_000,
     });
@@ -853,7 +853,7 @@ test('Remote Worker owns apply_patch, view_image, send_file, and receive_file fi
     await client.connect();
     assert.equal(await controller.workerHub.waitForEnvironment('worker-files'), true);
     const seeded = worker.workspaceRegistry.listRegistered()[0];
-    const workspaceContext = controller.workspaceContextManager.createRegistered(
+    const workspaceHandle = controller.workspaceHandleManager.createRegistered(
       'worker-files',
       seeded,
     );
@@ -865,7 +865,7 @@ test('Remote Worker owns apply_patch, view_image, send_file, and receive_file fi
       '*** End Patch',
     ].join('\n');
     const patchResult = await controller.fileService.applyPatch({
-      workspace_context: workspaceContext.workspace_context,
+      workspace_handle: workspaceHandle.workspace_handle,
       patch,
     });
     assert.match(patchResult.output, /A remote\.txt/);
@@ -880,7 +880,7 @@ test('Remote Worker owns apply_patch, view_image, send_file, and receive_file fi
     );
     await fs.writeFile(path.join(tempRoot, 'tiny.png'), png);
     const image = await controller.fileService.viewImage({
-      workspace_context: workspaceContext.workspace_context,
+      workspace_handle: workspaceHandle.workspace_handle,
       path: 'tiny.png',
     });
     assert.equal(image.mime_type, 'image/png');
@@ -891,7 +891,7 @@ test('Remote Worker owns apply_patch, view_image, send_file, and receive_file fi
     const docBytes = Buffer.from('fake-docx-content');
     await fs.writeFile(path.join(tempRoot, 'sample.docx'), docBytes);
     const file = await controller.fileService.sendFile({
-      workspace_context: workspaceContext.workspace_context,
+      workspace_handle: workspaceHandle.workspace_handle,
       path: 'sample.docx',
     });
     assert.equal(file.filename, 'sample.docx');
@@ -908,7 +908,7 @@ test('Remote Worker owns apply_patch, view_image, send_file, and receive_file fi
       file_name: 'incoming.txt',
     };
     const received = await controller.fileService.receiveFile({
-      workspace_context: workspaceContext.workspace_context,
+      workspace_handle: workspaceHandle.workspace_handle,
       file: incoming,
       destination: 'nested\\incoming.txt',
     });

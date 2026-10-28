@@ -58,15 +58,15 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
       overflow-wrap: anywhere;
     }
     #status[data-error="true"] { opacity: 1; }
-    #contextRow { margin-top: 12px; }
-    #contextKey {
+    #handleRow { margin-top: 12px; }
+    #handleElement {
       display: block; padding: 8px; margin-top: 5px;
       font: 12px/1.5 ui-monospace, Consolas, monospace;
       user-select: text; overflow-wrap: anywhere;
       border-radius: 7px;
       background: color-mix(in srgb, currentColor 7%, transparent);
     }
-    #copyKey { margin-top: 7px; }
+    #copyHandle { margin-top: 7px; }
     #actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
     button {
       border: 0;
@@ -97,10 +97,10 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
     <div class="row" id="policyScopeRow" hidden><div class="label">Always allow</div><div class="value" id="policyScope"></div></div>
     <div id="command"></div>
     <div id="status" aria-live="polite">Waiting for your decision.</div>
-    <div id="contextRow" hidden>
-      <div class="label">Project key (workspace_context)</div>
-      <code id="contextKey"></code>
-      <button id="copyKey" type="button">Copy key</button>
+    <div id="handleRow" hidden>
+      <div class="label">Workspace handle (workspace_handle)</div>
+      <code id="handleElement"></code>
+      <button id="copyHandle" type="button">Copy handle</button>
     </div>
     <div id="actions">
       <button id="deny" type="button" disabled>Deny</button>
@@ -134,9 +134,9 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
       const policyScope = document.getElementById("policyScope");
       const command = document.getElementById("command");
       const status = document.getElementById("status");
-      const contextRow = document.getElementById("contextRow");
-      const contextKey = document.getElementById("contextKey");
-      const copyKey = document.getElementById("copyKey");
+      const handleRow = document.getElementById("handleRow");
+      const handleElement = document.getElementById("handleElement");
+      const copyHandle = document.getElementById("copyHandle");
       const approve = document.getElementById("approve");
       const approveAlways = document.getElementById("approveAlways");
       const deny = document.getElementById("deny");
@@ -180,9 +180,9 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         approvalNonce = hidden.approval_nonce || null;
         verified = false;
         finalOutcome = null;
-        contextRow.hidden = true;
-        contextKey.textContent = '';
-        copyKey.textContent = 'Copy key';
+        handleRow.hidden = true;
+        handleElement.textContent = '';
+        copyHandle.textContent = 'Copy handle';
         retryDecision = null;
         const workspaceAction = structured.kind === "workspace";
         title.textContent = workspaceAction
@@ -199,7 +199,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         workspace.textContent = [
           structured.workspace_id,
           structured.workspace_root
-        ].filter(Boolean).join(" · ") || structured.workspace_context || "Unknown";
+        ].filter(Boolean).join(" · ") || structured.workspace_handle || "Unknown";
         environment.textContent = structured.environment_id || "Unknown";
         expires.textContent = structured.expires_at || "";
         const policyPersistable =
@@ -221,7 +221,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
                   ? "Create if missing, register, and enter this exact workspace."
                   : "Register and enter this exact workspace.")
               : structured.operation === "unregister_workspace"
-                ? "Remove this workspace registration and revoke its contexts. Do not delete project files. Running processes are not stopped."
+                ? "Remove this workspace registration and revoke its handles. Do not delete project files. Running processes are not stopped."
                 : "Enter this exact registered workspace.")
           : (structured.command || "");
         approve.textContent = workspaceAction ? "Approve" : "Approve once";
@@ -259,7 +259,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         updateHeight();
       }
 
-      function validKey(value) {
+      function validHandle(value) {
         return typeof value === 'string' &&
           /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value);
       }
@@ -274,15 +274,15 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         approve.disabled = true;
         approveAlways.disabled = true;
         deny.disabled = true;
-        contextRow.hidden = true;
-        contextKey.textContent = '';
+        handleRow.hidden = true;
+        handleElement.textContent = '';
         const workspaceSuccess = value.kind === 'workspace' &&
           ['select_workspace', 'register_workspace'].includes(value.operation) &&
           value.state === 'consumed' && value.action_failed !== true &&
-          validKey(value.workspace_context);
+          validHandle(value.workspace_handle);
         if (workspaceSuccess) {
-          contextKey.textContent = value.workspace_context;
-          contextRow.hidden = false;
+          handleElement.textContent = value.workspace_handle;
+          handleRow.hidden = false;
         }
         const message = value.result_unavailable
           ? 'Approval has finished; the original outcome is no longer available.'
@@ -312,8 +312,8 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
           ...(value.kind === 'workspace' &&
             ['select_workspace', 'register_workspace'].includes(value.operation) &&
             value.state === 'consumed' && !value.action_failed &&
-            validKey(value.workspace_context)
-            ? { workspace_context: value.workspace_context } : {}),
+            validHandle(value.workspace_handle)
+            ? { workspace_handle: value.workspace_handle } : {}),
         };
       }
 
@@ -369,8 +369,8 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
           } else if (value.state === 'pending' || value.state === 'approved_retryable') {
             // A valid nonce-authenticated Controller result is authoritative.
             finalOutcome = null;
-            contextRow.hidden = true;
-            contextKey.textContent = '';
+            handleRow.hidden = true;
+            handleElement.textContent = '';
             verified = true;
             busy = false;
             approve.disabled = false;
@@ -396,14 +396,14 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         }
       }
 
-      copyKey.addEventListener('click', async () => {
-        if (contextRow.hidden || !contextKey.textContent) return;
+      copyHandle.addEventListener('click', async () => {
+        if (handleRow.hidden || !handleElement.textContent) return;
         try {
           if (!window.navigator?.clipboard?.writeText) throw new Error('Clipboard unavailable');
-          await window.navigator.clipboard.writeText(contextKey.textContent);
-          copyKey.textContent = 'Copied';
+          await window.navigator.clipboard.writeText(handleElement.textContent);
+          copyHandle.textContent = 'Copied';
         } catch {
-          copyKey.textContent = 'Select the key above to copy';
+          copyHandle.textContent = 'Select the handle above to copy';
         }
         updateHeight();
       });
@@ -432,7 +432,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
           state: structured?.state,
           kind: structured?.kind,
           operation: structured?.operation,
-          workspace_context: structured?.workspace_context,
+          workspace_handle: structured?.workspace_handle,
           environment_id: structured?.environment_id,
           workspace_id: structured?.workspace_id,
           workspace_root: structured?.workspace_root,
@@ -464,7 +464,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
               ? "The user denied the frozen CCM workspace action; do not retry it."
               : structured?.action_failed
                 ? "The approved CCM workspace action failed safely and was consumed; request a new approval before retrying."
-                : "The user approved the frozen CCM workspace action. CCM completed it and returned the workspace context; do not recreate or retry the workspace action.")
+                : "The user approved the frozen CCM workspace action. CCM completed it and returned the workspace handle; do not recreate or retry the workspace action.")
           : (decision === "deny"
               ? "The user denied the frozen CCM full-access action."
               : decision === "approve_workspace"
@@ -597,17 +597,17 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
             setStatus("Approved and started. Session ID: " + structured.session_id);
           } else if (structured.exit_code != null) {
             setStatus("Approved and completed with exit code " + structured.exit_code + ".");
-          } else if (structured.workspace_context) {
+          } else if (structured.workspace_handle) {
             setStatus(structured.output || "Approved and entered workspace.");
           } else {
             setStatus(structured.output || "Decision recorded.");
           }
           if (workspaceAction && decision === 'approve' &&
               !structured.action_failed && structured.state === 'consumed' &&
-              typeof structured.workspace_context === 'string' &&
-              /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(structured.workspace_context)) {
-            contextKey.textContent = structured.workspace_context;
-            contextRow.hidden = false;
+              typeof structured.workspace_handle === 'string' &&
+              /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(structured.workspace_handle)) {
+            handleElement.textContent = structured.workspace_handle;
+            handleRow.hidden = false;
             updateHeight();
           }
           approve.disabled = true;

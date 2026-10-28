@@ -11,8 +11,8 @@ import { TrustedPackageScriptStore } from '../src/controller/trusted-package-scr
 import { RemoteProcessManager } from '../src/runtime/remote-process-manager.mjs';
 import { EnvironmentRegistry } from '../src/runtime/environment-registry.mjs';
 
-const workspaceContext = {
-  workspace_context: '00000000-0000-4000-8000-000000000001',
+const workspaceHandle = {
+  workspace_handle: '00000000-0000-4000-8000-000000000001',
   environment_id: 'worker-a',
   workspace_id: 'workspace-a',
   workspace_kind: 'registered',
@@ -45,7 +45,7 @@ test('trusted package-script store persists workspace and script-hash binding', 
   try {
     const first = new TrustedPackageScriptStore({ stateFile });
     const created = first.trust({
-      workspaceContext,
+      workspaceHandle,
       environment,
       args,
       packageScript,
@@ -54,18 +54,18 @@ test('trusted package-script store persists workspace and script-hash binding', 
 
     const second = new TrustedPackageScriptStore({ stateFile });
     assert.equal(second.mayMatch({
-      workspaceContext,
+      workspaceHandle,
       environment,
       args,
     }), true);
     assert.equal(second.match({
-      workspaceContext,
+      workspaceHandle,
       environment,
       args: { ...args, shell: 'powershell' },
       packageScript,
     })?.rule_id, created.rule_id);
     assert.equal(second.match({
-      workspaceContext,
+      workspaceHandle,
       environment,
       args,
       packageScript: {
@@ -74,8 +74,8 @@ test('trusted package-script store persists workspace and script-hash binding', 
       },
     }), null);
     assert.equal(second.match({
-      workspaceContext: {
-        ...workspaceContext,
+      workspaceHandle: {
+        ...workspaceHandle,
         workspace_id: 'workspace-b',
       },
       environment,
@@ -83,13 +83,13 @@ test('trusted package-script store persists workspace and script-hash binding', 
       packageScript,
     }), null);
     assert.equal(second.match({
-      workspaceContext,
+      workspaceHandle,
       environment,
       args: { ...args, workdir: 'packages/api' },
       packageScript,
     }), null);
     assert.equal(second.match({
-      workspaceContext,
+      workspaceHandle,
       environment,
       args: { ...args, tty: true },
       packageScript,
@@ -103,7 +103,7 @@ test('trusted package-script store rejects compound shell commands', () => {
   const store = new TrustedPackageScriptStore();
   assert.throws(
     () => store.trust({
-      workspaceContext,
+      workspaceHandle,
       environment,
       args: { ...args, cmd: 'npm test && whoami' },
       packageScript,
@@ -142,7 +142,7 @@ test('RemoteProcessManager runs a trusted npm test without approval', async () =
   };
   const store = new TrustedPackageScriptStore();
   const rule = store.trust({
-    workspaceContext,
+    workspaceHandle,
     environment,
     args,
     packageScript,
@@ -155,10 +155,10 @@ test('RemoteProcessManager runs a trusted npm test without approval', async () =
         throw new Error('approval must not be requested');
       },
     },
-    workspaceContextManager: {
+    workspaceHandleManager: {
       resolve(value) {
-        assert.equal(value, workspaceContext.workspace_context);
-        return { ...workspaceContext };
+        assert.equal(value, workspaceHandle.workspace_handle);
+        return { ...workspaceHandle };
       },
     },
     trustedPackageScriptStore: store,
@@ -166,7 +166,7 @@ test('RemoteProcessManager runs a trusted npm test without approval', async () =
 
   try {
     const result = await manager.execCommand({
-      workspace_context: workspaceContext.workspace_context,
+      workspace_handle: workspaceHandle.workspace_handle,
       cmd: 'npm test',
     });
     assert.equal(result.exit_code, 0);
@@ -212,7 +212,7 @@ test('changed package script no longer uses the trusted full-access path', async
   };
   const store = new TrustedPackageScriptStore();
   store.trust({
-    workspaceContext,
+    workspaceHandle,
     environment,
     args,
     packageScript,
@@ -220,9 +220,9 @@ test('changed package script no longer uses the trusted full-access path', async
   const manager = new RemoteProcessManager({
     environmentRegistry: registry,
     workerHub,
-    workspaceContextManager: {
+    workspaceHandleManager: {
       resolve() {
-        return { ...workspaceContext };
+        return { ...workspaceHandle };
       },
     },
     trustedPackageScriptStore: store,
@@ -230,7 +230,7 @@ test('changed package script no longer uses the trusted full-access path', async
 
   try {
     const result = await manager.execCommand({
-      workspace_context: workspaceContext.workspace_context,
+      workspace_handle: workspaceHandle.workspace_handle,
       cmd: 'npm test',
     });
     assert.equal(result.trusted_package_script, undefined);

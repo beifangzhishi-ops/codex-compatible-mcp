@@ -18,7 +18,7 @@ import {
   LEGACY_APPROVAL_UI_URI,
   PREVIOUS_APPROVAL_UI_URI,
 } from '../src/ui/approval-app.mjs';
-import { WORKSPACE_KEY_UI_HTML, WORKSPACE_KEY_UI_URI } from '../src/ui/workspace-key-app.mjs';
+import { WORKSPACE_HANDLE_UI_HTML, WORKSPACE_HANDLE_UI_URI } from '../src/ui/workspace-handle-app.mjs';
 import {
   PUBLISHED_FILE_UI_HTML,
   PUBLISHED_FILE_UI_URI,
@@ -76,7 +76,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     auditLogFile: path.join(tempRoot, 'audit.jsonl'),
     execPolicyStateFile: path.join(tempRoot, 'exec-policy.json'),
     trustedPackageScriptStateFile: path.join(tempRoot, 'trusted-package-scripts.json'),
-    workspaceContextStateFile: path.join(tempRoot, 'workspace-contexts.json'),
+    workspaceHandleStateFile: path.join(tempRoot, 'workspace-handles.json'),
     fileTransferStateDir: path.join(tempRoot, 'file-transfers'),
     fileDownloadOrigin: () => 'https://example.test',
     planStateDir: path.join(tempRoot, 'plans'),
@@ -110,6 +110,18 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
 
   try {
     await client.connect(transport);
+    assert.match(
+      client.getInstructions(),
+      /user, project instructions, or a previous CCM result already provide a workspace_handle.*pass that exact handle directly/i,
+    );
+    assert.match(
+      client.getInstructions(),
+      /NOT an environment_id, workspace_id, conversation context, or MCP session ID/i,
+    );
+    assert.match(
+      client.getInstructions(),
+      /Do NOT call select_workspace, register_workspace, or create_projectless_context merely to obtain another handle/i,
+    );
     assert.match(
       client.getInstructions(),
       /Do not use projectless as a fallback to bypass select_workspace or register_workspace.*current intended real project/i,
@@ -201,11 +213,11 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(listed.tools.some((tool) => tool.name === 'preview_published_image'), false);
     for (const name of ['select_workspace', 'register_workspace']) {
       const tool = listed.tools.find((entry) => entry.name === name);
-      assert.equal(tool?._meta?.ui?.resourceUri, WORKSPACE_KEY_UI_URI);
-      assert.equal(tool?._meta?.['openai/outputTemplate'], WORKSPACE_KEY_UI_URI);
+      assert.equal(tool?._meta?.ui?.resourceUri, WORKSPACE_HANDLE_UI_URI);
+      assert.equal(tool?._meta?.['openai/outputTemplate'], WORKSPACE_HANDLE_UI_URI);
     }
-    const keyResource = await client.readResource({ uri: WORKSPACE_KEY_UI_URI });
-    assert.equal(keyResource.contents[0].text, WORKSPACE_KEY_UI_HTML);
+    const keyResource = await client.readResource({ uri: WORKSPACE_HANDLE_UI_URI });
+    assert.equal(keyResource.contents[0].text, WORKSPACE_HANDLE_UI_HTML);
     assert.equal(listed.tools.some((tool) => tool.name === 'list_projects'), false);
     assert.equal(listed.tools.some((tool) => tool.name === 'send_file'), false);
     assert.equal(listed.tools.some((tool) => tool.name === 'receive_file'), false);
@@ -214,7 +226,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       name: 'write_stdin',
       arguments: {
         session_id: 999999,
-        workspace_context: '00000000-0000-4000-8000-000000000099',
+        workspace_handle: '00000000-0000-4000-8000-000000000099',
         chars: '',
       },
     });
@@ -335,7 +347,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(projectless.structuredContent.state, 'completed');
     const projectlessResult =
       projectless.structuredContent.calls[0].result.structured_content;
-    const workspaceContext = projectlessResult.workspace_context;
+    const workspaceHandle = projectlessResult.workspace_handle;
     const workspaceRoot = projectlessResult.workspace_root;
     assert.equal(projectlessResult.workspace_kind, 'projectless');
 
@@ -425,8 +437,8 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(recoveredApproval.isError, undefined);
     assert.equal(recoveredApproval.structuredContent.state, 'consumed');
     assert.equal(
-      recoveredApproval.structuredContent.workspace_context,
-      selectedWorkspace.structuredContent.workspace_context,
+      recoveredApproval.structuredContent.workspace_handle,
+      selectedWorkspace.structuredContent.workspace_handle,
     );
     const deniedStatusRead = await client.callTool({
       name: 'get_approval_status',
@@ -440,7 +452,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const result = await client.callTool({
       name: 'exec_command',
       arguments: {
-        workspace_context: workspaceContext,
+        workspace_handle: workspaceHandle,
         cmd: 'Write-Output MCP_OK',
       },
     });
@@ -452,7 +464,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const escalationPending = await client.callTool({
       name: 'exec_command',
       arguments: {
-        workspace_context: workspaceContext,
+        workspace_handle: workspaceHandle,
         cmd: 'Write-Output MCP_ESCALATED_OK',
         sandbox_permissions: 'require_escalated',
         justification: 'Allow this MCP test command once?',
@@ -490,7 +502,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
         calls: [{
           tool: 'ccm.exec_command',
           arguments: {
-            workspace_context: workspaceContext,
+            workspace_handle: workspaceHandle,
             cmd: 'Write-Output NESTED_CORE_OK',
           },
         }],
@@ -508,7 +520,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const patchResult = await client.callTool({
       name: 'apply_patch',
       arguments: {
-        workspace_context: workspaceContext,
+        workspace_handle: workspaceHandle,
         patch: [
           '*** Begin Patch',
           '*** Add File: mcp.txt',
@@ -535,7 +547,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
         calls: [{
           tool: 'ccm.view_image',
           arguments: {
-            workspace_context: workspaceContext,
+            workspace_handle: workspaceHandle,
             path: 'tiny.png',
           },
         }],
@@ -559,7 +571,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     await fs.writeFile(path.join(workspaceRoot, 'preview.docx'), docBytes);
     const publishResult = await client.callTool({
       name: 'publish_worker_file',
-      arguments: { workspace_context: workspaceContext, path: 'preview.docx' },
+      arguments: { workspace_handle: workspaceHandle, path: 'preview.docx' },
     });
     assert.equal(publishResult.isError, undefined);
     assert.ok(!publishResult.content.some((item) => item.type === 'resource_link'));

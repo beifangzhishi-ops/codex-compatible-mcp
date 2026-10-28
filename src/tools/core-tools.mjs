@@ -1,6 +1,6 @@
 import * as z from 'zod/v4';
 import { APPROVAL_UI_URI } from '../ui/approval-app.mjs';
-import { WORKSPACE_KEY_UI_URI } from '../ui/workspace-key-app.mjs';
+import { WORKSPACE_HANDLE_UI_URI } from '../ui/workspace-handle-app.mjs';
 
 const UNIFIED_EXEC_OUTPUT_SCHEMA = {
   chunk_id: z.string().optional(),
@@ -31,7 +31,7 @@ const UNIFIED_EXEC_OUTPUT_SCHEMA = {
   justification: z.string().optional(),
   expires_at: z.string().optional(),
   intent_sha256: z.string().optional(),
-  workspace_context: z.string().optional(),
+  workspace_handle: z.string().optional(),
   workspace_id: z.string().optional(),
   workspace_kind: z.enum(['registered', 'projectless']).optional(),
   workspace_root: z.string().optional(),
@@ -83,8 +83,8 @@ function execResult(value) {
     );
   }
   if (value.chunk_id) lines.push(`Chunk ID: ${value.chunk_id}`);
-  if (value.workspace_context) {
-    lines.push(`Workspace context: ${value.workspace_context}`);
+  if (value.workspace_handle) {
+    lines.push(`Workspace handle: ${value.workspace_handle}`);
     lines.push(`Workspace: ${value.environment_id} / ${value.workspace_id}`);
     lines.push(`Workspace kind: ${value.workspace_kind}`);
   }
@@ -162,14 +162,14 @@ function approvalCardResult(prepared) {
 
 function workspaceActionStatus(request, {
   output,
-  workspaceContext = null,
+  workspaceHandle = null,
   actionFailed = false,
 } = {}) {
   return {
     wall_time_seconds: 0,
     output: String(output || ''),
     ...request,
-    ...(workspaceContext || {}),
+    ...(workspaceHandle || {}),
     ...(actionFailed ? { action_failed: true } : {}),
   };
 }
@@ -201,7 +201,7 @@ async function executeWorkspaceAction(runtime, action, {
     }
     // Revoke Controller context handles before changing the Worker registry.
     // A failed Controller state write must not leave an unrevoked old context.
-    runtime.workspaceContextManager.revokeRegistered(
+    runtime.workspaceHandleManager.revokeRegistered(
       environment.id, action.workspace_id,
     );
     await runtime.workerHub.call(
@@ -268,7 +268,7 @@ async function executeWorkspaceAction(runtime, action, {
     throw new Error('Unknown workspace operation: ' + action.operation);
   }
 
-  return runtime.workspaceContextManager.createRegistered(
+  return runtime.workspaceHandleManager.createRegistered(
     environment.id,
     workspace,
   );
@@ -305,14 +305,14 @@ async function resolvePendingWorkspaceAction(
   );
   const action = claimed.action;
   try {
-    const workspaceContext = await executeWorkspaceAction(runtime, action);
+    const workspaceHandle = await executeWorkspaceAction(runtime, action);
     const consumed = runtime.approvalManager.markAppWorkspaceConsumed(
       approvalId,
     );
     return workspaceActionStatus(consumed, {
-      workspaceContext,
+      workspaceHandle,
       output: action.operation === 'unregister_workspace'
-        ? 'Approved and unregistered the workspace. Project files were not deleted; previous workspace contexts are invalid.'
+        ? 'Approved and unregistered the workspace. Project files were not deleted; previous workspace handles are invalid.'
         : action.operation === 'select_workspace'
           ? 'Approved and entered the selected workspace.'
           : 'Approved, registered, and entered the workspace.',
@@ -337,8 +337,8 @@ function patchResult(value) {
     structuredContent: {
       workdir: value.workdir,
       changes: value.changes,
-      ...(value.workspace_context ? {
-        workspace_context: value.workspace_context,
+      ...(value.workspace_handle ? {
+        workspace_handle: value.workspace_handle,
         environment_id: value.environment_id,
         workspace_id: value.workspace_id,
         workspace_kind: value.workspace_kind,
@@ -365,8 +365,8 @@ function imageResult(value) {
       source_width: value.source_width,
       source_height: value.source_height,
       compressed: value.compressed,
-      ...(value.workspace_context ? {
-        workspace_context: value.workspace_context,
+      ...(value.workspace_handle ? {
+        workspace_handle: value.workspace_handle,
         environment_id: value.environment_id,
         workspace_id: value.workspace_id,
         workspace_kind: value.workspace_kind,
@@ -481,20 +481,20 @@ export function registerCoreTools(registry, runtime) {
     tags: ['workspace', 'projectless', 'context', 'environment'],
     supportsParallel: true,
     description: [
-      'Create a projectless workspace_context for operations that do not belong to a registered project.',
+      'Create a projectless workspace_handle for operations that do not belong to a registered project.',
       'Use this when the user has not selected, requested, or otherwise indicated a real registered project. If select_workspace or register_workspace is awaiting approval for the user\'s current intended real project, call request_approval and wait for that action instead of creating projectless context to bypass it. If the user explicitly changes to a different real project, the older pending workspace action does not block select_workspace or register_workspace for the new target; do not use projectless context as a substitute for that new project. If environment_id is omitted, CCM uses the primary environment.',
-      'The returned workspace_context supplies Worker routing and the context root for subsequent CCM operations. Read-scope decisions, including whether absolute paths outside the projectless root are readable, belong to list_projects and exec_command rather than this lifecycle tool.',
+      'The returned workspace_handle supplies Worker routing and the context root for subsequent CCM operations. Read-scope decisions, including whether absolute paths outside the projectless root are readable, belong to list_projects and exec_command rather than this lifecycle tool.',
     ].join('\n\n'),
     inputSchema: {
       environment_id: z.string().optional().describe('Environment on which to create the projectless context. Omit to use the primary environment.'),
     },
     handler: async (args) => {
       try {
-        if (!runtime.workspaceContextManager) {
-          throw new Error('Workspace context manager is not available.');
+        if (!runtime.workspaceHandleManager) {
+          throw new Error('Workspace handle manager is not available.');
         }
         return jsonResult(
-          await runtime.workspaceContextManager.createProjectless(args.environment_id),
+          await runtime.workspaceHandleManager.createProjectless(args.environment_id),
         );
       } catch (error) {
         return toolError(error);
@@ -507,15 +507,15 @@ export function registerCoreTools(registry, runtime) {
     provider: 'ccm-core',
     surfaces: { direct: true, codeMode: true },
     mcpMeta: {
-      ui: { resourceUri: WORKSPACE_KEY_UI_URI },
-      'openai/outputTemplate': WORKSPACE_KEY_UI_URI,
+      ui: { resourceUri: WORKSPACE_HANDLE_UI_URI },
+      'openai/outputTemplate': WORKSPACE_HANDLE_UI_URI,
     },
     tags: ['workspace', 'project', 'approval'],
     description: [
-      'Enter one registered workspace. Full-access environments return the workspace_context directly; restricted environments return a frozen approval request.',
-      'Use this only when the user explicitly intends to work in that registered project. Do not select a workspace merely to read or search a path; for a genuinely projectless task, use create_projectless_context for temporary execution context instead.',
-      'Call directly for a full-access environment so CCM itself displays a project-key card with the resulting workspace_context, without needing you to repeat the key. For restricted environments, prefer the Code Mode route through ccm.exec, followed by the top-level request_approval tool when approval_required=true; the approved card itself then displays the key. Do not send a separate key message. While that workspace remains the user\'s intended target, wait for the frozen action to resolve; do not retry the same target or switch to projectless context to bypass it. If the user explicitly changes to a different real project, directly select or register that new target without requiring the older pending approval to be denied or resolved first; pending workspace approvals are independent.',
-      'Full-access skips user approval but keeps workspace identity validation, Worker routing, and workspace-context boundaries.',
+      'Enter one registered workspace. Full-access environments return the workspace_handle directly; restricted environments return a frozen approval request.',
+      'Use this only when the user explicitly intends to work in that registered project AND no usable workspace_handle has already been supplied. A workspace_handle is not an environment_id or workspace_id. Reuse an existing handle directly with operational tools; never re-enter a project or request approval just because the user asks to work there. Do not select a workspace merely to read or search a path; for a genuinely projectless task, use create_projectless_context for temporary execution handle instead.',
+      'Call directly for a full-access environment so CCM itself displays a workspace-handle card with the resulting workspace_handle, without needing you to repeat the key. For restricted environments, prefer the Code Mode route through ccm.exec, followed by the top-level request_approval tool when approval_required=true; the approved card itself then displays the key. Do not send a separate key message. While that workspace remains the user\'s intended target, wait for the frozen action to resolve; do not retry the same target or switch to projectless context to bypass it. If the user explicitly changes to a different real project, directly select or register that new target without requiring the older pending approval to be denied or resolved first; pending workspace approvals are independent.',
+      'Full-access skips user approval but keeps workspace identity validation, Worker routing, and workspace-handle boundaries.',
     ].join('\n\n'),
     inputSchema: {
       environment_id: z.string().describe('Environment whose Worker owns the workspace.'),
@@ -574,15 +574,15 @@ export function registerCoreTools(registry, runtime) {
     provider: 'ccm-core',
     surfaces: { direct: true, codeMode: true },
     mcpMeta: {
-      ui: { resourceUri: WORKSPACE_KEY_UI_URI },
-      'openai/outputTemplate': WORKSPACE_KEY_UI_URI,
+      ui: { resourceUri: WORKSPACE_HANDLE_UI_URI },
+      'openai/outputTemplate': WORKSPACE_HANDLE_UI_URI,
     },
     tags: ['workspace', 'project', 'approval', 'register'],
     description: [
-      'Register and enter one exact project directory. Full-access environments return the workspace_context directly; restricted environments return a frozen approval request.',
-      'Use this only when the user explicitly intends to register that concrete directory as a project. Do not register a directory merely to gain read access; for a genuinely projectless task, use create_projectless_context instead.',
-      'Call directly for a full-access environment so CCM itself displays a project-key card with the resulting workspace_context, without needing you to repeat the key. For restricted environments, prefer the Code Mode route through ccm.exec, followed by the top-level request_approval tool when approval_required=true; the approved card itself then displays the key. Do not send a separate key message. While that workspace remains the user\'s intended target, wait for the frozen action to resolve; do not retry the same target or switch to projectless context to bypass it. If the user explicitly changes to a different real project, directly select or register that new target without requiring the older pending approval to be denied or resolved first; pending workspace approvals are independent.',
-      'With create_if_missing=true, registration may create the exact missing directory before entry. Full-access skips user approval but keeps target revalidation and workspace-context boundaries.',
+      'Register and enter one exact project directory. Full-access environments return the workspace_handle directly; restricted environments return a frozen approval request.',
+      'Use this only when the user explicitly intends to register that concrete directory as a project AND no usable workspace_handle is already available for that project. A workspace_handle is not an environment_id or workspace_id. Do not register or request approval again merely because the user asks for work in an already entered project. Do not register a directory merely to gain read access; for a genuinely projectless task, use create_projectless_context instead.',
+      'Call directly for a full-access environment so CCM itself displays a workspace-handle card with the resulting workspace_handle, without needing you to repeat the key. For restricted environments, prefer the Code Mode route through ccm.exec, followed by the top-level request_approval tool when approval_required=true; the approved card itself then displays the key. Do not send a separate key message. While that workspace remains the user\'s intended target, wait for the frozen action to resolve; do not retry the same target or switch to projectless context to bypass it. If the user explicitly changes to a different real project, directly select or register that new target without requiring the older pending approval to be denied or resolved first; pending workspace approvals are independent.',
+      'With create_if_missing=true, registration may create the exact missing directory before entry. Full-access skips user approval but keeps target revalidation and workspace-handle boundaries.',
     ].join('\n\n'),
     inputSchema: {
       environment_id: z.string().describe('Environment whose Worker owns the directory.'),
@@ -652,7 +652,7 @@ export function registerCoreTools(registry, runtime) {
       'Remove exactly one registered workspace from a Worker, without deleting its directory or files.',
       'Always requires a one-shot CCM approval card, even in full-access environments. No Always allow policy is available.',
       'Discover through tool_search and invoke through exec. If approval_required=true, pass its approval_id to the top-level request_approval tool and wait for the card decision; never manually retry or bypass it.',
-      'Approval freezes the environment, workspace id, root, and registration identity. Previously issued workspace_context handles for that registration are revoked. Existing running processes are not forcibly terminated.',
+      'Approval freezes the environment, workspace id, root, and registration identity. Previously issued workspace_handle handles for that registration are revoked. Existing running processes are not forcibly terminated.',
       'Only registered workspaces may be unregistered. Projectless contexts are not registration entries. The project directory may already be missing; it is not needed for deregistration.',
     ].join('\n\n'),
     inputSchema: {
@@ -681,7 +681,7 @@ export function registerCoreTools(registry, runtime) {
           },
           'Allow CCM to unregister workspace ' + environment.id + ' / ' +
           workspace.workspace_id + ' at ' + workspace.root +
-          '? The project directory and files will remain. Previously issued workspace contexts will be invalidated.',
+          '? The project directory and files will remain. Previously issued workspace handles will be invalidated.',
         );
         return jsonResult({
           approval_required: true,
@@ -703,8 +703,8 @@ export function registerCoreTools(registry, runtime) {
     supportsParallel: true,
     description: [
       'Runs a command using plain pipes by default; set tty=true to allocate a PTY. Returns output or a session ID for ongoing interaction.',
-      'workspace_context is required and determines the Worker, cwd/session ownership, and restricted-write root. It does not narrow filesystem reads below the environment\'s sandbox_read_scope. Do not pass or infer a separate environment for this command.',
-      'For a genuinely projectless task, when the user has not selected, requested, or otherwise indicated a real registered project, first discover ccm.create_projectless_context with tool_search and invoke it through exec; then pass the returned workspace_context here. If select_workspace or register_workspace is awaiting approval for the user\'s current intended real project, wait for that action and use its registered workspace_context instead of bypassing it with projectless context. If the user explicitly changes to a different real project, obtain a workspace_context for the new target through select_workspace or register_workspace; the older pending approval does not block that new workspace action. When sandbox_read_scope=host, projectless context is sufficient for absolute-path reads anywhere readable on the selected Worker; do not select/register a target path merely to inspect it.',
+      'workspace_handle is required and determines the Worker, cwd/session ownership, and restricted-write root. It does not narrow filesystem reads below the environment\'s sandbox_read_scope. Do not pass or infer a separate environment for this command.',
+      'For a genuinely projectless task, when the user has not selected, requested, or otherwise indicated a real registered project, first discover ccm.create_projectless_context with tool_search and invoke it through exec; then pass the returned workspace_handle here. If select_workspace or register_workspace is awaiting approval for the user\'s current intended real project, wait for that action and use its registered workspace_handle instead of bypassing it with projectless context. If the user explicitly changes to a different real project, obtain a workspace_handle for the new target through select_workspace or register_workspace; the older pending approval does not block that new workspace action. When sandbox_read_scope=host, projectless context is sufficient for absolute-path reads anywhere readable on the selected Worker; do not select/register a target path merely to inspect it.',
       'In workspace-write environments, normal remote Git commands such as git clone/fetch/pull/push/ls-remote are handled automatically and do not require sandbox_permissions=require_escalated. Run remote Git as Git-only shell commands so CCM can recognize the trusted path.',
       'Controller-trusted package scripts such as a specifically trusted workspace npm test are also handled automatically through exec_command. Trust is bound to the workspace and current package.json script hash; if the script changes it stops matching and must not be treated as trusted.',
       'On Windows workspace-write, direct node --test invocations are also a built-in trusted full-access class because the restricted token cannot spawn the Node test workers. Test code therefore runs with host permissions.',
@@ -715,7 +715,7 @@ export function registerCoreTools(registry, runtime) {
     ].join('\n\n'),
     inputSchema: {
       cmd: z.string().min(1).describe('Shell command to execute.'),
-      workspace_context: z.string().uuid().describe('Existing execution context. It selects the Worker and context root; obtain one with create_projectless_context, select_workspace, or register_workspace before executing. It is not itself the filesystem read boundary.'),
+      workspace_handle: z.string().uuid().describe('Existing workspace execution handle (UUID). If user/project instructions supply one for the intended workspace, reuse it directly without selecting/registering the workspace again. This is not an environment_id or workspace_id. The handle selects the Worker and workspace root; it does not limit the environment filesystem read scope.'),
       workdir: z.string().optional().describe('Relative subdirectory inside the selected context root. Defaults to the context root.'),
       tty: z.boolean().optional().describe('True allocates a PTY; false or omitted uses plain pipes.'),
       yield_time_ms: z.number().int().max(30_000).nonnegative().optional().describe('Wait before the initial command call yields output or a session. Defaults to 2000 ms. Values above 5000 ms are clamped to 5000 ms; long-running commands continue in a session and should be resumed with write_stdin.'),
@@ -728,9 +728,9 @@ export function registerCoreTools(registry, runtime) {
     outputSchema: UNIFIED_EXEC_OUTPUT_SCHEMA,
     handler: async (args) => {
       try {
-        if (!args.workspace_context) {
+        if (!args.workspace_handle) {
           throw new Error(
-            'exec_command requires workspace_context for Worker routing/cwd. For a genuinely projectless task, use ccm.create_projectless_context through tool_search + exec. If select_workspace or register_workspace is awaiting approval for the user\'s current intended real project, wait for it and use its registered workspace_context instead of bypassing it with projectless context. If the user explicitly changes to a different real project, obtain a context for that new target; the older pending approval does not block the new workspace action. The target read path does not need to be selected as a workspace when sandbox_read_scope=host.',
+            'exec_command requires workspace_handle for Worker routing/cwd. For a genuinely projectless task, use ccm.create_projectless_context through tool_search + exec. If select_workspace or register_workspace is awaiting approval for the user\'s current intended real project, wait for it and use its registered workspace_handle instead of bypassing it with projectless context. If the user explicitly changes to a different real project, obtain a context for that new target; the older pending approval does not block the new workspace action. The target read path does not need to be selected as a workspace when sandbox_read_scope=host.',
           );
         }
         return execResult(await runtime.processManager.execCommand(args));
@@ -881,11 +881,11 @@ export function registerCoreTools(registry, runtime) {
     tags: ['process', 'terminal', 'session', 'stdin'],
     description: [
       'Writes characters to an existing unified exec session and returns recent output.',
-      'workspace_context is required and must match the context that created session_id. Copy both values from the exec_command result; CCM rejects cross-workspace session continuation before contacting the Worker.',
+      'workspace_handle is required and must match the context that created session_id. Copy both values from the exec_command result; CCM rejects cross-workspace session continuation before contacting the Worker.',
     ].join(' '),
     inputSchema: {
       session_id: z.number().int().describe('Identifier of the running unified exec session.'),
-      workspace_context: z.string().uuid().describe('Workspace context returned with the exec_command session_id. It must own that session.'),
+      workspace_handle: z.string().uuid().describe('Workspace handle returned with the exec_command session_id. It must own that session.'),
       chars: z.string().optional().describe('Bytes to write to stdin. Defaults to empty, which polls without writing.'),
       yield_time_ms: z.number().int().max(30_000).nonnegative().optional().describe('Non-empty writes default to 250 ms; empty polls default to 1000 ms. All write_stdin waits cap at 30000 ms.'),
       max_output_tokens: z.number().int().positive().optional().describe('Output token budget. Defaults to 10000 tokens.'),
@@ -900,7 +900,7 @@ export function registerCoreTools(registry, runtime) {
           return toolError(new Error([
             'Direct empty write_stdin polling is disabled.',
             'CCM did not poll or modify this session.',
-            'Poll the existing session through exec with a nested ccm.write_stdin call, reusing the exact workspace_context and session_id.',
+            'Poll the existing session through exec with a nested ccm.write_stdin call, reusing the exact workspace_handle and session_id.',
             'Do not create a replacement session or retry the empty poll through top-level write_stdin.',
             'Top-level write_stdin remains available for real non-empty interactive/TTY stdin writes.',
           ].join(' ')));
@@ -919,12 +919,12 @@ export function registerCoreTools(registry, runtime) {
     tags: ['edit', 'patch', 'filesystem'],
     environmentRequirements: { capabilities: ['applyPatch'] },
     description: [
-      'Apply a Codex-style Begin/End Patch inside an existing workspace_context.',
-      'For a genuinely projectless task, automatically obtain a projectless context first through ccm.create_projectless_context; do not ask the user to choose or register a temporary directory. If select_workspace or register_workspace is awaiting approval for the user\'s current intended real project, wait for that action and use its registered workspace_context instead of bypassing it with projectless context. If the user explicitly changes to another real project, obtain the new target\'s workspace_context; the older pending approval does not block that new workspace action.',
+      'Apply a Codex-style Begin/End Patch inside an existing workspace_handle.',
+      'For a genuinely projectless task, automatically obtain a projectless context first through ccm.create_projectless_context; do not ask the user to choose or register a temporary directory. If select_workspace or register_workspace is awaiting approval for the user\'s current intended real project, wait for that action and use its registered workspace_handle instead of bypassing it with projectless context. If the user explicitly changes to another real project, obtain the new target\'s workspace_handle; the older pending approval does not block that new workspace action.',
     ].join('\n\n'),
     inputSchema: {
       patch: z.string().min(1).describe('Codex-style patch text beginning with *** Begin Patch.'),
-      workspace_context: z.string().uuid().describe('Existing workspace context.'),
+      workspace_handle: z.string().uuid().describe('Existing workspace handle.'),
       workdir: z.string().optional().describe('Relative subdirectory inside the selected context root.'),
     },
     handler: async (args) => {
@@ -953,12 +953,12 @@ export function registerCoreTools(registry, runtime) {
     supportsParallel: true,
     description: [
       'Read a local image and return bounded MCP image content. When the output byte budget is exceeded, the Worker first tries full-resolution low-loss WebP (quality 95/90/85), then progressively reduces dimensions if necessary to fit the budget. The source file is never modified. Source files are limited to 64 MiB.',
-      'For a genuinely projectless task, automatically obtain a projectless context first through ccm.create_projectless_context; do not ask the user to choose or register a temporary directory. If select_workspace or register_workspace is awaiting approval for the user\'s current intended real project, wait for that action and use its registered workspace_context instead of bypassing it with projectless context. If the user explicitly changes to another real project, obtain the new target\'s workspace_context; the older pending approval does not block that new workspace action.',
+      'For a genuinely projectless task, automatically obtain a projectless context first through ccm.create_projectless_context; do not ask the user to choose or register a temporary directory. If select_workspace or register_workspace is awaiting approval for the user\'s current intended real project, wait for that action and use its registered workspace_handle instead of bypassing it with projectless context. If the user explicitly changes to another real project, obtain the new target\'s workspace_handle; the older pending approval does not block that new workspace action.',
       'This direct tool is also available through exec for nested or batched image calls.',
     ].join(' '),
     inputSchema: {
       path: z.string().min(1).describe('Image path relative to the selected context root.'),
-      workspace_context: z.string().uuid().describe('Existing workspace context.'),
+      workspace_handle: z.string().uuid().describe('Existing workspace handle.'),
     },
     handler: async (args) => {
       try {

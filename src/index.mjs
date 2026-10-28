@@ -29,9 +29,9 @@ const runtime = createControllerRuntime({
   defaultEnvironmentId: localEnvironmentId,
   requestControllerRestart,
   workerTakeoverToken: localWorkerTakeoverToken,
-  workspaceContextStateFile:
-    process.env.CCM_WORKSPACE_CONTEXT_FILE ||
-    path.join(installRoot, '.state', 'workspace-contexts.json'),
+  workspaceHandleStateFile:
+    process.env.CCM_WORKSPACE_HANDLE_FILE ||
+    path.join(installRoot, '.state', 'workspace-handles.json'),
   planStateDir: path.join(installRoot, '.state', 'plans'),
 });
 await runtime.start();

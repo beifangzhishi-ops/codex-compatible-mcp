@@ -1,35 +1,35 @@
 export class RemoteFileService {
-  constructor({ environmentRegistry, workerHub, workspaceContextManager = null }) {
+  constructor({ environmentRegistry, workerHub, workspaceHandleManager = null }) {
     if (!environmentRegistry || !workerHub) {
       throw new Error('RemoteFileService requires environmentRegistry and workerHub.');
     }
     this.environmentRegistry = environmentRegistry;
     this.workerHub = workerHub;
-    this.workspaceContextManager = workspaceContextManager;
+    this.workspaceHandleManager = workspaceHandleManager;
   }
 
   #resolveExecution(args) {
-    if (!args.workspace_context) {
-      throw new Error('File operation requires workspace_context.');
+    if (!args.workspace_handle) {
+      throw new Error('File operation requires workspace_handle.');
     }
     if (args.environment_id) {
       throw new Error(
-        'File operation does not accept environment_id; workspace_context already determines the environment.',
+        'File operation does not accept environment_id; workspace_handle already determines the environment.',
       );
     }
-    if (!this.workspaceContextManager) {
-      throw new Error('Workspace context manager is not available.');
+    if (!this.workspaceHandleManager) {
+      throw new Error('Workspace handle manager is not available.');
     }
-    const workspaceContext = this.workspaceContextManager.resolve(
-      args.workspace_context,
+    const workspaceHandle = this.workspaceHandleManager.resolve(
+      args.workspace_handle,
     );
     const environment = this.environmentRegistry.resolve(
-      workspaceContext.environment_id,
+      workspaceHandle.environment_id,
     );
     return {
       environment,
-      workspaceContext,
-      workspaceId: workspaceContext.workspace_id,
+      workspaceHandle,
+      workspaceId: workspaceHandle.workspace_id,
     };
   }
 
@@ -46,9 +46,9 @@ export class RemoteFileService {
       ...args,
       environment_id: environment.id,
       workspace_id: execution.workspaceId,
-      expected_workspace_root: execution.workspaceContext.workspace_root,
+      expected_workspace_root: execution.workspaceHandle.workspace_root,
     };
-    delete forwarded.workspace_context;
+    delete forwarded.workspace_handle;
     delete forwarded.workspace_scoped;
     const result = await this.workerHub.call(
       environment.id,
@@ -56,7 +56,7 @@ export class RemoteFileService {
       forwarded,
       { timeoutMs: 30_000 },
     );
-    return { ...result, ...(execution.workspaceContext || {}) };
+    return { ...result, ...(execution.workspaceHandle || {}) };
   }
   async viewImage(args) {
     const execution = this.#resolveExecution(args);
@@ -71,16 +71,16 @@ export class RemoteFileService {
       ...args,
       environment_id: environment.id,
       workspace_id: execution.workspaceId,
-      expected_workspace_root: execution.workspaceContext.workspace_root,
+      expected_workspace_root: execution.workspaceHandle.workspace_root,
     };
-    delete forwarded.workspace_context;
+    delete forwarded.workspace_handle;
     const result = await this.workerHub.call(
       environment.id,
       'view_image',
       forwarded,
       { timeoutMs: 30_000 },
     );
-    return { ...result, ...(execution.workspaceContext || {}) };
+    return { ...result, ...(execution.workspaceHandle || {}) };
   }
 
   async sendFile(args) {
@@ -99,11 +99,11 @@ export class RemoteFileService {
         path: args.path,
         environment_id: environment.id,
         workspace_id: execution.workspaceId,
-        expected_workspace_root: execution.workspaceContext.workspace_root,
+        expected_workspace_root: execution.workspaceHandle.workspace_root,
       },
       { timeoutMs: 60_000 },
     );
-    return { ...result, ...execution.workspaceContext };
+    return { ...result, ...execution.workspaceHandle };
   }
 
   async receiveFile(args) {
@@ -124,10 +124,10 @@ export class RemoteFileService {
         overwrite: args.overwrite === true,
         environment_id: environment.id,
         workspace_id: execution.workspaceId,
-        expected_workspace_root: execution.workspaceContext.workspace_root,
+        expected_workspace_root: execution.workspaceHandle.workspace_root,
       },
       { timeoutMs: 330_000 },
     );
-    return { ...result, ...execution.workspaceContext };
+    return { ...result, ...execution.workspaceHandle };
   }
 }

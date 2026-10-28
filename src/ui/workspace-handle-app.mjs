@@ -1,7 +1,7 @@
-export const WORKSPACE_KEY_UI_URI = 'ui://ccm/workspace-key-v1.html';
+export const WORKSPACE_HANDLE_UI_URI = 'ui://ccm/workspace-handle-v1.html';
 
 // A read-only card for successfully entered registered projects only.
-export const WORKSPACE_KEY_UI_HTML = String.raw`<!doctype html>
+export const WORKSPACE_HANDLE_UI_HTML = String.raw`<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -13,7 +13,7 @@ export const WORKSPACE_KEY_UI_HTML = String.raw`<!doctype html>
     #card { padding: 12px; border: 1px solid color-mix(in srgb, currentColor 16%, transparent); border-radius: 12px; overflow-wrap: anywhere; }
     #title { font-weight: 700; margin-bottom: 4px; }
     #project { opacity: .75; font-size: 12px; }
-    #key { display: block; margin-top: 10px; padding: 9px; background: color-mix(in srgb, currentColor 7%, transparent); border-radius: 6px; font: 12px/1.5 ui-monospace, monospace; user-select: text; overflow-wrap: anywhere; }
+    #handle { display: block; margin-top: 10px; padding: 9px; background: color-mix(in srgb, currentColor 7%, transparent); border-radius: 6px; font: 12px/1.5 ui-monospace, monospace; user-select: text; overflow-wrap: anywhere; }
     #actions { text-align: right; margin-top: 8px; }
     #copy { border: 0; border-radius: 8px; padding: 7px 12px; font: inherit; cursor: pointer; color: inherit; background: color-mix(in srgb, currentColor 12%, transparent); }
     #status { font-size: 11px; opacity: .75; margin-top: 4px; }
@@ -21,17 +21,17 @@ export const WORKSPACE_KEY_UI_HTML = String.raw`<!doctype html>
 </head>
 <body>
   <div id="card" hidden>
-    <div id="title">CCM project key (workspace_context)</div>
+    <div id="title">CCM workspace handle (workspace_handle)</div>
     <div id="project"></div>
-    <code id="key"></code>
-    <div id="actions"><button id="copy" type="button">Copy key</button></div>
-    <div id="status">You can also select and copy the key above.</div>
+    <code id="handle"></code>
+    <div id="actions"><button id="copy" type="button">Copy handle</button></div>
+    <div id="status">You can also select and copy the handle above.</div>
   </div>
   <script>
     (() => {
       const card = document.getElementById('card');
       const project = document.getElementById('project');
-      const key = document.getElementById('key');
+      const handle = document.getElementById('handle');
       const status = document.getElementById('status');
       const copy = document.getElementById('copy');
       let current = '';
@@ -41,19 +41,19 @@ export const WORKSPACE_KEY_UI_HTML = String.raw`<!doctype html>
       function show(result) {
         const value = result?.structuredContent || result;
         const valid = value?.workspace_kind === 'registered' &&
-          typeof value.workspace_context === 'string' &&
-          /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value.workspace_context) &&
+          typeof value.workspace_handle === 'string' &&
+          /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value.workspace_handle) &&
           typeof value.environment_id === 'string' &&
           typeof value.workspace_id === 'string' &&
           value.approval_required !== true && value.action_failed !== true;
         card.hidden = !valid;
         if (valid) {
-          current = value.workspace_context;
+          current = value.workspace_handle;
           project.textContent = value.environment_id + ' / ' + value.workspace_id;
-          key.textContent = current;
+          handle.textContent = current;
         } else {
           current = '';
-          key.textContent = '';
+          handle.textContent = '';
         }
         try { window.openai?.notifyIntrinsicHeight?.(); } catch {}
       }
@@ -64,7 +64,7 @@ export const WORKSPACE_KEY_UI_HTML = String.raw`<!doctype html>
           await window.navigator.clipboard.writeText(current);
           status.textContent = 'Copied';
         } catch {
-          status.textContent = 'Select the key above to copy it.';
+          status.textContent = 'Select the handle above to copy it.';
         }
       });
       window.addEventListener('message', (event) => {
@@ -87,7 +87,7 @@ export const WORKSPACE_KEY_UI_HTML = String.raw`<!doctype html>
         });
         post({ jsonrpc: '2.0', id, method: 'ui/initialize', params: {
           protocolVersion: '2026-01-26',
-          appInfo: { name: 'ccm-workspace-key', version: '1.0.0' },
+          appInfo: { name: 'ccm-workspace-handle', version: '1.0.0' },
           appCapabilities: {}
         } });
       }

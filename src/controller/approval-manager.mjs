@@ -21,9 +21,9 @@ function intentFor(args, environmentId) {
       : null,
     policy_kind: args.policy_kind == null ? null : String(args.policy_kind),
     policy_persistable: Boolean(args.policy_persistable),
-    workspace_context: args.workspace_context == null
+    workspace_handle: args.workspace_handle == null
       ? null
-      : String(args.workspace_context),
+      : String(args.workspace_handle),
     yield_time_ms: args.yield_time_ms == null
       ? null
       : Number(args.yield_time_ms),
@@ -72,7 +72,7 @@ function secretMatches(value, expectedHash) {
 
 function frozenExecutionAction(args, environmentId, workspace = {}) {
   return Object.freeze({
-    workspace_context: String(args.workspace_context),
+    workspace_handle: String(args.workspace_handle),
     environment_id: String(environmentId),
     workspace_id: workspace.workspace_id == null
       ? null
@@ -130,7 +130,7 @@ export class ApprovalManager {
       kind: request.kind,
       state: request.state,
       environment_id: request.intent?.environment_id,
-      workspace_context: request.intent?.workspace_context || undefined,
+      workspace_handle: request.intent?.workspace_handle || undefined,
       workspace_id:
         request.action?.workspace_id || request.intent?.workspace_id || undefined,
       intent_sha256: request.intentHash,
@@ -483,7 +483,7 @@ export class ApprovalManager {
       prefix_rule: request.intent.prefix_rule,
       policy_kind: request.intent.policy_kind,
       policy_persistable: request.intent.policy_persistable,
-      workspace_context: request.intent.workspace_context,
+      workspace_handle: request.intent.workspace_handle,
       ...(request.action?.workspace_id
         ? { workspace_id: request.action.workspace_id }
         : {}),

@@ -487,7 +487,7 @@ test('exec rejects unsafe parallelization and reports live nested sessions clear
         session_id: 77,
         output: 'started',
         operation_id: 'operation-live',
-        workspace_context: '00000000-0000-4000-8000-000000000077',
+        workspace_handle: '00000000-0000-4000-8000-000000000077',
         environment_id: 'worker-live',
         workspace_id: 'workspace-live',
       },
@@ -512,7 +512,7 @@ test('exec rejects unsafe parallelization and reports live nested sessions clear
   assert.equal(live.structuredContent.state, 'awaiting_io');
   assert.equal(live.structuredContent.live_sessions[0].session_id, 77);
   assert.equal(
-    live.structuredContent.live_sessions[0].workspace_context,
+    live.structuredContent.live_sessions[0].workspace_handle,
     '00000000-0000-4000-8000-000000000077',
   );
   assert.equal(
@@ -546,7 +546,7 @@ test('exec does not report a process session that already ended before formattin
       structuredContent: {
         session_id: 88,
         operation_id: 'operation-finished',
-        workspace_context: '00000000-0000-4000-8000-000000000088',
+        workspace_handle: '00000000-0000-4000-8000-000000000088',
         environment_id: 'worker-finished',
       },
     }),
@@ -554,10 +554,10 @@ test('exec does not report a process session that already ended before formattin
   const codeModeManager = new CodeModeManager({
     registry,
     sessionInspector: {
-      isSessionLive(sessionId, workspaceContext) {
+      isSessionLive(sessionId, workspaceHandle) {
         assert.equal(sessionId, 88);
         assert.equal(
-          workspaceContext,
+          workspaceHandle,
           '00000000-0000-4000-8000-000000000088',
         );
         return false;

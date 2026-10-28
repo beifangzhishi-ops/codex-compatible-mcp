@@ -32,7 +32,7 @@ function executionApproval(overrides = {}) {
     justification: 'Approve this frozen test command?',
     expires_at: '2026-09-23T08:00:00.000Z',
     intent_sha256: 'a'.repeat(64),
-    workspace_context: '00000000-0000-4000-8000-000000000001',
+    workspace_handle: '00000000-0000-4000-8000-000000000001',
     workspace_id: 'approval-workspace',
     workspace_kind: 'registered',
     workspace_root: 'C:\\workspace',
@@ -100,9 +100,9 @@ async function createApprovalAppHarness({
     'policyScope',
     'command',
     'status',
-    'contextRow',
-    'contextKey',
-    'copyKey',
+    'handleRow',
+    'handleElement',
+    'copyHandle',
     'approve',
     'approveAlways',
     'deny',
@@ -273,19 +273,19 @@ test('reopened approved project restores the Key from read-only status, never re
     ...initial,
     state: 'consumed',
     approval_required: false,
-    workspace_context: context,
+    workspace_handle: context,
     workspace_kind: 'registered',
     exit_code: undefined,
   });
   const card = await createApprovalAppHarness({ initialApproval: initial, statusResult: final });
-  await waitFor(() => card.elements.contextKey.textContent === context, 'recovered key');
+  await waitFor(() => card.elements.handleElement.textContent === context, 'recovered key');
   assert.equal(card.elements.approve.disabled, true);
   assert.equal(card.elements.deny.disabled, true);
   card.replayInitial();
   card.click('approve');
-  assert.equal(card.elements.contextKey.textContent, context);
-  assert.equal(card.elements.contextRow.hidden, false);
-  assert.equal(card.openai.widgetState?.workspace_context, context);
+  assert.equal(card.elements.handleElement.textContent, context);
+  assert.equal(card.elements.handleRow.hidden, false);
+  assert.equal(card.openai.widgetState?.workspace_handle, context);
   assert.equal(card.calls.filter(x => x.params?.name === 'resolve_pending_action').length, 0);
   assert.equal(card.calls.filter(x => x.method === 'ui/message').length, 0);
 });
@@ -302,12 +302,12 @@ test('web-style globals before initialize still trigger one authenticated termin
       kind: initial.kind,
       operation: initial.operation,
       state: 'consumed',
-      workspace_context: context,
+      workspace_handle: context,
       workspace_kind: 'registered',
     },
   });
-  await waitFor(() => card.elements.contextKey.textContent === context, 'terminal lookup after early globals');
-  assert.equal(card.elements.contextRow.hidden, false);
+  await waitFor(() => card.elements.handleElement.textContent === context, 'terminal lookup after early globals');
+  assert.equal(card.elements.handleRow.hidden, false);
   assert.equal(card.elements.approve.disabled, true);
   assert.equal(card.elements.deny.disabled, true);
   assert.equal(card.calls.filter((call) => call.params?.name === 'get_approval_status').length, 1);
@@ -338,13 +338,13 @@ test('reopened card restores matching widgetState while a status query is unavai
       operation: 'select_workspace',
       state: 'consumed',
       action_failed: false,
-      workspace_context: context,
+      workspace_handle: context,
     },
   });
-  assert.equal(card.elements.contextKey.textContent, context);
+  assert.equal(card.elements.handleElement.textContent, context);
   assert.equal(card.elements.approve.disabled, true);
   card.replayInitial();
-  assert.equal(card.elements.contextKey.textContent, context);
+  assert.equal(card.elements.handleElement.textContent, context);
   card.click('approve');
   assert.equal(card.calls.filter(x => x.params?.name === 'resolve_pending_action').length, 0);
 });
@@ -358,7 +358,7 @@ test('reopened pending card requires an authenticated query before enabling appr
 });
 
 test('approval app keeps its capability in result _meta and resolves only the frozen action', async () => {
-  const workspaceContext = '00000000-0000-4000-8000-000000000001';
+  const workspaceHandle = '00000000-0000-4000-8000-000000000001';
   let resolvedArgs = null;
   const runtime = {
     environmentRegistry: {
@@ -377,7 +377,7 @@ test('approval app keeps its capability in result _meta and resolves only the fr
           approval_id: args.approval_id,
           operation_id: '00000000-0000-4000-8000-000000000003',
           state: 'consumed',
-          workspace_context: workspaceContext,
+          workspace_handle: workspaceHandle,
           environment_id: 'approval-worker',
           workspace_id: 'approval-workspace',
           workspace_kind: 'registered',
@@ -404,14 +404,14 @@ test('approval app keeps its capability in result _meta and resolves only the fr
         justification: args.justification,
         expires_at: '2026-09-23T08:00:00.000Z',
         intent_sha256: 'a'.repeat(64),
-        workspace_context: workspaceContext,
+        workspace_handle: workspaceHandle,
         workspace_id: 'approval-workspace',
         workspace_kind: 'registered',
         workspace_root: 'C:\\workspace',
       }),
       writeStdin: async () => ({ wall_time_seconds: 0, output: '', exit_code: 0 }),
     },
-    workspaceContextManager: {},
+    workspaceHandleManager: {},
     workerHub: {},
     approvalManager: {
       getRequest() {
@@ -437,7 +437,7 @@ test('approval app keeps its capability in result _meta and resolves only the fr
             justification: 'Approve this frozen test command?',
             expires_at: '2026-09-23T08:00:00.000Z',
             intent_sha256: 'a'.repeat(64),
-            workspace_context: workspaceContext,
+            workspace_handle: workspaceHandle,
             workspace_id: 'approval-workspace',
             workspace_kind: 'registered',
             workspace_root: 'C:\\workspace',
@@ -502,7 +502,7 @@ test('approval app keeps its capability in result _meta and resolves only the fr
     const pending = await client.callTool({
       name: 'exec_command',
       arguments: {
-        workspace_context: workspaceContext,
+        workspace_handle: workspaceHandle,
         cmd: 'Write-Output APPROVAL_UI_OK',
         sandbox_permissions: 'require_escalated',
         justification: 'Approve this frozen test command?',
@@ -723,8 +723,8 @@ test('approval app does not continue while an approved action is retryable', asy
   );
 });
 
-test('workspace approval publishes its workspace context before one follow-up', async () => {
-  const workspaceContext = '00000000-0000-4000-8000-000000000099';
+test('workspace approval publishes its workspace handle before one follow-up', async () => {
+  const workspaceHandle = '00000000-0000-4000-8000-000000000099';
   const harness = await createApprovalAppHarness({
     hostCapabilities: { message: { text: {} } },
     initialApproval: executionApproval({
@@ -736,7 +736,7 @@ test('workspace approval publishes its workspace context before one follow-up', 
       terminalExecution({
         kind: 'workspace',
         operation: 'select_workspace',
-        workspace_context: workspaceContext,
+        workspace_handle: workspaceHandle,
         exit_code: undefined,
         output: 'Approved and entered workspace.',
       }),
@@ -752,11 +752,11 @@ test('workspace approval publishes its workspace context before one follow-up', 
     (call) => call.method === 'ui/update-model-context',
   );
   assert.equal(
-    contextCall.params.structuredContent.workspace_context,
-    workspaceContext,
+    contextCall.params.structuredContent.workspace_handle,
+    workspaceHandle,
   );
-  assert.equal(harness.elements.contextRow.hidden, false);
-  assert.equal(harness.elements.contextKey.textContent, workspaceContext);
+  assert.equal(harness.elements.handleRow.hidden, false);
+  assert.equal(harness.elements.handleElement.textContent, workspaceHandle);
   assert.equal(
     harness.calls.filter((call) => call.method === 'ui/message').length,
     1,
@@ -765,9 +765,9 @@ test('workspace approval publishes its workspace context before one follow-up', 
 
 test('workspace key is not shown for denial, failure or absent context', async () => {
   const failed = [
-    { state: 'denied', workspace_context: '00000000-0000-4000-8000-000000000099' },
-    { state: 'consumed', action_failed: true, workspace_context: '00000000-0000-4000-8000-000000000099' },
-    { state: 'consumed', workspace_context: undefined },
+    { state: 'denied', workspace_handle: '00000000-0000-4000-8000-000000000099' },
+    { state: 'consumed', action_failed: true, workspace_handle: '00000000-0000-4000-8000-000000000099' },
+    { state: 'consumed', workspace_handle: undefined },
   ];
   for (const overrides of failed) {
     const harness = await createApprovalAppHarness({
@@ -777,22 +777,22 @@ test('workspace key is not shown for denial, failure or absent context', async (
     });
     harness.click(overrides.state === 'denied' ? 'deny' : 'approve');
     await waitFor(() => harness.calls.some((call) => call.method === 'ui/message'), 'workspace terminal decision');
-    assert.equal(harness.elements.contextRow.hidden, true);
-    assert.equal(harness.elements.contextKey.textContent, '');
+    assert.equal(harness.elements.handleRow.hidden, true);
+    assert.equal(harness.elements.handleElement.textContent, '');
   }
 });
 
 test('successful workspace key remains visible even when host continuation fails', async () => {
-  const workspaceContext = '00000000-0000-4000-8000-000000000099';
+  const workspaceHandle = '00000000-0000-4000-8000-000000000099';
   const harness = await createApprovalAppHarness({
     contextError: 'host unavailable',
     initialApproval: executionApproval({ kind: 'workspace', operation: 'register_workspace' }),
-    toolResults: [terminalExecution({ kind: 'workspace', operation: 'register_workspace', workspace_context: workspaceContext, exit_code: undefined })],
+    toolResults: [terminalExecution({ kind: 'workspace', operation: 'register_workspace', workspace_handle: workspaceHandle, exit_code: undefined })],
   });
   harness.click('approve');
   await waitFor(() => /handoff failed/i.test(harness.elements.status.textContent), 'handoff error');
-  assert.equal(harness.elements.contextRow.hidden, false);
-  assert.equal(harness.elements.contextKey.textContent, workspaceContext);
+  assert.equal(harness.elements.handleRow.hidden, false);
+  assert.equal(harness.elements.handleElement.textContent, workspaceHandle);
 });
 
 test('denial sends one continuation without introducing another resolver call', async () => {

@@ -26,10 +26,10 @@ function publicRule(rule) {
   };
 }
 
-function sameExecution(rule, { workspaceContext, environment, args }) {
+function sameExecution(rule, { workspaceHandle, environment, args }) {
   return rule.environment_id === String(environment.id) &&
-    rule.workspace_id === String(workspaceContext.workspace_id) &&
-    rule.workspace_root === String(workspaceContext.workspace_root) &&
+    rule.workspace_id === String(workspaceHandle.workspace_id) &&
+    rule.workspace_root === String(workspaceHandle.workspace_root) &&
     rule.command === normalizeCommand(args.cmd) &&
     rule.workdir === normalizeWorkdir(args.workdir) &&
     rule.shell === effectiveShell(args, environment) &&
@@ -85,16 +85,16 @@ export class TrustedPackageScriptStore {
     );
   }
 
-  mayMatch({ workspaceContext, environment, args }) {
+  mayMatch({ workspaceHandle, environment, args }) {
     if (!parsePackageScriptCommand(args.cmd)) return false;
     return this.rules.some((rule) =>
-      sameExecution(rule, { workspaceContext, environment, args }));
+      sameExecution(rule, { workspaceHandle, environment, args }));
   }
 
-  match({ workspaceContext, environment, args, packageScript }) {
+  match({ workspaceHandle, environment, args, packageScript }) {
     if (!packageScript) return null;
     for (const rule of this.rules) {
-      if (!sameExecution(rule, { workspaceContext, environment, args })) continue;
+      if (!sameExecution(rule, { workspaceHandle, environment, args })) continue;
       if (rule.package_script.package_manager !== packageScript.package_manager ||
           rule.package_script.script !== packageScript.script ||
           rule.package_script.script_sha256 !== packageScript.script_sha256) {
@@ -118,7 +118,7 @@ export class TrustedPackageScriptStore {
     return null;
   }
 
-  trust({ workspaceContext, environment, args, packageScript }) {
+  trust({ workspaceHandle, environment, args, packageScript }) {
     if (!packageScript?.package_manager ||
         !packageScript?.script ||
         !packageScript?.script_sha256) {
@@ -129,8 +129,8 @@ export class TrustedPackageScriptStore {
     }
     const candidate = {
       environment_id: String(environment.id),
-      workspace_id: String(workspaceContext.workspace_id),
-      workspace_root: String(workspaceContext.workspace_root),
+      workspace_id: String(workspaceHandle.workspace_id),
+      workspace_root: String(workspaceHandle.workspace_root),
       command: normalizeCommand(args.cmd),
       workdir: normalizeWorkdir(args.workdir),
       tty: Boolean(args.tty),
@@ -138,12 +138,12 @@ export class TrustedPackageScriptStore {
       package_script: { ...packageScript },
     };
     const existing = this.rules.find((rule) =>
-      sameExecution(rule, { workspaceContext, environment, args }) &&
+      sameExecution(rule, { workspaceHandle, environment, args }) &&
       JSON.stringify(rule.package_script) === JSON.stringify(candidate.package_script));
     if (existing) return publicRule(existing);
 
     this.rules = this.rules.filter((rule) =>
-      !sameExecution(rule, { workspaceContext, environment, args }));
+      !sameExecution(rule, { workspaceHandle, environment, args }));
     const rule = {
       rule_id: crypto.randomUUID(),
       ...candidate,
@@ -161,10 +161,10 @@ export class TrustedPackageScriptStore {
     return publicRule(rule);
   }
 
-  revoke({ workspaceContext, environment, args }) {
+  revoke({ workspaceHandle, environment, args }) {
     const before = this.rules.length;
     this.rules = this.rules.filter((rule) =>
-      !sameExecution(rule, { workspaceContext, environment, args }));
+      !sameExecution(rule, { workspaceHandle, environment, args }));
     if (this.rules.length !== before) this.#persist();
     return before - this.rules.length;
   }

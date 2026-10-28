@@ -5,7 +5,7 @@ import { RemoteProcessManager } from '../runtime/remote-process-manager.mjs';
 import { RemoteFileService } from '../runtime/filesystem/remote-file-service.mjs';
 import { WorkerHub } from './worker-hub.mjs';
 import { ApprovalManager } from './approval-manager.mjs';
-import { WorkspaceContextManager } from './workspace-context-manager.mjs';
+import { WorkspaceHandleManager } from './workspace-handle-manager.mjs';
 import { FileTransferStore } from './file-transfer-store.mjs';
 import { parseEnvFile, requireHttpsIdentity } from '../../ccm-sidecar/config.mjs';
 import fs from 'node:fs';
@@ -66,18 +66,18 @@ export function createControllerRuntime(options = {}) {
         defaultControllerStateFile('trusted-package-scripts.json'),
       audit,
     });
-  const workspaceContextManager = options.workspaceContextManager ||
-    new WorkspaceContextManager({
+  const workspaceHandleManager = options.workspaceHandleManager ||
+    new WorkspaceHandleManager({
       environmentRegistry,
       workerHub,
-      stateFile: options.workspaceContextStateFile,
+      stateFile: options.workspaceHandleStateFile,
     });
   const processManager = options.processManager || new RemoteProcessManager({
     environmentRegistry,
     workerHub,
     approvalManager,
     approvalReceiptStore,
-    workspaceContextManager,
+    workspaceHandleManager,
     execPolicyStore,
     trustedPackageScriptStore,
     audit,
@@ -85,7 +85,7 @@ export function createControllerRuntime(options = {}) {
   const fileService = options.fileService || new RemoteFileService({
     environmentRegistry,
     workerHub,
-    workspaceContextManager,
+    workspaceHandleManager,
   });
   const fileTransferStore = options.fileTransferStore || new FileTransferStore({
     stateDir: options.fileTransferStateDir ||
@@ -114,7 +114,7 @@ export function createControllerRuntime(options = {}) {
     execPolicyStore,
     trustedPackageScriptStore,
     audit,
-    workspaceContextManager,
+    workspaceHandleManager,
     processManager,
     fileService,
     fileTransferStore,
@@ -137,7 +137,7 @@ export function createControllerRuntime(options = {}) {
         execPolicyStore?.close?.();
         trustedPackageScriptStore?.close?.();
         await planManager?.close();
-        workspaceContextManager.close();
+        workspaceHandleManager.close();
         await workerHub.close();
       } finally {
         workerQuarantinePolicy.close();

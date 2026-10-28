@@ -25,10 +25,10 @@ function publicRule(rule) {
     created_at: rule.created_at,
   };
 }
-function sameScope(rule, { workspaceContext, environment, args }) {
+function sameScope(rule, { workspaceHandle, environment, args }) {
   return rule.environment_id === String(environment.id) &&
-    rule.workspace_id === String(workspaceContext.workspace_id) &&
-    rule.workspace_root === String(workspaceContext.workspace_root) &&
+    rule.workspace_id === String(workspaceHandle.workspace_id) &&
+    rule.workspace_root === String(workspaceHandle.workspace_root) &&
     rule.workdir === normalizeWorkdir(args.workdir) &&
     rule.shell === effectiveShell(args, environment) &&
     Boolean(rule.tty) === Boolean(args.tty);
@@ -84,7 +84,7 @@ export class ExecPolicyStore {
     );
   }
 
-  match({ workspaceContext, environment, args, parsed = null }) {
+  match({ workspaceHandle, environment, args, parsed = null }) {
     const shell = effectiveShell(args, environment);
     const command = parsed || parseShellCommand(args.cmd, { shell });
     if (!command?.segments.length) return null;
@@ -92,7 +92,7 @@ export class ExecPolicyStore {
     const matched = [];
     for (const segment of command.segments) {
       const rule = this.matchSegment({
-        workspaceContext,
+        workspaceHandle,
         environment,
         args,
         tokens: segment.tokens,
@@ -121,9 +121,9 @@ export class ExecPolicyStore {
     };
   }
 
-  matchSegment({ workspaceContext, environment, args, tokens, emit = true }) {
+  matchSegment({ workspaceHandle, environment, args, tokens, emit = true }) {
     const rule = this.rules.find((candidate) =>
-      sameScope(candidate, { workspaceContext, environment, args }) &&
+      sameScope(candidate, { workspaceHandle, environment, args }) &&
       tokenPrefixMatches(candidate.prefix_tokens, tokens, {
         platform: environment.platform || 'windows',
       }));
@@ -140,7 +140,7 @@ export class ExecPolicyStore {
     return publicRule(rule);
   }
 
-  allow({ workspaceContext, environment, args, prefixTokens }) {
+  allow({ workspaceHandle, environment, args, prefixTokens }) {
     const normalizedPrefix = validatePrefixTokens(prefixTokens);
     if (!normalizedPrefix) {
       throw new Error('Persistent execution policy requires valid prefix tokens.');
@@ -148,8 +148,8 @@ export class ExecPolicyStore {
     const candidate = {
       decision: 'allow',
       environment_id: String(environment.id),
-      workspace_id: String(workspaceContext.workspace_id),
-      workspace_root: String(workspaceContext.workspace_root),
+      workspace_id: String(workspaceHandle.workspace_id),
+      workspace_root: String(workspaceHandle.workspace_root),
       prefix_tokens: normalizedPrefix,
       workdir: normalizeWorkdir(args.workdir),
       tty: Boolean(args.tty),

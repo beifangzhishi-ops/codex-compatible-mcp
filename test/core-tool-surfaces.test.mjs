@@ -40,16 +40,16 @@ function runtimeStub() {
         return { id: resolved };
       },
     },
-    workspaceContextManager: {
+    workspaceHandleManager: {
       createProjectless: async (environmentId = null) => ({
-        workspace_context: '00000000-0000-4000-8000-000000000001',
+        workspace_handle: '00000000-0000-4000-8000-000000000001',
         environment_id: environmentId || 'primary',
         workspace_id: 'projectless-test',
         workspace_kind: 'projectless',
         workspace_root: 'C:\\temp\\projectless-test',
       }),
       createRegistered: (environmentId, workspace) => ({
-        workspace_context: '00000000-0000-4000-8000-000000000009',
+        workspace_handle: '00000000-0000-4000-8000-000000000009',
         environment_id: environmentId,
         workspace_id: workspace.workspace_id,
         workspace_kind: 'registered',
@@ -113,7 +113,7 @@ function runtimeStub() {
             kind: 'execution',
             state: 'pending',
             environment_id: 'primary',
-            workspace_context: args.workspace_context,
+            workspace_handle: args.workspace_handle,
             workspace_id: 'projectless-test',
             workspace_kind: 'projectless',
             workspace_root: 'C:\\temp\\projectless-test',
@@ -157,7 +157,7 @@ function runtimeStub() {
           state: 'pending',
           kind: 'execution',
           environment_id: 'primary',
-          workspace_context: '00000000-0000-4000-8000-000000000001',
+          workspace_handle: '00000000-0000-4000-8000-000000000001',
           workspace_id: 'projectless-test',
           workspace_kind: 'projectless',
           workspace_root: 'C:\\temp\\projectless-test',
@@ -175,7 +175,7 @@ function runtimeStub() {
   };
 }
 
-test('core tool surface exposes registered project key cards and centralizes approval cards', async () => {
+test('core tool surface exposes registered workspace handle cards and centralizes approval cards', async () => {
   const registry = registerCoreTools(new ToolRegistry(), runtimeStub());
 
   const direct = registry.listDirect().map((tool) => tool.name).sort();
@@ -219,6 +219,10 @@ test('core tool surface exposes registered project key cards and centralizes app
   );
   assert.match(
     registry.get('select_workspace').description,
+    /Reuse an existing handle directly with operational tools/,
+  );
+  assert.match(
+    registry.get('select_workspace').description,
     /user's intended target.*do not retry the same target.*projectless context/i,
   );
   assert.match(
@@ -229,6 +233,15 @@ test('core tool surface exposes registered project key cards and centralizes app
     registry.get('register_workspace').description,
     /Do not register a directory merely to gain read access/,
   );
+  assert.match(
+    registry.get('register_workspace').description,
+    /no usable workspace_handle is already available/,
+  );
+  assert.match(
+    registry.get('exec_command').inputSchema.workspace_handle.description,
+    /If user\/project instructions supply one.*reuse it directly/,
+  );
+  assert.equal(Object.hasOwn(registry.get('exec_command').inputSchema, 'environment_id'), false);
   assert.match(
     registry.get('register_workspace').description,
     /user's intended target.*do not retry the same target.*projectless context/i,
@@ -256,11 +269,11 @@ test('core tool surface exposes registered project key cards and centralizes app
   );
   assert.match(
     registry.get('apply_patch').description,
-    /awaiting approval.*use its registered workspace_context instead/i,
+    /awaiting approval.*use its registered workspace_handle instead/i,
   );
   assert.match(
     registry.get('view_image').description,
-    /awaiting approval.*use its registered workspace_context instead/i,
+    /awaiting approval.*use its registered workspace_handle instead/i,
   );
 
   for (const name of [
@@ -277,7 +290,7 @@ test('core tool surface exposes registered project key cards and centralizes app
     assert.equal(tool.surfaces.direct, true);
     assert.equal(tool.surfaces.deferred, false);
     assert.equal(tool.surfaces.codeMode, true);
-    assert.equal(tool.mcpMeta.ui.resourceUri, 'ui://ccm/workspace-key-v1.html');
+    assert.equal(tool.mcpMeta.ui.resourceUri, 'ui://ccm/workspace-handle-v1.html');
   }
   assert.deepEqual(
     Object.keys(registry.get('request_approval').inputSchema),
@@ -381,10 +394,10 @@ test('core tool surface exposes registered project key cards and centralizes app
     cmd: 'Write-Output should-not-run',
   });
   assert.equal(missingContext.isError, true);
-  assert.match(missingContext.content[0].text, /requires workspace_context/);
+  assert.match(missingContext.content[0].text, /requires workspace_handle/);
 
   const escalation = await registry.get('exec_command').handler({
-    workspace_context: '00000000-0000-4000-8000-000000000001',
+    workspace_handle: '00000000-0000-4000-8000-000000000001',
     cmd: 'Write-Output elevated',
     sandbox_permissions: 'require_escalated',
   });
@@ -551,11 +564,11 @@ test('write_stdin hard-rejects Direct empty polls while preserving nested pollin
 
   const registry = registerCoreTools(new ToolRegistry(), runtime);
   const directWriteStdin = registry.get('write_stdin');
-  const workspaceContext = '00000000-0000-4000-8000-000000000001';
+  const workspaceHandle = '00000000-0000-4000-8000-000000000001';
 
   const omittedChars = await directWriteStdin.handler({
     session_id: 41,
-    workspace_context: workspaceContext,
+    workspace_handle: workspaceHandle,
   }, { extra: {} });
   assert.equal(omittedChars.isError, true);
   assert.match(omittedChars.content[0].text, /Direct empty write_stdin polling is disabled/);
@@ -565,7 +578,7 @@ test('write_stdin hard-rejects Direct empty polls while preserving nested pollin
 
   const explicitEmpty = await directWriteStdin.handler({
     session_id: 41,
-    workspace_context: workspaceContext,
+    workspace_handle: workspaceHandle,
     chars: '',
   }, { extra: {} });
   assert.equal(explicitEmpty.isError, true);
@@ -573,7 +586,7 @@ test('write_stdin hard-rejects Direct empty polls while preserving nested pollin
 
   const directInput = await directWriteStdin.handler({
     session_id: 41,
-    workspace_context: workspaceContext,
+    workspace_handle: workspaceHandle,
     chars: 'y\n',
   }, { extra: {} });
   assert.equal(directInput.isError, undefined);
@@ -588,7 +601,7 @@ test('write_stdin hard-rejects Direct empty polls while preserving nested pollin
         tool: 'ccm.write_stdin',
         arguments: {
           session_id: 41,
-          workspace_context: workspaceContext,
+          workspace_handle: workspaceHandle,
           chars: '',
         },
       }],

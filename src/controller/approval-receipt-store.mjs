@@ -25,13 +25,21 @@ export class ApprovalReceiptStore {
     this.receipts = new Map();
     if (this.stateFile && fs.existsSync(this.stateFile)) {
       const data = JSON.parse(fs.readFileSync(this.stateFile, 'utf8').replace(/^\uFEFF/, ''));
+      let migrated = false;
       for (const receipt of data?.receipts || []) {
         if (receipt && typeof receipt.approval_id === 'string' &&
             Number.isFinite(receipt.saved_at) && receipt.saved_at + this.retentionMs > this.now()) {
-          this.receipts.set(receipt.approval_id, receipt);
+          const value = { ...receipt };
+          if (typeof value.workspace_context === 'string') {
+            value.workspace_handle = value.workspace_context;
+            delete value.workspace_context;
+            migrated = true;
+          }
+          this.receipts.set(value.approval_id, value);
         }
       }
       this.#prune();
+      if (migrated) this.#persist();
     }
   }
 
@@ -44,6 +52,18 @@ export class ApprovalReceiptStore {
     if (excess > 0) {
       const sorted = [...this.receipts].sort((a, b) => a[1].saved_at - b[1].saved_at);
       for (const [id] of sorted.slice(0, excess)) this.receipts.delete(id);
+    }
+  }
+
+  #persist() {
+    if (!this.stateFile) return;
+    fs.mkdirSync(path.dirname(this.stateFile), { recursive: true });
+    const temporary = this.stateFile + '.' + crypto.randomUUID() + '.tmp';
+    try {
+      fs.writeFileSync(temporary, JSON.stringify({ version: 1, receipts: [...this.receipts.values()] }) + '\n', { encoding: 'utf8', flag: 'wx' });
+      fs.renameSync(temporary, this.stateFile);
+    } finally {
+      if (fs.existsSync(temporary)) fs.rmSync(temporary, { force: true });
     }
   }
 
@@ -67,21 +87,13 @@ export class ApprovalReceiptStore {
           ['select_workspace', 'register_workspace'].includes(request.intent.operation) &&
           result.state === 'consumed' && !result.action_failed &&
           result.workspace_kind === 'registered' &&
-          typeof result.workspace_context === 'string'
-        ? { workspace_context: result.workspace_context } : {}),
+          typeof result.workspace_handle === 'string'
+        ? { workspace_handle: result.workspace_handle } : {}),
       saved_at: this.now(),
     };
     this.receipts.set(value.approval_id, value);
     this.#prune();
-    if (!this.stateFile) return;
-    fs.mkdirSync(path.dirname(this.stateFile), { recursive: true });
-    const temporary = this.stateFile + '.' + crypto.randomUUID() + '.tmp';
-    try {
-      fs.writeFileSync(temporary, JSON.stringify({ version: 1, receipts: [...this.receipts.values()] }) + '\n', { encoding: 'utf8', flag: 'wx' });
-      fs.renameSync(temporary, this.stateFile);
-    } finally {
-      if (fs.existsSync(temporary)) fs.rmSync(temporary, { force: true });
-    }
+    this.#persist();
   }
 
   read(approvalId, nonce, hostSession) {

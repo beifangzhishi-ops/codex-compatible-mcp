@@ -38,7 +38,7 @@ function executionIdentity(options) {
     parsed,
     root,
     workdir,
-    workspaceContext: {
+    workspaceHandle: {
       workspace_id: required(options, 'workspace-id'),
       workspace_root: root,
     },
@@ -73,7 +73,7 @@ function trustInput(options) {
     throw new Error('package.json does not define scripts.' + input.parsed.script);
   }
   return {
-    workspaceContext: input.workspaceContext,
+    workspaceHandle: input.workspaceHandle,
     environment: input.environment,
     args: input.args,
     packageScript: {

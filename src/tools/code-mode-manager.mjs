@@ -180,8 +180,8 @@ function liveSessionFrom(event) {
     call_index: event.call_index,
     tool: event.tool,
     session_id: sessionId,
-    ...(structured?.workspace_context
-      ? { workspace_context: structured.workspace_context }
+    ...(structured?.workspace_handle
+      ? { workspace_handle: structured.workspace_handle }
       : {}),
     ...(structured?.environment_id
       ? { environment_id: structured.environment_id }
@@ -226,7 +226,7 @@ export class CodeModeManager {
         }
         return this.sessionInspector.isSessionLive(
           session.session_id,
-          session.workspace_context || null,
+          session.workspace_handle || null,
         );
       });
     const state = running
@@ -248,7 +248,7 @@ export class CodeModeManager {
       message: running
         ? 'Nested execution is still running. Resume it with wait.'
         : liveSessions.length > 0
-          ? 'Nested execution finished, but one or more process sessions are still running. Poll those sessions by invoking ccm.write_stdin through exec with the same workspace_context and session_id; reserve top-level write_stdin for real non-empty interactive stdin writes.'
+          ? 'Nested execution finished, but one or more process sessions are still running. Poll those sessions by invoking ccm.write_stdin through exec with the same workspace_handle and session_id; reserve top-level write_stdin for real non-empty interactive stdin writes.'
           : job.hasErrors
             ? 'Nested execution completed with one or more tool errors.'
             : 'Nested execution completed.',
