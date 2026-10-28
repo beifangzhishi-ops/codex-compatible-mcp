@@ -482,7 +482,7 @@ export function registerCoreTools(registry, runtime) {
     supportsParallel: true,
     description: [
       'Create a projectless workspace_handle for operations that do not belong to a registered project.',
-      'Use this when the user has not selected, requested, or otherwise indicated a real registered project. If select_workspace or register_workspace is awaiting approval for the user\'s current intended real project, call request_approval and wait for that action instead of creating projectless workspace to bypass it. If the user explicitly changes to a different real project, the older pending workspace action does not block select_workspace or register_workspace for the new target; do not use projectless workspace as a substitute for that new project. If environment_id is omitted, CCM uses the primary environment.',
+      'Use when no suitable handle exists for genuinely projectless work or permitted absolute-path reads. Never use it to bypass a pending explicit workspace-entry approval or to write into a registered project. If environment_id is omitted, CCM uses the primary environment.',
       'The returned workspace_handle supplies Worker routing and the context root for subsequent CCM operations. Read-scope decisions, including whether absolute paths outside the projectless root are readable, belong to list_projects and exec_command rather than this lifecycle tool.',
     ].join('\n\n'),
     inputSchema: {
@@ -513,8 +513,8 @@ export function registerCoreTools(registry, runtime) {
     tags: ['workspace', 'project', 'approval'],
     description: [
       'Enter one registered workspace. Full-access environments return the workspace_handle directly; restricted environments return a frozen approval request.',
-      'Use this only when the user explicitly intends to work in that registered project AND no usable workspace_handle has already been supplied. A workspace_handle is not an environment_id or workspace_id. Reuse an existing handle directly with operational tools; never re-enter a project or request approval just because the user asks to work there. Do not select a workspace merely to read or search a path; for a genuinely projectless task, use create_projectless_handle for temporary execution handle instead.',
-      'Call directly for a full-access environment so CCM itself displays a workspace-handle card with the resulting workspace_handle, without needing you to repeat the handle. For restricted environments, prefer the Code Mode route through ccm.exec, followed by the top-level request_approval tool when approval_required=true; the approved card itself then displays the handle. Do not send a separate handle message. While that workspace remains the user\'s intended target, wait for the frozen action to resolve; do not retry the same target or switch to projectless workspace to bypass it. If the user explicitly changes to a different real project, directly select or register that new target without requiring the older pending approval to be denied or resolved first; pending workspace approvals are independent.',
+      'Requires an explicit user request to enter/switch workspaces AND no usable workspace_handle. Reading, inspecting, editing, or working on a project is not an entry request.',
+      'For an authorized entry, call Direct on full-access to display the handle card; on restricted Workers use exec then request_approval if required. Do not repeat the handle, retry pending entry, or bypass its approval with projectless execution.',
       'Full-access skips user approval but keeps workspace identity validation, Worker routing, and workspace-handle boundaries.',
     ].join('\n\n'),
     inputSchema: {
@@ -560,8 +560,8 @@ export function registerCoreTools(registry, runtime) {
             'Call the top-level request_approval tool with this approval_id. ' +
             'While this workspace remains the user\'s intended target, wait for this frozen action to resolve; ' +
             'do not retry the same target or create or switch to projectless workspace to bypass it. ' +
-            'If the user explicitly changes to a different real project, select or register the new target directly; ' +
-            'the older pending approval does not need to be denied or resolved first.',
+            'Changing projects alone does not authorize new entry; request a handle or an explicit entry/registration instruction. ' +
+            'A separately authorized new workspace action does not require denying this older pending approval.',
         });
       } catch (error) {
         return toolError(error);
@@ -580,8 +580,8 @@ export function registerCoreTools(registry, runtime) {
     tags: ['workspace', 'project', 'approval', 'register'],
     description: [
       'Register and enter one exact project directory. Full-access environments return the workspace_handle directly; restricted environments return a frozen approval request.',
-      'Use this only when the user explicitly intends to register that concrete directory as a project AND no usable workspace_handle is already available for that project. A workspace_handle is not an environment_id or workspace_id. Do not register or request approval again merely because the user asks for work in an already entered project. Do not register a directory merely to gain read access; for a genuinely projectless task, use create_projectless_handle instead.',
-      'Call directly for a full-access environment so CCM itself displays a workspace-handle card with the resulting workspace_handle, without needing you to repeat the handle. For restricted environments, prefer the Code Mode route through ccm.exec, followed by the top-level request_approval tool when approval_required=true; the approved card itself then displays the handle. Do not send a separate handle message. While that workspace remains the user\'s intended target, wait for the frozen action to resolve; do not retry the same target or switch to projectless workspace to bypass it. If the user explicitly changes to a different real project, directly select or register that new target without requiring the older pending approval to be denied or resolved first; pending workspace approvals are independent.',
+      'Requires an explicit user request to register a workspace AND no usable workspace_handle for that project. Reading, inspecting, editing, or working on a project is not a registration request.',
+      'For an authorized registration, call Direct on full-access to display the handle card; on restricted Workers use exec then request_approval if required. Do not repeat the handle, retry pending registration, or bypass its approval with projectless execution.',
       'With create_if_missing=true, registration may create the exact missing directory before entry. Full-access skips user approval but keeps target revalidation and workspace-handle boundaries.',
     ].join('\n\n'),
     inputSchema: {
@@ -634,8 +634,8 @@ export function registerCoreTools(registry, runtime) {
             'Call the top-level request_approval tool with this approval_id. ' +
             'While this workspace remains the user\'s intended target, wait for this frozen action to resolve; ' +
             'do not retry the same target or create or switch to projectless workspace to bypass it. ' +
-            'If the user explicitly changes to a different real project, select or register the new target directly; ' +
-            'the older pending approval does not need to be denied or resolved first.',
+            'Changing projects alone does not authorize new entry; request a handle or an explicit entry/registration instruction. ' +
+            'A separately authorized new workspace action does not require denying this older pending approval.',
         });
       } catch (error) {
         return toolError(error);
@@ -704,7 +704,7 @@ export function registerCoreTools(registry, runtime) {
     description: [
       'Runs a command using plain pipes by default; set tty=true to allocate a PTY. Returns output or a session ID for ongoing interaction.',
       'workspace_handle is required and determines the Worker, cwd/session ownership, and restricted-write root. It does not narrow filesystem reads below the environment\'s sandbox_read_scope. Do not pass or infer a separate environment for this command.',
-      'For a genuinely projectless task, when the user has not selected, requested, or otherwise indicated a real registered project, first discover ccm.create_projectless_handle with tool_search and invoke it through exec; then pass the returned workspace_handle here. If select_workspace or register_workspace is awaiting approval for the user\'s current intended real project, wait for that action and use its registered workspace_handle instead of bypassing it with projectless workspace. If the user explicitly changes to a different real project, obtain a workspace_handle for the new target through select_workspace or register_workspace; the older pending approval does not block that new workspace action. When sandbox_read_scope=host, projectless workspace is sufficient for absolute-path reads anywhere readable on the selected Worker; do not select/register a target path merely to inspect it.',
+      'Reuse a supplied workspace_handle directly. Without one, create_projectless_handle may support projectless work and permitted absolute-path reads; do not select/register merely to inspect a project. For registered-project writes without a handle, ask the user for a handle or explicit entry instruction. Never bypass a pending explicit workspace approval.',
       'In workspace-write environments, normal remote Git commands such as git clone/fetch/pull/push/ls-remote are handled automatically and do not require sandbox_permissions=require_escalated. Run remote Git as Git-only shell commands so CCM can recognize the trusted path.',
       'Controller-trusted package scripts such as a specifically trusted workspace npm test are also handled automatically through exec_command. Trust is bound to the workspace and current package.json script hash; if the script changes it stops matching and must not be treated as trusted.',
       'On Windows workspace-write, direct node --test invocations are also a built-in trusted full-access class because the restricted token cannot spawn the Node test workers. Test code therefore runs with host permissions.',
@@ -730,7 +730,7 @@ export function registerCoreTools(registry, runtime) {
       try {
         if (!args.workspace_handle) {
           throw new Error(
-            'exec_command requires workspace_handle for Worker routing/cwd. For a genuinely projectless task, use ccm.create_projectless_handle through tool_search + exec. If select_workspace or register_workspace is awaiting approval for the user\'s current intended real project, wait for it and use its registered workspace_handle instead of bypassing it with projectless workspace. If the user explicitly changes to a different real project, obtain a context for that new target; the older pending approval does not block the new workspace action. The target read path does not need to be selected as a workspace when sandbox_read_scope=host.',
+            'exec_command requires workspace_handle for Worker routing/cwd. Reuse the supplied handle; for projectless tasks or permitted absolute-path reads, use ccm.create_projectless_handle. Never select/register a project merely to read or work on it; ask for a handle or explicit entry instruction if registered-project writing requires one.',
           );
         }
         return execResult(await runtime.processManager.execCommand(args));
@@ -920,7 +920,7 @@ export function registerCoreTools(registry, runtime) {
     environmentRequirements: { capabilities: ['applyPatch'] },
     description: [
       'Apply a Codex-style Begin/End Patch inside an existing workspace_handle.',
-      'For a genuinely projectless task, automatically obtain a projectless workspace first through ccm.create_projectless_handle; do not ask the user to choose or register a temporary directory. If select_workspace or register_workspace is awaiting approval for the user\'s current intended real project, wait for that action and use its registered workspace_handle instead of bypassing it with projectless workspace. If the user explicitly changes to another real project, obtain the new target\'s workspace_handle; the older pending approval does not block that new workspace action.',
+      'Reuse the existing workspace_handle. For genuinely projectless edits, use create_projectless_handle; for registered-project edits without a handle, request the handle or an explicit workspace-entry instruction. Never select/register implicitly or bypass pending approval.',
     ].join('\n\n'),
     inputSchema: {
       patch: z.string().min(1).describe('Codex-style patch text beginning with *** Begin Patch.'),
@@ -953,7 +953,7 @@ export function registerCoreTools(registry, runtime) {
     supportsParallel: true,
     description: [
       'Read a local image and return bounded MCP image content. When the output byte budget is exceeded, the Worker first tries full-resolution low-loss WebP (quality 95/90/85), then progressively reduces dimensions if necessary to fit the budget. The source file is never modified. Source files are limited to 64 MiB.',
-      'For a genuinely projectless task, automatically obtain a projectless workspace first through ccm.create_projectless_handle; do not ask the user to choose or register a temporary directory. If select_workspace or register_workspace is awaiting approval for the user\'s current intended real project, wait for that action and use its registered workspace_handle instead of bypassing it with projectless workspace. If the user explicitly changes to another real project, obtain the new target\'s workspace_handle; the older pending approval does not block that new workspace action.',
+      'Reuse the existing workspace_handle. For genuinely projectless image reads, use create_projectless_handle; do not select/register a project merely to inspect images, or bypass a pending explicit entry approval.',
       'This direct tool is also available through exec for nested or batched image calls.',
     ].join(' '),
     inputSchema: {

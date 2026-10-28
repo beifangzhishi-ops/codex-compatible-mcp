@@ -112,31 +112,31 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     await client.connect(transport);
     assert.match(
       client.getInstructions(),
-      /user, project instructions, or a previous CCM result already provide a workspace_handle.*pass that exact handle directly/i,
+      /Always reuse an existing workspace_handle for the target workspace/i,
     );
     assert.match(
       client.getInstructions(),
-      /NOT an environment_id, workspace_id, conversation context, or MCP session ID/i,
+      /not an environment_id, workspace_id, or conversation context/i,
     );
     assert.match(
       client.getInstructions(),
-      /Do NOT call select_workspace, register_workspace, or create_projectless_handle merely to obtain another handle/i,
+      /Call select_workspace only if no usable handle exists AND the user explicitly requests workspace entry/i,
     );
     assert.match(
       client.getInstructions(),
-      /Do not use projectless as a fallback to bypass select_workspace or register_workspace.*current intended real project/i,
+      /Call register_workspace only if the user explicitly requests workspace registration and no usable handle exists/i,
     );
     assert.match(
       client.getInstructions(),
-      /changes to a different real project.*older pending workspace approval does not need to be denied or resolved first/i,
+      /Reading, inspecting, searching, editing, or working on a project.*does not authorize entry or registration/i,
     );
     assert.match(
       client.getInstructions(),
-      /user's intended target.*wait for the frozen action.*do not use projectless workspace/i,
+      /Never initiate workspace-entry approval implicitly/i,
     );
     assert.match(
       client.getInstructions(),
-      /independent pending workspace approvals may coexist/i,
+      /For registered-project writes, ask for a handle or an explicit entry request/i,
     );
     assert.match(client.getInstructions(), /explore discoverable facts first/i);
     assert.match(client.getInstructions(), /ask rather than guess/i);

@@ -207,35 +207,35 @@ test('core tool surface exposes registered workspace handle cards and centralize
   );
   assert.match(
     registry.get('create_projectless_handle').description,
-    /current intended real project.*wait.*instead of creating projectless workspace/i,
+    /Never use it to bypass a pending explicit workspace-entry approval/i,
   );
   assert.match(
     registry.get('create_projectless_handle').description,
-    /changes to a different real project.*older pending workspace action does not block/i,
+    /permitted absolute-path reads/i,
   );
   assert.match(
     registry.get('select_workspace').description,
-    /Do not select a workspace merely to read or search/,
+    /Requires an explicit user request to enter\/switch workspaces AND no usable workspace_handle/i,
   );
   assert.match(
     registry.get('select_workspace').description,
-    /Reuse an existing handle directly with operational tools/,
+    /Reading, inspecting, editing, or working on a project is not an entry request/i,
   );
   assert.match(
     registry.get('select_workspace').description,
-    /user's intended target.*do not retry the same target.*projectless workspace/i,
+    /Do not repeat the handle, retry pending entry, or bypass its approval/i,
   );
   assert.match(
     registry.get('select_workspace').description,
-    /changes to a different real project.*without requiring the older pending approval/i,
+    /For an authorized entry, call Direct on full-access/i,
   );
   assert.match(
     registry.get('register_workspace').description,
-    /Do not register a directory merely to gain read access/,
+    /Requires an explicit user request to register a workspace AND no usable workspace_handle/i,
   );
   assert.match(
     registry.get('register_workspace').description,
-    /no usable workspace_handle is already available/,
+    /Reading, inspecting, editing, or working on a project is not a registration request/i,
   );
   assert.match(
     registry.get('exec_command').inputSchema.workspace_handle.description,
@@ -244,11 +244,11 @@ test('core tool surface exposes registered workspace handle cards and centralize
   assert.equal(Object.hasOwn(registry.get('exec_command').inputSchema, 'environment_id'), false);
   assert.match(
     registry.get('register_workspace').description,
-    /user's intended target.*do not retry the same target.*projectless workspace/i,
+    /Do not repeat the handle, retry pending registration, or bypass its approval/i,
   );
   assert.match(
     registry.get('register_workspace').description,
-    /changes to a different real project.*without requiring the older pending approval/i,
+    /For an authorized registration, call Direct on full-access/i,
   );
   const unregisterTool = registry.get('unregister_workspace');
   assert.equal(unregisterTool.surfaces.direct, false);
@@ -261,19 +261,19 @@ test('core tool surface exposes registered workspace handle cards and centralize
   );
   assert.match(
     registry.get('exec_command').description,
-    /current intended real project.*wait for that action.*instead of bypassing it with projectless workspace/i,
+    /For registered-project writes without a handle, ask the user for a handle or explicit entry instruction/i,
   );
   assert.match(
     registry.get('exec_command').description,
-    /changes to a different real project.*older pending approval does not block/i,
+    /do not select\/register merely to inspect a project/i,
   );
   assert.match(
     registry.get('apply_patch').description,
-    /awaiting approval.*use its registered workspace_handle instead/i,
+    /Never select\/register implicitly or bypass pending approval/i,
   );
   assert.match(
     registry.get('view_image').description,
-    /awaiting approval.*use its registered workspace_handle instead/i,
+    /do not select\/register a project merely to inspect images/i,
   );
 
   for (const name of [
@@ -435,7 +435,7 @@ test('core tool surface exposes registered workspace handle cards and centralize
   );
   assert.match(
     workspacePending.structuredContent.instruction,
-    /changes to a different real project.*older pending approval does not need to be denied or resolved first/i,
+    /Changing projects alone does not authorize new entry.*explicit entry\/registration instruction/i,
   );
   assert.equal(workspacePending._meta, undefined);
 
@@ -547,7 +547,7 @@ test('core tool surface exposes registered workspace handle cards and centralize
     );
     assert.match(
       registerPending.instruction,
-      /changes to a different real project.*older pending approval does not need to be denied or resolved first/i,
+      /Changing projects alone does not authorize new entry.*explicit entry\/registration instruction/i,
     );
   } finally {
     codeModeManager.close();
