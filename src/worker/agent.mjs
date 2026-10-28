@@ -22,6 +22,8 @@ const runtime = createWorkerRuntime({
   workspaceStateFile:
     process.env.CCM_WORKSPACE_REGISTRY_FILE ||
     path.join(installRoot, '.state', 'workspaces.json'),
+  transferStateDir: path.join(installRoot, '.state', 'worker-transfers',
+    String(process.env.CCM_WORKER_ID || 'local').replace(/[^A-Za-z0-9_.-]/g, '_')),
 });
 const reconnectDelayMs = Number(process.env.CCM_WORKER_RECONNECT_MS || 1000);
 const healthIntervalMs = Number(

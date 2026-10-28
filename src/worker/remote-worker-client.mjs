@@ -3,10 +3,8 @@ import {
   MAX_WORKER_MESSAGE_BYTES,
   WORKER_PROTOCOL,
 } from './protocol.mjs';
+import { sendWorkerMessage as send } from './message-send.mjs';
 
-function send(socket, message) {
-  socket.write(JSON.stringify(message) + '\n');
-}
 
 class RemoteWorkerDispatchError extends Error {
   constructor(code, message) {
@@ -181,7 +179,7 @@ export class RemoteWorkerClient {
     if (message?.type !== 'request' || !message.id) return;
     try {
       const result = await this.#dispatch(message.method, message.params || {});
-      send(this.socket, {
+      await send(this.socket, {
         type: 'response',
         id: message.id,
         result,
@@ -190,7 +188,7 @@ export class RemoteWorkerClient {
         setTimeout(() => this.requestRestart(), 250).unref();
       }
     } catch (error) {
-      send(this.socket, {
+      await send(this.socket, {
         type: 'response',
         id: message.id,
         error: {
@@ -225,6 +223,22 @@ export class RemoteWorkerClient {
         return this.runtime.fileService.sendFile(params);
       case 'receive_file':
         return this.runtime.fileService.receiveFile(params);
+      case 'transfer_inspect':
+        return this.runtime.transferService.inspect(params);
+      case 'transfer_read':
+        return this.runtime.transferService.read(params);
+      case 'transfer_digest':
+        return this.runtime.transferService.digest(params);
+      case 'transfer_reserve':
+        return this.runtime.transferService.reserve(params);
+      case 'transfer_write':
+        return this.runtime.transferService.write(params);
+      case 'transfer_finish':
+        return this.runtime.transferService.finish(params);
+      case 'transfer_commit':
+        return this.runtime.transferService.commit(params);
+      case 'transfer_abort':
+        return this.runtime.transferService.abort(params);
       case 'list_projects':
         return {
           projects: this.runtime.workspaceRegistry.listRegistered().map(

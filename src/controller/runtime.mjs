@@ -16,6 +16,7 @@ import { TrustedPackageScriptStore } from './trusted-package-script-store.mjs';
 import { defaultControllerStateFile } from './controller-state.mjs';
 import { WorkerQuarantinePolicy } from './worker-quarantine-policy.mjs';
 import { ControlledRestart } from './controlled-restart.mjs';
+import { TransferTaskManager } from './transfer-task-manager.mjs';
 import { ApprovalReceiptStore } from './approval-receipt-store.mjs';
 
 const installRoot = path.resolve(
@@ -87,6 +88,12 @@ export function createControllerRuntime(options = {}) {
     workerHub,
     workspaceHandleManager,
   });
+  const transferTaskManager = options.transferTaskManager || new TransferTaskManager({
+    workspaceHandleManager,
+    workerHub,
+    stateFile: options.transferTaskStateFile ||
+      defaultControllerStateFile('transfer-tasks.json'),
+  });
   const fileTransferStore = options.fileTransferStore || new FileTransferStore({
     stateDir: options.fileTransferStateDir ||
       path.join(installRoot, '.state', 'file-transfers'),
@@ -117,6 +124,7 @@ export function createControllerRuntime(options = {}) {
     workspaceHandleManager,
     processManager,
     fileService,
+    transferTaskManager,
     fileTransferStore,
     fileDownloadOrigin,
     planManager,
@@ -132,6 +140,7 @@ export function createControllerRuntime(options = {}) {
     },
     async close() {
       try {
+        await transferTaskManager.close();
         await processManager.close();
         fileTransferStore.close();
         execPolicyStore?.close?.();

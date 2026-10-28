@@ -154,6 +154,44 @@ async function run(runtime, args, command) {
 }
 
 export function registerSpecializedTools(registry, runtime) {
+  for (const [name, schema, handler, description] of [
+    ['transfer_path', {
+      source_handle: z.string().uuid(),
+      source_path: z.string().min(1),
+      target_handle: z.string().uuid(),
+      target_path: z.string().min(1),
+    }, args => runtime.transferTaskManager.start(args),
+    'Copy a regular file or recursive directory between two existing CCM workspace handles over WorkerHub. Source may be an absolute readable path; target must be relative to the target workspace and MUST NOT already exist. Never overwrites or deletes source; returns transfer_id to monitor.'],
+    ['transfer_status', { transfer_id: z.string().uuid() },
+      args => runtime.transferTaskManager.status(args.transfer_id),
+      'Read progress and final outcome of a WorkerHub file/directory transfer by transfer_id.'],
+    ['transfer_cancel', { transfer_id: z.string().uuid() },
+      args => runtime.transferTaskManager.cancel(args.transfer_id),
+      'Request cancellation of a running WorkerHub file/directory transfer and safe cleanup of its new target.'],
+  ]) {
+    registry.register({
+      namespace: 'ccm-extra',
+      name,
+      provider: 'ccm-specialized',
+      provenance: 'ccm-workerhub-file-transfer',
+      surfaces: { deferred: true, codeMode: true },
+      tags: ['file', 'transfer', 'workerhub'],
+      supportsParallel: false,
+      description,
+      inputSchema: schema,
+      handler: async args => {
+        try {
+          const value = handler(args);
+          return {
+            content: [{ type: 'text', text: JSON.stringify(value) }],
+            structuredContent: value,
+          };
+        } catch (error) {
+          return toolError(error);
+        }
+      },
+    });
+  }
   registry.register({
     namespace: 'ccm-extra',
     name: 'publish_worker_file',

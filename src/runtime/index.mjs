@@ -4,6 +4,7 @@ import { NativeEnvironmentExecutor } from './executors/native-executor.mjs';
 import { ProcessManager } from './process-manager.mjs';
 import { NativeSandboxBackend } from './sandbox/native-sandbox.mjs';
 import { NativeFileService } from './filesystem/native-file-service.mjs';
+import { WorkerTransferService } from './filesystem/transfer-worker.mjs';
 import { WorkspaceRegistry } from './workspace-registry.mjs';
 import { ChildProxyPolicy } from './child-proxy-policy.mjs';
 
@@ -44,6 +45,9 @@ export function createWorkerRuntime(options = {}) {
     maxSendFileBytes: options.maxSendFileBytes,
     maxReceiveFileBytes: options.maxReceiveFileBytes,
   });
+  const transferService = options.transferService || new WorkerTransferService({
+    workspaceRegistry, stateDir: options.transferStateDir,
+  });
 
   return {
     environmentRegistry,
@@ -53,6 +57,7 @@ export function createWorkerRuntime(options = {}) {
     childProxyPolicy,
     processManager,
     fileService,
+    transferService,
     close() {
       processManager.terminateAll();
     },

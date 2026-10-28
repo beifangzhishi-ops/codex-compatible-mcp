@@ -5,10 +5,8 @@ import {
   MAX_WORKER_MESSAGE_BYTES,
   WORKER_PROTOCOL,
 } from '../worker/protocol.mjs';
+import { sendWorkerMessage as send } from '../worker/message-send.mjs';
 
-function send(socket, message) {
-  socket.write(JSON.stringify(message) + '\n');
-}
 
 const DUPLICATE_WORKER_PROBE_TIMEOUT_MS = 2_000;
 
@@ -121,7 +119,11 @@ export class WorkerHub extends EventEmitter {
       }, waitMs);
       connection.pending.set(id, { resolve, reject, timer });
       try {
-        send(connection.socket, { type: 'request', id, method, params });
+        send(connection.socket, { type: 'request', id, method, params }).catch(error => {
+          clearTimeout(timer);
+          connection.pending.delete(id);
+          reject(error);
+        });
       } catch (error) {
         clearTimeout(timer);
         connection.pending.delete(id);
