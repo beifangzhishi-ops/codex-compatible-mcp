@@ -7,6 +7,7 @@ import {
   writeJsonAtomic,
 } from './worker-state.mjs';
 import { supervisorOwnsProcess } from './supervisor-ownership.mjs';
+import { normalizeWorkerTokenOwner } from './token-owner.mjs';
 
 const installRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -14,6 +15,10 @@ const installRoot = path.resolve(
   '..',
 );
 process.env.CCM_INSTALL_ROOT ||= installRoot;
+
+// This must run inside the Worker before it creates workspaces or child processes.
+// The native child modifies only this parent Worker's token default owner.
+normalizeWorkerTokenOwner();
 
 const takeoverToken = process.env.CCM_WORKER_TAKEOVER_TOKEN || null;
 delete process.env.CCM_WORKER_TAKEOVER_TOKEN;

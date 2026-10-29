@@ -147,6 +147,29 @@ function buildWindowsSandbox() {
   }
 }
 
+function buildWindowsTokenOwner() {
+  const csc = findWindowsCsc();
+  if (!csc) {
+    throw new Error(
+      'CCM Windows token-owner build requires the Windows .NET Framework C# compiler.',
+    );
+  }
+  const output = path.join(outputDir, 'ccm-worker-token-owner.exe');
+  const tempOutput = path.join(outputDir, '.ccm-worker-token-owner.' + process.pid + '.exe');
+  try {
+    run(csc, [
+      '/nologo',
+      '/optimize+',
+      '/target:exe',
+      '/out:' + tempOutput,
+      path.join(root, 'native', 'windows-token-owner', 'CcmWorkerTokenOwner.cs'),
+    ]);
+    replaceBuiltFile(tempOutput, output);
+  } finally {
+    fs.rmSync(tempOutput, { force: true });
+  }
+}
+
 function buildPtyProxy() {
   const cargo = findCargo();
   if (!cargo) throw new Error('Rust cargo was not found.');
@@ -200,5 +223,6 @@ fs.mkdirSync(outputDir, { recursive: true });
 
 if (process.platform === 'win32') {
   buildWindowsSandbox();
+  buildWindowsTokenOwner();
 }
 buildPtyProxy();
