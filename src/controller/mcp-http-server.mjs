@@ -3,8 +3,8 @@ import {
   PUBLISHED_FILE_UI_HTML,
   PUBLISHED_FILE_UI_URI,
 } from '../ui/published-file-app.mjs';
+import { publishedPreviewKind, ISOLATED_MARKUP_CSP } from './published-file-preview.mjs';
 import { FILE_TOKEN_RE } from './file-transfer-store.mjs';
-import { isPreviewableTextMime } from './text-file-preview.mjs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
@@ -58,7 +58,7 @@ function createProtocolServer(
       'When the user explicitly asks to plan, discuss before implementation, or re-plan and a durable multi-turn Plan is useful, discover ccm.plan_patch / ccm.plan_read through tool_search. Use Codex-style planning discipline: explore discoverable facts first and do not ask for facts that reasonable non-mutating inspection can answer; if a high-impact ambiguity instead depends on a non-discoverable user preference, product/scope/compatibility choice, or meaningful tradeoff, ask rather than guess. When asking such a decision question, explicitly show 2-4 mutually exclusive choices in the user-visible question and identify a recommended default there when useful; the user may still provide another answer. Continue until the Plan is decision-complete for another executor, including implementation, interface/data-flow, failure-mode, validation, migration/cleanup, and acceptance details. While planning, ordinary read-only inspection and tests/builds limited to ignored/cache/temp side effects are allowed, but tracked implementation edits, migrations, rewriting codegen/formatting, dependency/config changes, deploy/release, commit, and push remain gated on explicit execution/implementation authorization. Keep the Plan current by removing or rewriting stale, completed, invalidated, or superseded content. When planning reaches a decision-complete stopping point and you are about to tell the user the Plan is complete or await execution authorization, read the current persisted Plan and include its complete latest text in that same user-visible reply; do not replace it with a summary, excerpt, plan_id, or change list. If plan_read is truncated and returns next_start_line, continue ordered range reads until the complete Plan has been collected before replying. This final-Plan handoff applies only when finishing the planning phase; later plan_read calls used during implementation remain lifecycle-neutral and do not require repeating the Plan or re-entering planning. Imperative task wording, Plan updates, completed inspection, workspace approval, registration approval, or sandbox escalation approval is not execution authorization. CCM does not maintain a Plan-Mode state machine or Codex Host proposal/input UI. Once the user explicitly asks to execute/implement, continue implementation; plan_read is a neutral reference lookup and never switches the workflow back to planning.',
       'If no workspace_handle is available, do not infer permission to enter or register a named project. For projectless tasks or absolute-path reads allowed by sandbox_read_scope, discover ccm.create_projectless_handle via tool_search and exec. For registered-project writes, ask for a handle or an explicit entry request. Never use projectless to bypass a pending explicitly requested workspace approval. Pass environment_id when a particular Worker is required; otherwise use the primary Worker.',
       'An environment has no GPT-visible default workspace or project directory. Do not infer project location from Worker bootstrap cwd, CCM_WORKSPACE, Documents, Temp, a drive root, or any other internal path. CCM does not define a Projects Root; new-project placement comes from the user or upper-layer orchestrator.',
-      'Use direct apply_patch and view_image for model-side workspace work. ccm-extra.import_chatgpt_file remains deferred: discover it through tool_search and dispatch through exec with top-level exec.file binding; Library attachments must be materialized as raw_file before binding. It imports one file into the selected Worker context. Publish user-facing deliverables and useful previews using the direct publish_worker_file tool, one file per call; call it proactively when the user asked to create or see PPT/PDF/images/reports, without waiting for a separate send request, including stage previews when useful. Continue work after publishing when needed. publish_worker_file returns temporary CCM HTTPS links, not native ChatGPT attachments. Its file card displays the actual image for PNG/JPEG/WebP, a fixed-size scrollable snippet plus full-text/download links for UTF-8 text, and a filename/download link for other files. The structured download_url remains available for clients without MCP Apps. view_image only serves model-side analysis. Avoid publishing unnecessary intermediate files.',
+      'Use direct apply_patch and view_image for model-side workspace work. ccm-extra.import_chatgpt_file remains deferred: discover it through tool_search and dispatch through exec with top-level exec.file binding; Library attachments must be materialized as raw_file before binding. It imports one file into the selected Worker context. Publish user-facing deliverables and useful previews using the direct publish_worker_file tool, one file per call; call it proactively when the user asked to create or see PPT/PDF/images/reports, without waiting for a separate send request, including stage previews when useful. Continue work after publishing when needed. publish_worker_file returns temporary CCM HTTPS links, not native ChatGPT attachments. Its card shows supported raster images or bounded UTF-8 text directly, and provides browser previews for PDF, audio, video and isolated HTML/SVG; Office formats remain download-only without conversion. Every card retains a download link. The structured download_url remains available for clients without MCP Apps. view_image only serves model-side analysis. Avoid publishing unnecessary intermediate files.',
       'Discover chatgpt_share_export through tool_search and invoke it through exec when the user supplies a public ChatGPT Share URL and wants that conversation inspected or exported; do not route that workflow through BMG/browser automation. Codex 公开共享链接 https://chatgpt.com/s/cx_... 同样通过该工具读取和导出。Discover quark_upload through tool_search and invoke it through exec when the user asks to upload known local files through the logged-in Quark Cloud Drive desktop client.',
       'For bulk image inspection, view_image is also available through exec; batch independent image calls with parallel=true when useful.',
       'Use exec/wait for structured nested capability dispatch; host Code Mode remains responsible for JavaScript/control flow.',
@@ -181,6 +181,20 @@ function createProtocolServer(
   return server;
 }
 
+function resolvePublishRange(header, size) {
+  if (header === undefined) return null;
+  const parts = typeof header === 'string' ? /^bytes=(\d*)-(\d*)$/.exec(header) : null;
+  if (!parts || (!parts[1] && !parts[2]) || size === 0) return false;
+  const first = parts[1] ? Number(parts[1]) : null;
+  const last = parts[2] ? Number(parts[2]) : null;
+  if ((first !== null && !Number.isSafeInteger(first)) ||
+      (last !== null && !Number.isSafeInteger(last))) return false;
+  const start = first === null ? Math.max(0, size - last) : first;
+  const end = first === null || last === null ? size - 1 : Math.min(last, size - 1);
+  return start < size && end >= start && (first !== null || last > 0)
+    ? { start, end } : false;
+}
+
 export function createHttpController({
   toolRegistry,
   runtime,
@@ -215,26 +229,35 @@ export function createHttpController({
       res.status(405).end();
       return;
     }
-    const acquired = runtime.fileTransferStore?.acquire(match[2]);
+    const entryInfo = runtime.fileTransferStore?.get(match[2]);
+    if (!entryInfo) { res.status(404).end(); return; }
+    const preview = match[1] === 'preview';
+    const kind = preview ? publishedPreviewKind(entryInfo.mime_type) : null;
+    if (preview && !kind) { res.status(404).end(); return; }
+    const range = resolvePublishRange(req.headers.range, entryInfo.byte_length);
+    if (range === false) {
+      res.setHeader('Content-Range', `bytes */${entryInfo.byte_length}`);
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(416).end();
+      return;
+    }
+    const acquired = runtime.fileTransferStore?.acquire(match[2], range || null);
     if (!acquired) { res.status(404).end(); return; }
     const { entry, stream, release } = acquired;
-    const preview = match[1] === 'preview';
-    const textView = preview && isPreviewableTextMime(entry.mime_type);
-    const imageView = preview && /^image\/(png|jpeg|webp)$/i.test(entry.mime_type);
-    if (preview && !textView && !imageView) {
-      stream.destroy(); release();
-      res.status(404).end(); return;
-    }
+    const textView = kind === 'text';
     const safeFilename = entry.filename.replace(/[\r\n\\/"\x00-\x1f\x7f]/g, '_');
     const asciiName = safeFilename.replace(/[^\x20-\x7e]/g, '_').replace(/[%\\]/g, '_');
     const mime = /^[\w.+-]+\/[\w.+-]+$/.test(entry.mime_type) ? entry.mime_type : 'application/octet-stream';
-    res.status(200);
-    res.setHeader('Content-Length', entry.byte_length);
+    res.status(range ? 206 : 200);
+    res.setHeader('Content-Length', range ? range.end - range.start + 1 : entry.byte_length);
+    res.setHeader('Accept-Ranges', 'bytes');
+    if (range) res.setHeader('Content-Range', `bytes ${range.start}-${range.end}/${entry.byte_length}`);
     res.setHeader('Content-Type', textView ? 'text/plain; charset=utf-8' : preview ? entry.mime_type : mime);
     res.setHeader('Content-Disposition', preview ? 'inline' : 'attachment; filename="' + asciiName + '"; filename*=UTF-8\'\'' + encodeURIComponent(safeFilename));
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
+    if (kind === 'markup') res.setHeader('Content-Security-Policy', ISOLATED_MARKUP_CSP);
     stream.on('close', release);
     stream.on('error', () => { if (!res.headersSent) res.status(500).end(); else res.destroy(); });
     res.on('close', () => stream.destroy());

@@ -9,7 +9,7 @@ const fullTextUrl = 'https://example.test/ccm/preview/12345678-1234-4234-8234-12
 
 function mountCard() {
   const elements = Object.fromEntries(
-    ['frame', 'filename', 'picture', 'image', 'image-link', 'text-preview', 'text-note', 'status', 'details', 'link', 'full-link']
+    ['frame', 'filename', 'picture', 'image', 'image-link', 'preview-link', 'text-preview', 'text-note', 'status', 'details', 'link', 'full-link']
       .map((name) => [name, {
         style: {},
         textContent: '',
@@ -87,6 +87,7 @@ test('published image shows fitted image and download link in the same card', ()
     preview_url: previewUrl,
     filename: 'portrait.png',
     mime_type: 'image/png',
+    preview_kind: 'image',
   });
   assert.equal(card.elements.image.src, previewUrl);
   assert.equal(card.elements['image-link'].href, previewUrl);
@@ -145,6 +146,7 @@ test('image preview link requires matching origin and token', () => {
       download_url: downloadUrl,
       preview_url: url,
       filename: 'photo.png',
+      preview_kind: 'image',
     });
     assert.equal(card.elements['image-link'].style.display, 'none');
   }
@@ -156,6 +158,7 @@ test('image preview link survives thumbnail loading failure', () => {
     capability: 'publish_worker_file',
     download_url: downloadUrl,
     preview_url: previewUrl,
+    preview_kind: 'image',
     filename: 'photo.png',
   });
   card.elements.image.onerror();
@@ -174,4 +177,14 @@ test('text preview rejects foreign/mismatched full-text links', () => {
   });
   assert.equal(card.elements['text-preview'].style.display, 'none');
   assert.equal(card.elements['full-link'].style.display, 'none');
+});
+
+test('PDF preview card retains its download link', () => {
+  const card = mountCard();
+  card.result({ capability: 'publish_worker_file', download_url: downloadUrl,
+    preview_url: previewUrl, preview_kind: 'document', filename: 'report.pdf' });
+  assert.equal(card.elements['preview-link'].href, previewUrl);
+  assert.equal(card.elements['preview-link'].textContent, 'View PDF');
+  assert.equal(card.elements['preview-link'].style.display, 'block');
+  assert.equal(card.elements.link.href, downloadUrl);
 });

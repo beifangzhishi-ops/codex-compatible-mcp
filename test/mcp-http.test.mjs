@@ -211,7 +211,6 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const publishedFileUiTool = listed.tools.find((tool) => tool.name === 'publish_worker_file');
     assert.equal(publishedFileUiTool?._meta?.ui?.resourceUri, PUBLISHED_FILE_UI_URI);
     assert.equal(publishedFileUiTool?._meta?.['openai/outputTemplate'], PUBLISHED_FILE_UI_URI);
-    assert.equal(listed.tools.some((tool) => tool.name === 'preview_published_image'), false);
     for (const name of ['select_workspace', 'register_workspace']) {
       const tool = listed.tools.find((entry) => entry.name === name);
       assert.equal(tool?._meta?.ui?.resourceUri, undefined);

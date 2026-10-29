@@ -79,6 +79,12 @@ test('Sidecar proxies safe plain-text view over existing preview route', async (
   const payload = Buffer.from('<script>non-executable source</script>');
   const upstream = http.createServer((req, res) => {
     if (req.url !== '/ccm/preview/' + token) { res.writeHead(404); res.end(); return; }
+    if (req.headers.range === 'bytes=0-3') {
+      res.writeHead(206, { 'Content-Type': 'text/plain', 'Content-Length': 4,
+        'Content-Range': 'bytes 0-3/' + payload.length, 'Accept-Ranges': 'bytes' });
+      res.end(payload.subarray(0, 4));
+      return;
+    }
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8',
       'Content-Length': payload.length, 'Content-Disposition': 'inline' });
     res.end(payload);
@@ -98,6 +104,10 @@ test('Sidecar proxies safe plain-text view over existing preview route', async (
     assert.equal(result.headers.get('content-disposition'), 'inline');
     assert.equal(result.headers.get('x-content-type-options'), 'nosniff');
     assert.equal(await result.text(), payload.toString());
+    const part = await fetch(url, { headers: { Range: 'bytes=0-3' } });
+    assert.equal(part.status, 206);
+    assert.equal(part.headers.get('content-range'), 'bytes 0-3/' + payload.length);
+    assert.equal(await part.text(), payload.subarray(0, 4).toString());
     assert.equal((await fetch(url, { method: 'POST' })).status, 405);
     assert.equal((await fetch(base + '/ccm/preview/not-a-token')).status, 404);
   } finally {

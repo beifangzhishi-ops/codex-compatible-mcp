@@ -663,7 +663,10 @@ function proxyPublishedFile(request, response, url, runtime) {
     path: url.pathname,
     method: 'GET',
     timeout: UPSTREAM_TIMEOUT_MS,
-    headers: { Accept: 'application/octet-stream' },
+    headers: {
+      Accept: 'application/octet-stream',
+      ...(typeof request.headers.range === 'string' ? { Range: request.headers.range } : {}),
+    },
   }, (source) => {
     const status = source.statusCode || 502;
     if (status === 404) {
@@ -671,14 +674,23 @@ function proxyPublishedFile(request, response, url, runtime) {
       sendJson(response, 404, { error: 'not_found' }, { noStore: true });
       return;
     }
+    if (status === 416) {
+      source.resume();
+      response.statusCode = 416;
+      if (source.headers['content-range']) response.setHeader('Content-Range', source.headers['content-range']);
+      setNoStore(response);
+      response.end();
+      return;
+    }
     const length = Number(source.headers['content-length']);
-    if (status !== 200 || !Number.isSafeInteger(length) || length < 0 || length > MAX_DOWNLOAD_BYTES) {
+    if (![200, 206].includes(status) || !Number.isSafeInteger(length) || length < 0 || length > MAX_DOWNLOAD_BYTES ||
+        (status === 206 && !/^bytes \d+-\d+\/\d+$/.test(String(source.headers['content-range'] || '')))) {
       source.destroy();
       if (!response.headersSent) sendJson(response, 502, { error: 'invalid_upstream' }, { noStore: true });
       return;
     }
-    response.statusCode = 200;
-    for (const name of ['content-type', 'content-length', 'content-disposition', 'cache-control', 'x-content-type-options', 'referrer-policy']) {
+    response.statusCode = status;
+    for (const name of ['content-type', 'content-length', 'content-disposition', 'content-range', 'accept-ranges', 'content-security-policy', 'cache-control', 'x-content-type-options', 'referrer-policy']) {
       if (source.headers[name] !== undefined) response.setHeader(name, source.headers[name]);
     }
     response.setHeader('Cache-Control', 'no-store');

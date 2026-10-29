@@ -1,6 +1,7 @@
 ﻿import * as z from 'zod/v4';
 import { PUBLISHED_FILE_UI_URI } from '../ui/published-file-app.mjs';
 import { textPreviewFromBase64 } from '../controller/text-file-preview.mjs';
+import { publishedPreviewKind } from '../controller/published-file-preview.mjs';
 function toolError(error) {
   return {
     content: [{ type: 'text', text: String(error?.message || error) }],
@@ -43,20 +44,23 @@ function fileResourceResult(value, environmentId, runtime) {
   if (!/^https:\/\//.test(origin)) throw new Error('Valid HTTPS file origin is required.');
   const transfer = fileTransferStore.put(value, { environmentId });
   const url = origin + '/ccm/download/' + transfer.token;
-  const previewUrl = /^image\/(png|jpeg|webp)$/i.test(transfer.mime_type)
+  const previewKind = publishedPreviewKind(transfer.mime_type);
+  const previewUrl = previewKind && previewKind !== 'text'
     ? origin + '/ccm/preview/' + transfer.token : undefined;
-  const textPreview = textPreviewFromBase64(value.data, transfer.mime_type);
+  const textPreview = previewKind === 'text'
+    ? textPreviewFromBase64(value.data, transfer.mime_type) : null;
   const textUrl = textPreview
     ? origin + '/ccm/preview/' + transfer.token : undefined;
   return {
     content: [{ type: 'text', text: 'Download ' + transfer.filename + ': ' + url +
-      (previewUrl ? '\nImage preview: ' + previewUrl : '') +
+      (previewUrl ? '\nPreview: ' + previewUrl : '') +
       '\nExpires: ' + new Date(transfer.expiresAt).toISOString() }],
     structuredContent: {
       capability: 'publish_worker_file',
       environment_id: environmentId,
       download_url: url,
       ...(previewUrl ? { preview_url: previewUrl } : {}),
+      ...(previewKind ? { preview_kind: previewKind } : {}),
       ...(textUrl ? {
         text_url: textUrl,
         text_preview: textPreview.text,
@@ -208,11 +212,11 @@ export function registerSpecializedTools(registry, runtime) {
     },
     supportsParallel: false,
     description: [
-      'Publish one Worker file as a temporary HTTPS download link (up to 72 hours), and display one MCP App card in chat. PNG/JPEG/WebP show the image, UTF-8 text/Markdown/JSON/code show a bounded scrollable preview with a full-text link, and other formats show the filename and download link. This is not a native ChatGPT attachment.',
+      'Publish one Worker file as a temporary HTTPS download link (up to 72 hours) and one MCP App card. Browser-native images, PDF, audio/video and isolated HTML/SVG have preview links; supported raster images also show inline, UTF-8 text/Markdown/JSON/code show a bounded source snippet and full-text link. Unsupported files download only. No format conversion is performed. This is not a native ChatGPT attachment.',
       'When a user asks to create a PPT, PDF, image, report or other artifact, you may proactively publish the finished result and useful preview images for the user without a separate request to send it. Stage previews are permitted and further CCM work may continue after publishing. Do not publish files merely for model-side inspection.',
       'workspace_handle is required and determines the Worker. Relative paths are resolved from that context root; absolute paths remain absolute on the selected Worker.',
       'Reuse an existing workspace_handle. For projectless work or permitted absolute-path reads without a handle, use create_projectless_handle; never select/register a project merely to publish its files or bypass pending entry approval.',
-      'view_image is only for model-side image inspection. One publication creates one useful file card; images fit inside the card, text has a compact scrollable preview and a browser full-text link, and other files show a download link. Avoid publishing unnecessary intermediate files. PPT/PDF require separately rendered images for visual page preview.',
+      'view_image is only for model-side image inspection. The card keeps the download link beside any native browser preview. PDF previews use the browser PDF reader; Office files require conversion and therefore remain download-only. Avoid publishing unnecessary intermediate files.',
       'The original bytes are preserved. Publish one file at a time, sequentially; public links are bearer capabilities and anyone possessing them can download during their lifetime.',
     ].join('\n\n'),
     inputSchema: {

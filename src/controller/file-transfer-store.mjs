@@ -121,7 +121,7 @@ export class FileTransferStore {
     this.#cleanup();
     return FILE_TOKEN_RE.test(String(token)) ? this.entries.get(token) || null : null;
   }
-  acquire(token) {
+  acquire(token, range = null) {
     const entry = this.get(token);
     if (!entry) return null;
     let fd;
@@ -137,7 +137,12 @@ export class FileTransferStore {
     catch { this.#remove(token); return null; }
     this.active.set(token, (this.active.get(token) || 0) + 1);
     let released = false;
-    return { entry, stream: fs.createReadStream(null, { fd, autoClose: true }), release: () => {
+    const streamOptions = { fd, autoClose: true };
+    if (range) {
+      streamOptions.start = range.start;
+      streamOptions.end = range.end;
+    }
+    return { entry, stream: fs.createReadStream(null, streamOptions), release: () => {
       if (released) return;
       released = true;
       const count = (this.active.get(token) || 1) - 1;

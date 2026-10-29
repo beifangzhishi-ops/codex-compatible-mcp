@@ -50,7 +50,7 @@ test('Controller streams original file bytes and safe attachment headers', async
   assert.equal((await fetch(origin + '/ccm/preview/' + entry.token + '?utm_source=chatgpt.com')).status, 200);
   assert.equal((await fetch(origin + '/ccm/preview/' + entry.token, { method: 'POST' })).status, 405);
 }));
-test('Controller serves inline only allowlisted PNG/JPEG/WebP image types', async () => withController(async ({ store, origin }) => {
+test('Controller serves original PNG bytes inline', async () => withController(async ({ store, origin }) => {
   const entry = put(store, Buffer.from('fake-png'), 'image/png');
   const res = await fetch(origin + '/ccm/preview/' + entry.token);
   assert.equal(res.status, 200);
@@ -64,13 +64,55 @@ test('Controller serves inline only allowlisted PNG/JPEG/WebP image types', asyn
   assert.equal((await fetch(origin + '/ccm/preview/' + entry.token)).status, 200);
 }));
 
-test('HTML source is displayed as plain text rather than executable markup', async () => withController(async ({ store, origin }) => {
+test('Native browser formats preview without conversion; Office stays download-only', async () => withController(async ({ store, origin }) => {
+  for (const mime of ['application/pdf', 'audio/mpeg', 'audio/ogg', 'video/mp4',
+    'video/webm', 'image/gif', 'image/avif', 'image/bmp', 'image/svg+xml']) {
+    const bytes = Buffer.from('original bytes');
+    const entry = put(store, bytes, mime);
+    const response = await fetch(origin + '/ccm/preview/' + entry.token);
+    assert.equal(response.status, 200, mime);
+    assert.equal(response.headers.get('content-type'), mime);
+    assert.equal(response.headers.get('content-disposition'), 'inline');
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes);
+    if (mime === 'image/svg+xml') {
+      assert.match(response.headers.get('content-security-policy'), /^sandbox;/);
+    }
+  }
+  const office = put(store, Buffer.from('office'), 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
+  assert.equal((await fetch(origin + '/ccm/preview/' + office.token)).status, 404);
+  assert.equal((await fetch(origin + '/ccm/download/' + office.token)).status, 200);
+}));
+
+test('Controller supports bounded single-byte ranges for PDF and media seeking', async () => withController(async ({ store, origin }) => {
+  const entry = put(store, Buffer.from('0123456789'), 'video/mp4');
+  const url = origin + '/ccm/preview/' + entry.token;
+  for (const [requestRange, expectedRange, expectedBody] of [
+    ['bytes=2-5', 'bytes 2-5/10', '2345'],
+    ['bytes=8-', 'bytes 8-9/10', '89'],
+    ['bytes=-3', 'bytes 7-9/10', '789'],
+    ['bytes=0-999', 'bytes 0-9/10', '0123456789'],
+  ]) {
+    const response = await fetch(url, { headers: { Range: requestRange } });
+    assert.equal(response.status, 206);
+    assert.equal(response.headers.get('accept-ranges'), 'bytes');
+    assert.equal(response.headers.get('content-range'), expectedRange);
+    assert.equal(await response.text(), expectedBody);
+  }
+  for (const invalid of ['bytes=10-', 'bytes=-0', 'bytes=5-3', 'bytes=0-1,4-5']) {
+    const response = await fetch(url, { headers: { Range: invalid } });
+    assert.equal(response.status, 416);
+    assert.equal(response.headers.get('content-range'), 'bytes */10');
+  }
+}));
+
+test('HTML is isolated by a restrictive CSP sandbox', async () => withController(async ({ store, origin }) => {
   const html = Buffer.from('<script>alert(1)</script>\n<h1>Safe source</h1>');
   const entry = put(store, html, 'text/html');
   const res = await fetch(origin + '/ccm/preview/' + entry.token);
   assert.equal(res.status, 200);
-  assert.equal(res.headers.get('content-type'), 'text/plain; charset=utf-8');
+  assert.equal(res.headers.get('content-type'), 'text/html');
   assert.equal(res.headers.get('content-disposition'), 'inline');
   assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+  assert.match(res.headers.get('content-security-policy'), /^sandbox; default-src 'none'/);
   assert.equal(await res.text(), html.toString());
 }));

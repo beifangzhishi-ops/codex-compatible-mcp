@@ -1,7 +1,8 @@
-export const PUBLISHED_FILE_UI_URI = 'ui://ccm/published-file-v6.html';
+export const PUBLISHED_FILE_UI_URI = 'ui://ccm/published-file-v7.html';
 
 // Every publication gets one useful card: images render inline, text shows a
-// bounded scrollable snippet, and all files retain a download link.
+// bounded scrollable snippet, and other browser-native types show preview links.
+// Every file also retains a download link.
 export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
 <html lang="en">
 <head>
@@ -31,7 +32,7 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
     #text-note { display: none; margin-top: 5px; font-size: 11px; opacity: 0.65; }
     #status { opacity: 0.8; }
     #details { display: none; margin-top: 7px; font-size: 12px; opacity: 0.7; }
-    #link, #full-link, #image-link { display: none; margin-top: 8px; }
+    #link, #full-link, #image-link, #preview-link { display: none; margin-top: 8px; }
   </style>
 </head>
 <body>
@@ -39,6 +40,7 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
     <div id="filename"></div>
     <div id="picture"><img id="image" alt="CCM published image"></div>
     <a id="image-link" target="_blank" rel="noopener noreferrer">View image</a>
+    <a id="preview-link" target="_blank" rel="noopener noreferrer">Preview file</a>
     <pre id="text-preview"></pre>
     <div id="text-note"></div>
     <div id="status">Loading published file…</div>
@@ -53,6 +55,7 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
       const picture = document.getElementById('picture');
       const image = document.getElementById('image');
       const imageLink = document.getElementById('image-link');
+      const previewLink = document.getElementById('preview-link');
       const textPreview = document.getElementById('text-preview');
       const textNote = document.getElementById('text-note');
       const status = document.getElementById('status');
@@ -123,6 +126,7 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
       enableExternalLink(link, 'download');
       enableExternalLink(fullLink, 'preview');
       enableExternalLink(imageLink, 'preview');
+      enableExternalLink(previewLink, 'preview');
       function show(result) {
         const value = result?.structuredContent || result;
         if (value?.capability !== 'publish_worker_file') return;
@@ -141,6 +145,7 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
         link.style.display = 'block';
         picture.style.display = 'none';
         imageLink.style.display = 'none';
+        previewLink.style.display = 'none';
         details.style.display = 'none';
         textPreview.style.display = 'none';
         textNote.style.display = 'none';
@@ -166,16 +171,26 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
         }
         const previewUrl = value.preview_url;
         if (!validUrl(previewUrl, 'preview') ||
+            new URL(previewUrl).origin !== new URL(downloadUrl).origin ||
             previewUrl.split('/').at(-1) !== downloadUrl.split('/').at(-1)) {
           status.style.display = 'none';
           image.removeAttribute('src');
           sizeChanged();
           return;
         }
-        if (new URL(previewUrl).origin === new URL(downloadUrl).origin) {
-          imageLink.href = previewUrl;
-          imageLink.style.display = 'block';
+        if (value.preview_kind !== 'image') {
+          image.removeAttribute('src');
+          previewLink.href = previewUrl;
+          previewLink.textContent = value.preview_kind === 'document' ? 'View PDF'
+            : value.preview_kind === 'audio' ? 'Play audio'
+            : value.preview_kind === 'video' ? 'Play video' : 'Preview file';
+          previewLink.style.display = 'block';
+          status.style.display = 'none';
+          sizeChanged();
+          return;
         }
+        imageLink.href = previewUrl;
+        imageLink.style.display = 'block';
         status.style.display = '';
         status.textContent = 'Loading image preview…';
         image.onload = () => {
