@@ -41,6 +41,18 @@ function runtimeStub() {
       },
     },
     workspaceHandleManager: {
+      resolve: (handle) => {
+        if (handle !== '00000000-0000-4000-8000-000000000009') {
+          throw new Error('Unknown or expired workspace_handle');
+        }
+        return {
+          workspace_handle: handle,
+          environment_id: 'primary',
+          workspace_id: 'project',
+          workspace_kind: 'registered',
+          workspace_root: 'C:\\work\\project',
+        };
+      },
       createProjectless: async (environmentId = null) => ({
         workspace_handle: '00000000-0000-4000-8000-000000000001',
         environment_id: environmentId || 'primary',
@@ -175,7 +187,7 @@ function runtimeStub() {
   };
 }
 
-test('core tool surface exposes registered workspace handle cards and centralizes approval cards', async () => {
+test('core tool surface separates successful workspace handle rendering from approval cards', async () => {
   const registry = registerCoreTools(new ToolRegistry(), runtimeStub());
 
   const direct = registry.listDirect().map((tool) => tool.name).sort();
@@ -187,6 +199,7 @@ test('core tool surface exposes registered workspace handle cards and centralize
     'request_approval',
     'resolve_pending_action',
     'select_workspace',
+    'show_workspace_handle',
     'view_image',
     'write_stdin',
   ]);
@@ -223,11 +236,11 @@ test('core tool surface exposes registered workspace handle cards and centralize
   );
   assert.match(
     registry.get('select_workspace').description,
-    /Do not repeat the handle, retry pending entry, or bypass its approval/i,
+    /Never show a handle for pending\/failed actions, retry pending entry, or bypass its approval/i,
   );
   assert.match(
     registry.get('select_workspace').description,
-    /For an authorized entry, call Direct on full-access/i,
+    /On full-access success, call show_workspace_handle/i,
   );
   assert.match(
     registry.get('register_workspace').description,
@@ -244,11 +257,11 @@ test('core tool surface exposes registered workspace handle cards and centralize
   assert.equal(Object.hasOwn(registry.get('exec_command').inputSchema, 'environment_id'), false);
   assert.match(
     registry.get('register_workspace').description,
-    /Do not repeat the handle, retry pending registration, or bypass its approval/i,
+    /Never show a handle for pending\/failed actions, retry pending registration, or bypass its approval/i,
   );
   assert.match(
     registry.get('register_workspace').description,
-    /For an authorized registration, call Direct on full-access/i,
+    /On full-access success, call show_workspace_handle/i,
   );
   const unregisterTool = registry.get('unregister_workspace');
   assert.equal(unregisterTool.surfaces.direct, false);
@@ -290,8 +303,16 @@ test('core tool surface exposes registered workspace handle cards and centralize
     assert.equal(tool.surfaces.direct, true);
     assert.equal(tool.surfaces.deferred, false);
     assert.equal(tool.surfaces.codeMode, true);
-    assert.equal(tool.mcpMeta.ui.resourceUri, 'ui://ccm/workspace-handle-v1.html');
+    assert.equal(tool.mcpMeta?.ui?.resourceUri, undefined, name + ' must not render an empty card before approval');
   }
+  const showHandle = registry.get('show_workspace_handle');
+  assert.equal(showHandle.surfaces.direct, true);
+  assert.equal(showHandle.surfaces.codeMode, false);
+  assert.equal(showHandle.mcpMeta.ui.resourceUri, 'ui://ccm/workspace-handle-v1.html');
+  const displayed = await showHandle.handler({ workspace_handle: '00000000-0000-4000-8000-000000000009' });
+  assert.equal(displayed.structuredContent.workspace_kind, 'registered');
+  const unknown = await showHandle.handler({ workspace_handle: '00000000-0000-4000-8000-000000000099' });
+  assert.equal(unknown.isError, true);
   assert.deepEqual(
     Object.keys(registry.get('request_approval').inputSchema),
     ['approval_id'],
@@ -452,6 +473,7 @@ test('core tool surface exposes registered workspace handle cards and centralize
         'request_approval',
         'resolve_pending_action',
         'select_workspace',
+        'show_workspace_handle',
         'tool_search',
         'view_image',
         'wait',

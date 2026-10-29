@@ -173,6 +173,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       'request_approval',
       'resolve_pending_action',
       'select_workspace',
+      'show_workspace_handle',
       'tool_search',
       'view_image',
       'wait',
@@ -213,9 +214,12 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(listed.tools.some((tool) => tool.name === 'preview_published_image'), false);
     for (const name of ['select_workspace', 'register_workspace']) {
       const tool = listed.tools.find((entry) => entry.name === name);
-      assert.equal(tool?._meta?.ui?.resourceUri, WORKSPACE_HANDLE_UI_URI);
-      assert.equal(tool?._meta?.['openai/outputTemplate'], WORKSPACE_HANDLE_UI_URI);
+      assert.equal(tool?._meta?.ui?.resourceUri, undefined);
+      assert.equal(tool?._meta?.['openai/outputTemplate'], undefined);
     }
+    const handleTool = listed.tools.find((entry) => entry.name === 'show_workspace_handle');
+    assert.equal(handleTool?._meta?.ui?.resourceUri, WORKSPACE_HANDLE_UI_URI);
+    assert.equal(handleTool?._meta?.['openai/outputTemplate'], WORKSPACE_HANDLE_UI_URI);
     const keyResource = await client.readResource({ uri: WORKSPACE_HANDLE_UI_URI });
     assert.equal(keyResource.contents[0].text, WORKSPACE_HANDLE_UI_HTML);
     assert.equal(listed.tools.some((tool) => tool.name === 'list_projects'), false);

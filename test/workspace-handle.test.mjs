@@ -401,6 +401,17 @@ test('full-access Controller enters registered workspaces without approval', asy
     assert.equal(Object.hasOwn(selected.structuredContent, 'approval_id'), false);
     assert.equal(selected.structuredContent.workspace_kind, 'registered');
     assert.equal(selected.structuredContent.workspace_root, await fs.realpath(bootstrapRoot));
+    const showHandle = tools.registry.get('show_workspace_handle');
+    const displayedSelection = await showHandle.handler({
+      workspace_handle: selected.structuredContent.workspace_handle,
+    });
+    assert.deepEqual(displayedSelection.structuredContent, selected.structuredContent);
+    assert.equal((await showHandle.handler({
+      workspace_handle: first.workspace_handle,
+    })).isError, true, 'projectless handles must not create a card');
+    assert.equal((await showHandle.handler({
+      workspace_handle: '00000000-0000-4000-8000-000000000999',
+    })).isError, true, 'unknown handles must not create a card');
 
     const register = tools.registry.get('register_workspace');
     const registered = await register.handler({
@@ -416,6 +427,10 @@ test('full-access Controller enters registered workspaces without approval', asy
     assert.equal(Object.hasOwn(registered.structuredContent, 'approval_id'), false);
     assert.equal(registered.structuredContent.workspace_id, 'new-project');
     assert.equal(registered.structuredContent.workspace_kind, 'registered');
+    const displayedRegistration = await showHandle.handler({
+      workspace_handle: registered.structuredContent.workspace_handle,
+    });
+    assert.deepEqual(displayedRegistration.structuredContent, registered.structuredContent);
     assert.equal(
       registered.structuredContent.workspace_root,
       await fs.realpath(newRoot),

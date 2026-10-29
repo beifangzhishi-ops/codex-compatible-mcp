@@ -506,15 +506,11 @@ export function registerCoreTools(registry, runtime) {
     name: 'select_workspace',
     provider: 'ccm-core',
     surfaces: { direct: true, codeMode: true },
-    mcpMeta: {
-      ui: { resourceUri: WORKSPACE_HANDLE_UI_URI },
-      'openai/outputTemplate': WORKSPACE_HANDLE_UI_URI,
-    },
     tags: ['workspace', 'project', 'approval'],
     description: [
       'Enter one registered workspace. Full-access environments return the workspace_handle directly; restricted environments return a frozen approval request.',
       'Requires an explicit user request to enter/switch workspaces AND no usable workspace_handle. Reading, inspecting, editing, or working on a project is not an entry request.',
-      'For an authorized entry, call Direct on full-access to display the handle card; on restricted Workers use exec then request_approval if required. Do not repeat the handle, retry pending entry, or bypass its approval with projectless execution.',
+      'On full-access success, call show_workspace_handle with the returned workspace_handle to display the copyable handle card. On restricted Workers, call request_approval when approval_required=true; the completed approval card displays the handle. Never show a handle for pending/failed actions, retry pending entry, or bypass its approval with projectless execution.',
       'Full-access skips user approval but keeps workspace identity validation, Worker routing, and workspace-handle boundaries.',
     ].join('\n\n'),
     inputSchema: {
@@ -573,15 +569,11 @@ export function registerCoreTools(registry, runtime) {
     name: 'register_workspace',
     provider: 'ccm-core',
     surfaces: { direct: true, codeMode: true },
-    mcpMeta: {
-      ui: { resourceUri: WORKSPACE_HANDLE_UI_URI },
-      'openai/outputTemplate': WORKSPACE_HANDLE_UI_URI,
-    },
     tags: ['workspace', 'project', 'approval', 'register'],
     description: [
       'Register and enter one exact project directory. Full-access environments return the workspace_handle directly; restricted environments return a frozen approval request.',
       'Requires an explicit user request to register a workspace AND no usable workspace_handle for that project. Reading, inspecting, editing, or working on a project is not a registration request.',
-      'For an authorized registration, call Direct on full-access to display the handle card; on restricted Workers use exec then request_approval if required. Do not repeat the handle, retry pending registration, or bypass its approval with projectless execution.',
+      'On full-access success, call show_workspace_handle with the returned workspace_handle to display the copyable handle card. On restricted Workers, call request_approval when approval_required=true; the completed approval card displays the handle. Never show a handle for pending/failed actions, retry pending registration, or bypass its approval with projectless execution.',
       'With create_if_missing=true, registration may create the exact missing directory before entry. Full-access skips user approval but keeps target revalidation and workspace-handle boundaries.',
     ].join('\n\n'),
     inputSchema: {
@@ -637,6 +629,36 @@ export function registerCoreTools(registry, runtime) {
             'Changing projects alone does not authorize new entry; request a handle or an explicit entry/registration instruction. ' +
             'A separately authorized new workspace action does not require denying this older pending approval.',
         });
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  });
+
+  registry.register({
+    name: 'show_workspace_handle',
+    provider: 'ccm-core',
+    surfaces: { direct: true },
+    mcpMeta: {
+      ui: { resourceUri: WORKSPACE_HANDLE_UI_URI },
+      'openai/outputTemplate': WORKSPACE_HANDLE_UI_URI,
+    },
+    tags: ['workspace', 'handle', 'ui'],
+    description: [
+      'Display a copyable CCM workspace_handle card after a successful full-access select_workspace or register_workspace call.',
+      'Pass the exact registered workspace_handle returned by that successful call. Do not call for approval_required, failed, denied, or projectless results; restricted approval cards already display the approved handle.',
+      'This is read-only: it validates the existing registered handle and does not enter a workspace, request approval, or create a new handle.',
+    ].join('\n\n'),
+    inputSchema: {
+      workspace_handle: z.string().uuid().describe('Exact handle returned by a successful registered workspace entry.'),
+    },
+    handler: async ({ workspace_handle }) => {
+      try {
+        const value = runtime.workspaceHandleManager.resolve(workspace_handle);
+        if (value.workspace_kind !== 'registered') {
+          throw new Error('Only registered workspace handles can be displayed.');
+        }
+        return jsonResult(value);
       } catch (error) {
         return toolError(error);
       }
