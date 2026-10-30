@@ -28,7 +28,7 @@ test('Tailscale trust binds aliases and quoted PowerShell paths to one absolute 
   );
 });
 
-test('CMD Tailscale trust fixes /s /c quoting and binds the executable path', () => {
+test('CMD Tailscale calls safely invoke the pinned path via PowerShell', () => {
   for (const command of [
     'tailscale version',
     'tailscale.exe version',
@@ -37,7 +37,7 @@ test('CMD Tailscale trust fixes /s /c quoting and binds the executable path', ()
   ]) {
     assert.deepEqual(
       trustedTailscaleInvocation(command, 'cmd.exe', environment),
-      { cmd: `""${TAILSCALE_EXE}" version"` },
+      { cmd: `& '${TAILSCALE_EXE}' version`, shell: 'powershell.exe' },
     );
   }
 });

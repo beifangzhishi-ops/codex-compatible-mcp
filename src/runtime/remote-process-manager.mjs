@@ -494,6 +494,7 @@ export class RemoteProcessManager {
       forwardedArgs = {
         ...forwardedArgs,
         cmd: trustedTailscale.cmd,
+        ...(trustedTailscale.shell ? { shell: trustedTailscale.shell } : {}),
         sandbox_permissions: 'approved_escalated',
       };
       delete forwardedArgs.justification;

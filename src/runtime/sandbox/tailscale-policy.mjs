@@ -8,8 +8,10 @@ const alias = /^tailscale(?:\.exe)?(?=\s|$)/i;
 const literalPath = /^["']?C:\\Program Files\\Tailscale\\tailscale\.exe["']?(?=\s|$)/i;
 const psCall = /^&\s+(?:'C:\\Program Files\\Tailscale\\tailscale\.exe'|"C:\\Program Files\\Tailscale\\tailscale\.exe")(?=\s|$)/i;
 
-// Return a command with the trusted absolute executable substituted in place
-// of a bare alias. CMD needs an extra outer pair of quotes for /s /c.
+// Run the pinned executable as a literal PowerShell call. CMD /s /c can
+// mis-handle the nested quotes needed for executable paths containing spaces
+// after Node's Windows argument escaping. Parse CMD inputs in CMD syntax,
+// then dispatch only the recognized executable call via PowerShell.
 export function trustedTailscaleInvocation(command, shell, environment = {}) {
   if (environment.platform !== 'windows') return null;
   const shellKind = effectiveShell({ shell }, environment);
@@ -34,8 +36,7 @@ export function trustedTailscaleInvocation(command, shell, environment = {}) {
       !/^tailscale(?:\.exe)?$/i.test(segment.tokens[0])) return null;
   const suffix = source.slice(match[0].length);
   return {
-    cmd: shellKind === 'cmd'
-      ? `""${TAILSCALE_EXE}"${suffix}"`
-      : `& '${TAILSCALE_EXE}'${suffix}`,
+    cmd: `& '${TAILSCALE_EXE}'${suffix}`,
+    ...(shellKind === 'cmd' ? { shell: 'powershell.exe' } : {}),
   };
 }

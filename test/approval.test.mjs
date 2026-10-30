@@ -823,10 +823,11 @@ test('Tailscale runs through the installed path without CCM approval in PowerShe
       assert.equal(forwarded.sandbox_permissions, 'approved_escalated');
       assert.equal(
         forwarded.cmd,
-        args.shell === 'cmd.exe'
-          ? `""${path}" version"`
-          : `& '${path}' ${args.cmd.includes('status') ? 'status' : 'version'}`,
+        `& '${path}' ${args.cmd.includes('status') ? 'status' : 'version'}`,
       );
+      if (args.shell === 'cmd.exe') {
+        assert.equal(forwarded.shell, 'powershell.exe');
+      }
     }
   } finally {
     await manager.close();
