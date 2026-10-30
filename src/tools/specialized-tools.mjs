@@ -309,7 +309,7 @@ export function registerSpecializedTools(registry, runtime) {
     supportsParallel: true,
     description: [
       '读取和导出公开 ChatGPT 共享会话（https://chatgpt.com/share/...）及 Codex 共享会话（https://chatgpt.com/s/cx_...），无需 BMG 或浏览器自动化。',
-      'When the user provides a public ChatGPT Share URL and asks to inspect, extract, compare, or export that conversation, discover this capability through tool_search and invoke it through exec rather than BMG or browser automation.',
+      'For public ChatGPT Share or Codex shared-conversation links, use this capability through tool_search -> exec to inspect, extract, compare, or export the conversation. Do not use web search, web browsing, BMG, or browser automation to retrieve the conversation; report retrieval failures rather than silently switching methods.',
       'Fetches the Share HTML, decodes the indexed React Router payload, reconstructs the active parent/child branch, and exports visible user/assistant messages to Markdown or JSON.',
       'Use branch=all for forensic/debug export of all mapping nodes. Use mode=text for readable messages only, or mode=full to preserve every available message record and tool/internal payload exposed by the Share data.',
       'Codex 通过公开共享快照接口读取 version=1 的 turns/items。mode=text 保留用户消息及助手的进度和最终回复；mode=full 额外保留推理摘要、文件修改和图片项，JSON 同时保留原始快照及元数据。Codex 快照没有消息分支，branch=active 和 branch=all 均按快照原始顺序导出。无法恢复共享快照上游省略的工具调用或文件修改。',

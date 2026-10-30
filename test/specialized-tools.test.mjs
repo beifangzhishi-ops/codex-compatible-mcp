@@ -283,7 +283,7 @@ test('receive_file is Deferred + Code Mode and preserves native file objects thr
 });
 
 
-test('ChatGPT Share export dispatches through CCM exec without BMG', async () => {
+test('ChatGPT Share export routes through CCM rather than web or BMG', async () => {
   const runtime = fakeRuntime();
   runtime.environmentRegistry.resolve = (environmentId) => ({
     id: environmentId || 'windows-worker', platform: 'windows', capabilities: { exec: true },
@@ -294,7 +294,8 @@ test('ChatGPT Share export dispatches through CCM exec without BMG', async () =>
   assert.equal(shareExport.surfaces.direct, false);
   assert.equal(shareExport.surfaces.deferred, true);
   assert.equal(shareExport.surfaces.codeMode, true);
-  assert.match(shareExport.description, /discover this capability through tool_search and invoke it through exec rather than BMG or browser automation/i);
+  assert.match(shareExport.description, /tool_search -> exec/i);
+  assert.match(shareExport.description, /Do not use web search, web browsing, BMG, or browser automation/i);
   const result = await registry.get('ccm-extra.chatgpt_share_export').handler({
     environment_id: 'worker-a',
     share_url: 'https://chatgpt.com/share/test-id',

@@ -187,6 +187,8 @@ CCM deliberately does not embed a second JavaScript interpreter for Code Mode. T
 
 ### ChatGPT Share conversation export
 
+**Model routing:** For public ChatGPT Share (`https://chatgpt.com/share/...`) and Codex shared-conversation (`https://chatgpt.com/s/cx_...`) links, inspect, compare, or export the conversation with `ccm-extra.chatgpt_share_export` via `tool_search` -> `exec`. Do not substitute web search, web browsing, BMG, or browser automation to retrieve shared-conversation content; report CCM retrieval failures. This rule is provided to models in the MCP Server instructions and the deferred tool description, rather than requiring a global user instruction.
+
 `ccm-extra.chatgpt_share_export` 使用 Deferred + Code Mode，可读取并导出公开 ChatGPT 与 Codex 共享会话，无需 BMG 或浏览器自动化。通过 `tool_search` 发现工具，再通过 `exec` 调用。
 
 Supported features:
