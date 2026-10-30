@@ -100,6 +100,9 @@ async function createApprovalAppHarness({
     'policyScope',
     'command',
     'status',
+    'outputRow',
+    'outputLabel',
+    'outputText',
     'handleRow',
     'handleElement',
     'copyHandle',
@@ -288,6 +291,36 @@ test('reopened approved project restores the workspace handle from read-only sta
   assert.equal(card.openai.widgetState?.workspace_handle, context);
   assert.equal(card.calls.filter(x => x.params?.name === 'resolve_pending_action').length, 0);
   assert.equal(card.calls.filter(x => x.method === 'ui/message').length, 0);
+});
+
+test('reopened execution card displays authenticated saved output without reexecuting', async () => {
+  const initial = executionApproval();
+  const card = await createApprovalAppHarness({
+    initialApproval: initial,
+    statusResult: {
+      ...terminalExecution(),
+      output: 'saved command output',
+      exit_code: 7,
+      output_truncated: true,
+    },
+  });
+  await waitFor(() => card.elements.outputText.textContent === 'saved command output', 'saved output');
+  assert.equal(card.elements.outputRow.hidden, false);
+  assert.match(card.elements.outputLabel.textContent, /truncated/);
+  assert.match(card.elements.status.textContent, /exit code 7/);
+  card.click('approve');
+  assert.equal(card.calls.filter(x => x.params?.name === 'resolve_pending_action').length, 0);
+});
+
+test('approval card shows the initial output when execution starts a session', async () => {
+  const card = await createApprovalAppHarness({
+    toolResults: [terminalExecution({ session_id: 43, exit_code: undefined })],
+  });
+  await waitFor(() => card.elements.status.textContent === 'Waiting for your decision.', 'pending approval');
+  card.click('approve');
+  await waitFor(() => card.elements.outputText.textContent === 'APPROVAL_UI_OK', 'initial execution output');
+  assert.match(card.elements.outputLabel.textContent, /initial chunk/);
+  assert.equal(card.elements.outputText.textContent, 'APPROVAL_UI_OK');
 });
 
 test('web-style globals before initialize still trigger one authenticated terminal lookup', async () => {

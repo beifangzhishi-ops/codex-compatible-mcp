@@ -58,6 +58,17 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
       overflow-wrap: anywhere;
     }
     #status[data-error="true"] { opacity: 1; }
+    #outputRow { margin-top: 10px; font-size: 12px; }
+    #outputRow summary { cursor: pointer; font-weight: 600; }
+    #outputText {
+      padding: 9px 10px;
+      border-radius: 9px;
+      background: color-mix(in srgb, currentColor 7%, transparent);
+      font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      user-select: text;
+    }
     #handleRow { margin-top: 12px; }
     #handleElement {
       display: block; padding: 8px; margin-top: 5px;
@@ -97,6 +108,10 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
     <div class="row" id="policyScopeRow" hidden><div class="label">Always allow</div><div class="value" id="policyScope"></div></div>
     <div id="command"></div>
     <div id="status" aria-live="polite">Waiting for your decision.</div>
+    <details id="outputRow" hidden>
+      <summary id="outputLabel">Execution output</summary>
+      <pre id="outputText"></pre>
+    </details>
     <div id="handleRow" hidden>
       <div class="label">Workspace handle (workspace_handle)</div>
       <code id="handleElement"></code>
@@ -134,6 +149,9 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
       const policyScope = document.getElementById("policyScope");
       const command = document.getElementById("command");
       const status = document.getElementById("status");
+      const outputRow = document.getElementById("outputRow");
+      const outputLabel = document.getElementById("outputLabel");
+      const outputText = document.getElementById("outputText");
       const handleRow = document.getElementById("handleRow");
       const handleElement = document.getElementById("handleElement");
       const copyHandle = document.getElementById("copyHandle");
@@ -182,6 +200,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         finalOutcome = null;
         handleRow.hidden = true;
         handleElement.textContent = '';
+        renderOutput(null);
         copyHandle.textContent = 'Copy handle';
         retryDecision = null;
         const workspaceAction = structured.kind === "workspace";
@@ -268,6 +287,18 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         return ['consumed', 'denied', 'execution_unknown'].includes(value?.state);
       }
 
+      function renderOutput(value) {
+        const hasOutput = (value?.kind || approval?.kind) === 'execution' &&
+          value?.state !== 'denied' && typeof value?.output === 'string' &&
+          value.output.length > 0;
+        outputRow.hidden = !hasOutput;
+        outputText.textContent = hasOutput ? value.output : '';
+        outputLabel.textContent = 'Execution output' +
+          (value?.session_id != null ? ' (initial chunk)' : '') +
+          (value?.output_truncated ? ' (truncated)' : '');
+        updateHeight();
+      }
+
       function renderTerminal(value, { unverified = false } = {}) {
         verified = false;
         finalOutcome = value;
@@ -276,6 +307,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         deny.disabled = true;
         handleRow.hidden = true;
         handleElement.textContent = '';
+        renderOutput(value);
         const workspaceSuccess = value.kind === 'workspace' &&
           ['select_workspace', 'register_workspace'].includes(value.operation) &&
           value.state === 'consumed' && value.action_failed !== true &&
@@ -295,7 +327,11 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
                 : workspaceSuccess
                   ? 'Approved and entered the workspace.'
                   : value.state === 'consumed'
-                    ? 'Approved action completed.'
+                    ? value.session_id != null
+                      ? 'Approved and started. Session ID: ' + value.session_id + '.'
+                      : value.exit_code != null
+                        ? 'Approved and completed with exit code ' + value.exit_code + '.'
+                        : 'Approved action completed.'
                     : 'Approval finished.';
         setStatus(message + (unverified ? '\nSaved card state; server verification unavailable.' : ''));
       }
@@ -602,6 +638,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
           } else {
             setStatus(structured.output || "Decision recorded.");
           }
+          renderOutput(structured);
           if (workspaceAction && decision === 'approve' &&
               !structured.action_failed && structured.state === 'consumed' &&
               typeof structured.workspace_handle === 'string' &&

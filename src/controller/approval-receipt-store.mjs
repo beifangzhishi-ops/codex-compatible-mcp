@@ -4,6 +4,7 @@ import path from 'node:path';
 
 const DEFAULT_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_RECEIPTS = 4096;
+const MAX_RECEIPT_OUTPUT_CHARS = 12_000;
 
 function nonceHash(nonce) {
   return crypto.createHash('sha256').update(String(nonce)).digest('hex');
@@ -74,7 +75,20 @@ export class ApprovalReceiptStore {
       state: result.state,
       action_failed: result.action_failed === true,
       decision: result.state === 'denied' ? 'deny' : 'approve',
-      // Never store execution output, command text, or a projectless workspace.
+      // Preserve only the bounded initial execution result, never command text.
+      ...(request.kind === 'execution' && result.state !== 'denied' &&
+          typeof result.output === 'string'
+        ? {
+          output: result.output.slice(0, MAX_RECEIPT_OUTPUT_CHARS),
+          ...(result.output.length > MAX_RECEIPT_OUTPUT_CHARS
+            ? { output_truncated: true } : {}),
+        } : {}),
+      ...(request.kind === 'execution' && result.state === 'consumed' &&
+          Number.isInteger(result.exit_code)
+        ? { exit_code: result.exit_code } : {}),
+      ...(request.kind === 'execution' && result.state === 'consumed' &&
+          Number.isInteger(result.session_id)
+        ? { session_id: result.session_id } : {}),
       ...(request.kind === 'workspace' &&
           ['select_workspace', 'register_workspace'].includes(request.intent.operation) &&
           result.state === 'consumed' && !result.action_failed &&

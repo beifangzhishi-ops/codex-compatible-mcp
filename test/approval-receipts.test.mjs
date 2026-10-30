@@ -74,6 +74,64 @@ test('terminal receipts never publish a workspace handle for failures, unregiste
   }
 });
 
+test('execution receipt survives Controller restart with bounded output and result metadata', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-execution-receipt-'));
+  const file = path.join(dir, 'receipts.json');
+  try {
+    const store = new ApprovalReceiptStore({ stateFile: file });
+    const manager = new ApprovalManager({ receiptStore: store });
+    const pending = manager.requestExecution({
+      workspace_handle: '00000000-0000-4000-8000-000000000001',
+      cmd: 'secret command must not be stored',
+    }, 'worker');
+    const { approvalNonce } = manager.prepareAppApproval(pending.approval_id);
+    manager.claimAppExecution(pending.approval_id, approvalNonce);
+    const consumed = manager.markAppExecutionConsumed(pending.approval_id);
+    manager.recordAppOutcome(pending.approval_id, {
+      ...consumed, output: 'a'.repeat(13_000), exit_code: 4,
+      workspace_handle: '00000000-0000-4000-8000-000000000001',
+    });
+    const saved = (new ApprovalReceiptStore({ stateFile: file })).read(
+      pending.approval_id, approvalNonce, null,
+    );
+    assert.equal(saved.state, 'consumed');
+    assert.equal(saved.exit_code, 4);
+    assert.equal(saved.output.length, 12_000);
+    assert.equal(saved.output_truncated, true);
+    assert.equal(saved.workspace_handle, undefined);
+    const raw = await fs.readFile(file, 'utf8');
+    assert.doesNotMatch(raw, /secret command must not be stored/);
+    assert.doesNotMatch(raw, new RegExp(approvalNonce));
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('session receipt retains only initial output; denied approvals store no output', () => {
+  const manager = new ApprovalManager({ receiptStore: new ApprovalReceiptStore() });
+  const args = { workspace_handle: '00000000-0000-4000-8000-000000000001', cmd: 'echo ok' };
+  const started = manager.requestExecution(args, 'worker');
+  const { approvalNonce: startedNonce } = manager.prepareAppApproval(started.approval_id);
+  manager.claimAppExecution(started.approval_id, startedNonce);
+  manager.recordAppOutcome(started.approval_id, {
+    ...manager.markAppExecutionConsumed(started.approval_id),
+    output: 'started', session_id: 42,
+  });
+  const startedReceipt = manager.readAppStatus(started.approval_id, startedNonce);
+  assert.equal(startedReceipt.output, 'started');
+  assert.equal(startedReceipt.session_id, 42);
+  assert.equal(startedReceipt.output_truncated, undefined);
+
+  const pending = manager.requestExecution(args, 'worker');
+  const { approvalNonce } = manager.prepareAppApproval(pending.approval_id);
+  manager.recordAppOutcome(pending.approval_id, {
+    ...manager.denyAppExecution(pending.approval_id, approvalNonce),
+    output: 'should not persist',
+  });
+  const deniedReceipt = manager.readAppStatus(pending.approval_id, approvalNonce);
+  assert.equal(deniedReceipt.output, undefined);
+});
+
 test('receipt storage expires records and bounds total count', () => {
   let time = 10000;
   const receipts = new ApprovalReceiptStore({
