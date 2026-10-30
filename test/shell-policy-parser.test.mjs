@@ -53,6 +53,10 @@ test('PowerShell parser splits real executable boundaries outside quotes', () =>
 test('PowerShell parser fails closed on unsupported execution syntax', () => {
   for (const command of [
     '& git push origin main',
+    '& $program status',
+    '& (Get-Command tailscale.exe) status',
+    'Write-Output okay; & tailscale.exe status',
+    "& 'C:\\Program Files\\Tailscale\\tailscale.exe'$(whoami)",
     'Write-Output $(whoami)',
     'Write-Output "$(whoami)"',
     'git push origin main > out.txt',
@@ -60,6 +64,33 @@ test('PowerShell parser fails closed on unsupported execution syntax', () => {
   ]) {
     assert.equal(parseShellCommand(command, { shell: 'powershell.exe' }), null);
   }
+});
+
+test('PowerShell literal call operator recognizes only the exact absolute executable', () => {
+  const fullPath = 'C:\\Program Files\\Tailscale\\tailscale.exe';
+  const parsed = parseShellCommand(
+    `& '${fullPath}' status`, { shell: 'powershell.exe' },
+  );
+  assert.deepEqual(parsed?.segments[0].tokens, [fullPath, 'status']);
+  assert.deepEqual(
+    parseShellCommand(`& "${fullPath}" status`, { shell: 'powershell.exe' })
+      ?.segments[0].tokens,
+    [fullPath, 'status'],
+  );
+  assert.equal(
+    tokenPrefixMatches([fullPath], parsed.segments[0].tokens, { platform: 'windows' }),
+    true,
+  );
+  assert.equal(
+    tokenPrefixMatches(['tailscale.exe'], parsed.segments[0].tokens, { platform: 'windows' }),
+    false,
+  );
+  const compound = parseShellCommand(
+    `Write-Output okay; & '${fullPath}' status`, { shell: 'pwsh.exe' },
+  );
+  assert.deepEqual(compound?.segments.map((segment) => segment.tokens[0]), [
+    'Write-Output', fullPath,
+  ]);
 });
 
 test('cmd parser respects caret-escaped metacharacters', () => {

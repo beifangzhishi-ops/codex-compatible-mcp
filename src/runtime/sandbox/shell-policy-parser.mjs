@@ -137,7 +137,6 @@ function unsupportedOutsideQuote(command, index, shellKind) {
   const next = command[index + 1];
   if (ch === '>' || ch === '<') return true;
   if (shellKind !== 'cmd') {
-    if (ch === '&' && next !== '&') return true;
     if (ch === '(' || ch === ')' || ch === '{' || ch === '}') return true;
     if (ch === '$' && next === '(') return true;
     if (ch === '#') return true;
@@ -146,6 +145,11 @@ function unsupportedOutsideQuote(command, index, shellKind) {
   }
   return false;
 }
+
+// PowerShell needs the call operator to invoke an executable whose absolute
+// path contains spaces. Accept only a literal quoted drive-absolute
+// executable at the beginning of a segment; never accept computed targets.
+const literalCall = /^&\s+(?:'[A-Za-z]:[\\/][^']+'|"[A-Za-z]:[\\/][^"$`]+")(?=\s|$)/;
 
 export function parseShellCommand(command, { shell = 'powershell' } = {}) {
   if (typeof command !== 'string' || !command.trim()) return null;
@@ -202,6 +206,11 @@ export function parseShellCommand(command, { shell = 'powershell' } = {}) {
       quote = ch;
       continue;
     }
+    if (shellKind !== 'cmd' && ch === '&' && next !== '&') {
+      if (command.slice(start, i).trim() ||
+          !literalCall.test(command.slice(i))) return null;
+      continue;
+    }
     if (unsupportedOutsideQuote(command, i, shellKind)) return null;
 
     let operator = null;
@@ -239,7 +248,11 @@ export function parseShellCommand(command, { shell = 'powershell' } = {}) {
 
   const segments = [];
   for (const segment of rawSegments) {
-    const tokens = tokenizeSegment(segment.source, shellKind);
+    const isLiteralCall = shellKind !== 'cmd' && literalCall.test(segment.source);
+    const source = isLiteralCall
+      ? segment.source.slice(1).trimStart()
+      : segment.source;
+    const tokens = tokenizeSegment(source, shellKind);
     if (!tokens) return null;
     segments.push({ ...segment, tokens });
   }

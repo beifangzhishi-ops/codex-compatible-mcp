@@ -5,6 +5,7 @@ import {
 import {
   isTrustedNodeTestSegment,
 } from './sandbox/node-test-policy.mjs';
+import { trustedTailscaleInvocation } from './sandbox/tailscale-policy.mjs';
 import {
   effectiveShell,
   parseShellCommand,
@@ -416,6 +417,8 @@ export class RemoteProcessManager {
     const windowsWorkspaceWrite =
       environment.permissionProfile === 'workspace-write' &&
       environment.platform === 'windows';
+    const trustedTailscale = windowsWorkspaceWrite &&
+      trustedTailscaleInvocation(args.cmd, args.shell, environment);
     const trustedNodeShell = ['powershell', 'pwsh'].includes(shellKind);
     const allBuiltInSegments = windowsWorkspaceWrite &&
       Boolean(parsedCommand?.segments.length) &&
@@ -445,6 +448,7 @@ export class RemoteProcessManager {
       requestedEscalation &&
       !trustedGit &&
       !trustedNodeOrMixed &&
+      !trustedTailscale &&
       !trustedPackageScript;
     let policyRule = null;
 
@@ -483,6 +487,21 @@ export class RemoteProcessManager {
         workspace_handle: workspaceHandle.workspace_handle,
         workspace_id: workspaceHandle.workspace_id,
         mixed_with_trusted_git: hasTrustedGitSegment || undefined,
+      });
+    }
+
+    if (trustedTailscale) {
+      forwardedArgs = {
+        ...forwardedArgs,
+        cmd: trustedTailscale.cmd,
+        sandbox_permissions: 'approved_escalated',
+      };
+      delete forwardedArgs.justification;
+      this.#emit('tailscale_builtin_auto_allowed', {
+        operation_id: operationId,
+        environment_id: environment.id,
+        workspace_handle: workspaceHandle.workspace_handle,
+        workspace_id: workspaceHandle.workspace_id,
       });
     }
 
@@ -607,6 +626,12 @@ export class RemoteProcessManager {
       return {
         ...recorded,
         trusted_node_test: true,
+      };
+    }
+    if (trustedTailscale) {
+      return {
+        ...recorded,
+        trusted_tailscale: true,
       };
     }
     return policyRule

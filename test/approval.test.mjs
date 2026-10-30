@@ -791,6 +791,48 @@ test('built-in node --test trust does not apply through an explicit cmd shell', 
   }
 });
 
+test('Tailscale runs through the installed path without CCM approval in PowerShell and CMD', async () => {
+  const environmentRegistry = restrictedRegistry();
+  const workerHub = new FakeWorkerHub();
+  const manager = new RemoteProcessManager({
+    environmentRegistry,
+    workerHub,
+    approvalManager: {
+      requestExecution() {
+        throw new Error('Tailscale must not request approval');
+      },
+    },
+    workspaceHandleManager: fakeWorkspaceHandleManager(),
+  });
+  const path = 'C:\\Program Files\\Tailscale\\tailscale.exe';
+  try {
+    for (const args of [
+      { cmd: 'tailscale version' },
+      { cmd: `& '${path}' status`, sandbox_permissions: 'require_escalated' },
+      { cmd: `& "${path}" version` },
+      { cmd: `"${path}" version`, shell: 'cmd.exe' },
+      { cmd: 'tailscale.exe version', shell: 'cmd.exe' },
+    ]) {
+      const result = await manager.execCommand({
+        workspace_handle: '00000000-0000-4000-8000-000000000001',
+        ...args,
+      });
+      assert.equal(result.exit_code, 0);
+      assert.equal(result.trusted_tailscale, true);
+      const forwarded = workerHub.calls.at(-1).params;
+      assert.equal(forwarded.sandbox_permissions, 'approved_escalated');
+      assert.equal(
+        forwarded.cmd,
+        args.shell === 'cmd.exe'
+          ? `""${path}" version"`
+          : `& '${path}' ${args.cmd.includes('status') ? 'status' : 'version'}`,
+      );
+    }
+  } finally {
+    await manager.close();
+  }
+});
+
 test('approval can persist a token-prefix workspace policy and reuse it for suffixes', async () => {
   const environmentRegistry = restrictedRegistry();
   const workerHub = new FakeWorkerHub();
