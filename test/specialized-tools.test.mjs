@@ -364,6 +364,10 @@ test('Bilibili deferred tool passes signed DASH URLs without exposing them in re
   assert.match(tool.description, /bmgctl\.cmd/);
   assert.match(tool.description, /Do not invoke BMG MCP tools/);
   assert.match(tool.description, /stop rather than silently using anonymous requests/);
+  assert.match(tool.description, /BROWSER CLEANUP IS REQUIRED/);
+  assert.match(tool.description, /including failed calls and tests/);
+  assert.match(tool.description, /chrome_javascript to pause playback/);
+  assert.match(tool.description, /do not close a tab that was already open for the user/);
   assert.equal(tool.inputSchema.expected_height.safeParse(undefined).success, false);
   assert.equal(tool.inputSchema.expected_height.safeParse(0).success, false);
   assert.equal(tool.inputSchema.expected_height.safeParse(1080).success, true);
