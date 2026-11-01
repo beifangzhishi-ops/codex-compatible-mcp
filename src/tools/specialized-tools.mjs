@@ -499,8 +499,8 @@ export function registerSpecializedTools(registry, runtime) {
       'Long downloads may return a live session; poll through exec with nested ccm.write_stdin, reusing workspace_handle and session_id.',
     ].join('\n\n'),
     inputSchema: {
-      output_path: z.string().min(1).describe(
-        'Destination MP4 path on 6v. Existing files are not overwritten.',
+      output_path: z.string().regex(/^[^\\/:*?"<>|]+\.mp4$/i).describe(
+        'MP4 filename only, e.g. video.mp4, inside the new 6v projectless workspace returned by the tool. Do not pass absolute paths or a destination in another workspace. Use returned workspace_handle/workspace_root to access or publish the file. Existing files are not overwritten.',
       ),
       environment_id: z.literal('DESKTOP-KFL6V1F').optional().describe(
         'The 6v Controller host: DESKTOP-KFL6V1F. The BMGCTL Bridge is local to 6v; omission also selects 6v.',

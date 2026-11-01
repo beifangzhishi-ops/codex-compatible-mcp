@@ -370,11 +370,14 @@ test('Bilibili deferred tool consumes only a local bridge handoff on 6v without 
   assert.equal(tool.inputSchema.video_url, undefined);
   assert.equal(tool.inputSchema.audio_url, undefined);
   assert.equal(tool.inputSchema.expected_height, undefined);
+  assert.equal(tool.inputSchema.output_path.safeParse('video.mp4').success, true);
+  assert.equal(tool.inputSchema.output_path.safeParse('C:\\media\\video.mp4').success, false);
+  assert.equal(tool.inputSchema.output_path.safeParse('../video.mp4').success, false);
   assert.equal(tool.inputSchema.environment_id.safeParse('noha').success, false);
   const result = await tool
     .handler({
       environment_id: 'DESKTOP-KFL6V1F',
-      output_path: 'C:\\media\\result.mp4',
+      output_path: 'result.mp4',
       timeout_seconds: 90,
     });
 
