@@ -352,13 +352,11 @@ test('ChatGPT Share export can use the default Git-ignored cache output', async 
   assert.equal(runtime.calls[0].cmd.includes(' --output '), false);
 });
 
-test('Bilibili deferred tool passes signed DASH URLs without exposing them in result metadata', async () => {
+test('Bilibili deferred tool consumes only a local bridge handoff on 6v without exposing signed URLs', async () => {
   const runtime = fakeRuntime();
   const registry = new ToolRegistry();
   registerSpecializedTools(registry, runtime);
 
-  const videoUrl = 'https://example.invalid/video.m4s?token=a&x=1';
-  const audioUrl = 'https://example.invalid/audio.m4s?token=b&x=2';
   const tool = registry.get('ccm-extra.bilibili_download_dash');
   assert.match(tool.description, /BMGCTL IS REQUIRED/);
   assert.match(tool.description, /bmgctl\.cmd/);
@@ -368,31 +366,30 @@ test('Bilibili deferred tool passes signed DASH URLs without exposing them in re
   assert.match(tool.description, /including failed calls and tests/);
   assert.match(tool.description, /chrome_javascript to pause playback/);
   assert.match(tool.description, /do not close a tab that was already open for the user/);
-  assert.equal(tool.inputSchema.expected_height.safeParse(undefined).success, false);
-  assert.equal(tool.inputSchema.expected_height.safeParse(0).success, false);
-  assert.equal(tool.inputSchema.expected_height.safeParse(1080).success, true);
+  assert.match(tool.description, /BRIDGE IS REQUIRED/);
+  assert.equal(tool.inputSchema.video_url, undefined);
+  assert.equal(tool.inputSchema.audio_url, undefined);
+  assert.equal(tool.inputSchema.expected_height, undefined);
+  assert.equal(tool.inputSchema.environment_id.safeParse('noha').success, false);
   const result = await tool
     .handler({
-      environment_id: 'worker-b',
-      video_url: videoUrl,
-      audio_url: audioUrl,
-      expected_height: 1080,
+      environment_id: 'DESKTOP-KFL6V1F',
       output_path: 'C:\\media\\result.mp4',
       timeout_seconds: 90,
     });
 
   assert.equal(result.isError, undefined);
-  assert.equal(result.structuredContent.environment_id, 'worker-b');
+  assert.equal(result.structuredContent.environment_id, 'DESKTOP-KFL6V1F');
   assert.equal(
     result.structuredContent.capability,
     'bilibili_download_dash',
   );
   assert.equal(result.structuredContent.video_url, undefined);
   assert.equal(result.structuredContent.audio_url, undefined);
-  assert.equal(result.structuredContent.expected_height, 1080);
-  assert.match(runtime.calls[0].cmd, /download-dash\.ps1/);
-  assert.match(runtime.calls[0].cmd, /-ExpectedHeight 1080/);
-  assert.match(runtime.calls[0].cmd, /-TimeoutSeconds 90/);
-  assert.match(runtime.calls[0].cmd, /video\.m4s\?token=a&x=1/);
-  assert.match(runtime.calls[0].cmd, /audio\.m4s\?token=b&x=2/);
+  assert.equal(result.structuredContent.expected_height, undefined);
+  assert.match(runtime.calls[0].cmd, /download-dash\.py/);
+  assert.match(runtime.calls[0].cmd, /--timeout 90/);
+  assert.doesNotMatch(runtime.calls[0].cmd, /video_url|audio_url|SESSDATA/i);
+  assert.equal(runtime.calls[0].workspace_handle, '00000000-0000-4000-8000-000000000001');
+  assert.equal((await tool.handler({ environment_id: 'noha', output_path: 'C:\\media\\bad.mp4' })).isError, true);
 });

@@ -488,40 +488,25 @@ export function registerSpecializedTools(registry, runtime) {
     environmentRequirements: {
       platform: 'windows',
       capabilities: ['exec'],
-      localSoftware: ['curl', 'ffmpeg', 'ffprobe'],
+      localSoftware: ['Python', 'curl', 'ffmpeg', 'ffprobe'],
     },
     description: [
-      'Download Bilibili DASH streams obtained with BMGCTL from the user\'s logged-in browser; remux without re-encoding and verify the resulting video resolution.',
-      'BMGCTL IS REQUIRED for discovery: on the 6v Windows machine, invoke the installed BMGCTL command through CCM exec_command. The verified executable is C:\\Users\\Songjx\\AppData\\Roaming\\npm\\bmgctl.cmd. First run `health`, then `call get_windows_and_tabs --args {}`; use `call chrome_navigate` and `call chrome_javascript` to operate the logged-in Bilibili browser. For nonempty JSON args, prefer `--args-base64 BASE64` to avoid Windows cmd argument quoting. BMGCTL accesses the existing browser session locally and does not need the BMG MCP phone-authenticator grant. Do not invoke BMG MCP tools for this workflow.',
+      'Download authenticated Bilibili DASH media received via the local Bridge handoff on 6v; remux without re-encoding and verify the resulting video resolution.',
+      'BMGCTL IS REQUIRED for discovery: on 6v invoke C:\\Users\\Songjx\\AppData\\Roaming\\npm\\bmgctl.cmd via CCM exec_command. First call `health` and `call get_windows_and_tabs --args {}`; use `call chrome_navigate` / `call chrome_javascript` to operate the logged-in Bilibili browser. Use `--args-base64 BASE64` for nonempty JSON to preserve Windows command quoting. BMGCTL reuses the browser login without the BMG MCP phone-authenticator grant. Do not invoke BMG MCP tools for this workflow.',
       'Using BMGCTL browser JavaScript, verify Bilibili login (the nav API must report `code: 0` and `data.isLogin: true`). Resolve the requested BV/CID and obtain the account-authorized DASH playurl response. Select the highest actually available video representation and appropriate audio; the requested DASH qn alone does not determine the returned quality. If BMGCTL is unavailable or Bilibili login is expired, stop rather than silently using anonymous requests, yt-dlp, or reduced quality.',
       'BROWSER CLEANUP IS REQUIRED after using a Bilibili video page, including failed calls and tests: use BMGCTL chrome_javascript to pause playback (`document.querySelector("video")?.pause()`), or close only a tab created specifically for this task. Do not leave autoplay running; do not close a tab that was already open for the user.',
-      'Pass the selected short-lived URLs and the actual DASH video height as expected_height. The Worker checks output with ffprobe and rejects mismatched or downgraded video before publishing it. Never export Bilibili cookies, SESSDATA, or credentials to CCM. Video availability and VIP entitlement remain subject to Bilibili.',
+      'BRIDGE IS REQUIRED: BMGCTL redacts signed DASH URLs in its tool results. Start the bundled tools/bilibili-download/bridge.py on 6v through CCM exec_command; wait for BRIDGE_READY. In the logged-in Bilibili tab use chrome_javascript to POST JSON {video_url,audio_url,expected_height} from actual selected DASH representations directly to http://127.0.0.1:8765/dash with Content-Type application/json. Expect HTTP 204 and BRIDGE_RECEIVED; do not print signed URLs in tool results. The one-shot Bridge stores them only in ignored .cache/bilibili-download/dash_urls.json on 6v. Then call this capability with only output_path (and optional timeout); the Worker uses Python to consume and delete the handoff, download via curl.exe, remux with ffmpeg -c copy and check ffprobe video height and audio presence. Do not call before Bridge success. Never export cookies, SESSDATA, or credentials. Follow Bilibili account permissions.',
       'Long downloads may return a live session; poll through exec with nested ccm.write_stdin, reusing workspace_handle and session_id.',
     ].join('\n\n'),
     inputSchema: {
-      video_url: z.string().url().describe(
-        'Signed DASH video representation URL obtained from Bilibili playurl.',
-      ),
-      audio_url: z.string().url().describe(
-        'Signed DASH audio representation URL obtained from Bilibili playurl.',
-      ),
-      expected_height: z.number().int().min(1).max(10000).describe(
-        'Actual height (pixels) of the highest permitted DASH video representation selected through BMGCTL in the logged-in browser, e.g. 1080. Required to reject lower-resolution output.',
-      ),
       output_path: z.string().min(1).describe(
-        'Destination MP4 path on the selected Worker.',
+        'Destination MP4 path on 6v. Existing files are not overwritten.',
       ),
-      environment_id: z.string().optional().describe(
-        'Windows Remote Worker environment. Omit to use the default environment.',
-      ),
-      referer: z.string().url().optional().describe(
-        'HTTP Referer. Defaults to https://www.bilibili.com/.',
-      ),
-      user_agent: z.string().min(1).optional().describe(
-        'Optional browser User-Agent. A normal desktop browser UA is used by default.',
+      environment_id: z.literal('DESKTOP-KFL6V1F').optional().describe(
+        'The 6v Controller host: DESKTOP-KFL6V1F. The BMGCTL Bridge is local to 6v; omission also selects 6v.',
       ),
       timeout_seconds: z.number().positive().max(86_400).optional().describe(
-        'Per-stream curl max time. Defaults to 1800 seconds.',
+        'Per-stream curl max time. Defaults to 900 seconds.',
       ),
       yield_time_ms: z.number().int().min(0).max(30_000).optional().describe(
         'How long CCM waits before returning a live process session. Defaults to 10000 ms.',
@@ -530,30 +515,24 @@ export function registerSpecializedTools(registry, runtime) {
     },
     handler: async (args) => {
       try {
+        const environmentId = args.environment_id || 'DESKTOP-KFL6V1F';
+        if (environmentId !== 'DESKTOP-KFL6V1F') {
+          throw new Error('BMGCTL Bridge handoff is only available on 6v.');
+        }
         const environment = resolveWindowsEnvironment(
           runtime,
-          args.environment_id,
+          environmentId,
         );
         const command = [
-          toolPath('tools\\bilibili-download\\download-dash.ps1'),
-          '& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $tool' +
-            ' -VideoUrl ' + psQuote(args.video_url) +
-            ' -AudioUrl ' + psQuote(args.audio_url) +
-            ' -ExpectedHeight ' + Number(args.expected_height) +
-            ' -OutputPath ' + psQuote(args.output_path) +
-            ' -Referer ' + psQuote(
-              args.referer || 'https://www.bilibili.com/',
-            ) +
-            (args.user_agent
-              ? ' -UserAgent ' + psQuote(args.user_agent)
-              : '') +
-            ' -TimeoutSeconds ' + Number(args.timeout_seconds || 1800),
+          toolPath('tools\\bilibili-download\\download-dash.py'),
+          '& python.exe $tool' +
+            ' --output ' + psQuote(args.output_path) +
+            ' --timeout ' + Number(args.timeout_seconds || 900),
         ].join('; ');
-        return execResult(await run(runtime, args, command), {
+        return execResult(await run(runtime, { ...args, environment_id: environmentId }, command), {
           environment_id: environment.id,
           capability: 'bilibili_download_dash',
           output_path: args.output_path,
-          expected_height: args.expected_height,
         });
       } catch (error) {
         return toolError(error);
