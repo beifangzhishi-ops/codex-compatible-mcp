@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   TAILSCALE_EXE,
   trustedTailscaleInvocation,
+  tailscaleSandboxDenialHint,
 } from '../src/runtime/sandbox/tailscale-policy.mjs';
 
 const environment = {
@@ -73,4 +74,34 @@ test('Tailscale trust does not elevate lookalikes, additional commands or dynami
     trustedTailscaleInvocation('tailscale version', null, { platform: 'linux' }),
     null,
   );
+});
+
+test('Tailscale access-denied hint provides the allowlist and standalone invocation guidance', () => {
+  const output = 'failed to connect to local tailscaled: Access is denied.\nprobe';
+  const hint = tailscaleSandboxDenialHint({
+    command: `& '${TAILSCALE_EXE}' status; Write-Output probe`,
+    output,
+    environment: { ...environment, permissionProfile: 'workspace-write' },
+  });
+  assert.match(hint, /no-approval Tailscale allowlist/);
+  assert.match(hint, /standalone exec_command/);
+  assert.match(hint, /separate calls/);
+  assert.match(hint, /tailscale\.exe status/);
+  assert.match(hint, /C:\\Program Files\\Tailscale\\tailscale\.exe/);
+});
+
+test('Tailscale hint is absent on other errors, successful commands and unrelated trust scopes', () => {
+  const env = { ...environment, permissionProfile: 'workspace-write' };
+  const base = {
+    command: 'tailscale status; Write-Output probe',
+    environment: env,
+    output: 'failed to connect to local tailscaled: Access is denied',
+  };
+  assert.equal(tailscaleSandboxDenialHint({ ...base, trusted: true }), null);
+  assert.equal(tailscaleSandboxDenialHint({ ...base, command: 'node --version' }), null);
+  assert.equal(tailscaleSandboxDenialHint({ ...base, environment: { ...env, permissionProfile: 'full-access' } }), null);
+  assert.equal(tailscaleSandboxDenialHint({ ...base, environment: { ...env, platform: 'linux' } }), null);
+  assert.equal(tailscaleSandboxDenialHint({ ...base, output: '# Health check: Tailscale failed to set DNS configuration: Access is denied.' }), null);
+  assert.equal(tailscaleSandboxDenialHint({ ...base, output: 'HTTP 403: Access is denied' }), null);
+  assert.equal(tailscaleSandboxDenialHint({ ...base, output: 'failed to connect to local tailscaled: connection refused' }), null);
 });

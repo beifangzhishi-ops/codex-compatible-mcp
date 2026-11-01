@@ -40,3 +40,30 @@ export function trustedTailscaleInvocation(command, shell, environment = {}) {
     ...(shellKind === 'cmd' ? { shell: 'powershell.exe' } : {}),
   };
 }
+
+const TAILSCALE_PIPE_DENIED = /failed to connect to local tailscaled[^\r\n]*(?:Access is denied|拒绝访问)/i;
+
+const TAILSCALE_ALLOWLIST_HINT = [
+  '[CCM Tailscale sandbox hint] Tailscale local service access was denied.',
+  'Built-in no-approval Tailscale allowlist (Windows workspace-write, each as a standalone exec_command):',
+  '  PowerShell / pwsh: tailscale status',
+  '  PowerShell / pwsh: tailscale.exe status',
+  `  PowerShell / pwsh: & '${TAILSCALE_EXE}' status`,
+  `  PowerShell / pwsh: & "${TAILSCALE_EXE}" status`,
+  '  CMD: tailscale status',
+  '  CMD: tailscale.exe status',
+  `  CMD: "${TAILSCALE_EXE}" status`,
+  'The examples use status; other Tailscale CLI arguments are also supported.',
+  'Invoke the Tailscale command alone in a new exec_command call. Run other diagnostics in separate calls; do not combine them with ;, &&, |, or redirection.',
+].join('\n');
+
+// A compound script can emit a local-service denial and still exit with 0 if
+// its last command succeeded. Diagnose the precise pipe failure rather than
+// relying on exit_code, and never mistake DNS health warnings for this case.
+export function tailscaleSandboxDenialHint({ command, output, environment, trusted = false }) {
+  if (trusted || environment?.platform !== 'windows' ||
+      environment?.permissionProfile !== 'workspace-write') return null;
+  if (!/\btailscale(?:\.exe)?\b/i.test(command || '') ||
+      !TAILSCALE_PIPE_DENIED.test(output || '')) return null;
+  return TAILSCALE_ALLOWLIST_HINT;
+}

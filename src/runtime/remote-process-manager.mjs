@@ -5,7 +5,10 @@ import {
 import {
   isTrustedNodeTestSegment,
 } from './sandbox/node-test-policy.mjs';
-import { trustedTailscaleInvocation } from './sandbox/tailscale-policy.mjs';
+import {
+  trustedTailscaleInvocation,
+  tailscaleSandboxDenialHint,
+} from './sandbox/tailscale-policy.mjs';
 import {
   effectiveShell,
   parseShellCommand,
@@ -74,7 +77,7 @@ export class RemoteProcessManager {
     this.audit({ component: 'process', event, ...fields });
   }
 
-  #recordExecResult(result, environment, workspaceHandle, operationId = null) {
+  #recordExecResult(result, environment, workspaceHandle, operationId = null, sessionHint = null) {
     if (result?.session_id !== undefined) {
       const publicSessionId = this.#allocateSessionId();
       this.sessions.set(publicSessionId, {
@@ -83,6 +86,7 @@ export class RemoteProcessManager {
         workspaceHandle: workspaceHandle.workspace_handle,
         workspace: { ...workspaceHandle },
         operationId,
+        tailscaleHint: sessionHint,
       });
       this.#emit('session_created', {
         operation_id: operationId || undefined,
@@ -111,6 +115,14 @@ export class RemoteProcessManager {
       ...(operationId ? { operation_id: operationId } : {}),
       ...workspaceHandle,
     };
+  }
+
+  #addTailscaleDeniedHint(result, command, environment, trusted = false) {
+    const hint = tailscaleSandboxDenialHint({
+      command, output: result?.output, environment, trusted,
+    });
+    if (!hint) return result;
+    return { ...result, output: String(result.output) + '\n\n' + hint + '\n' };
   }
 
   #approvalStatusResult(approval, workspaceHandle, output) {
@@ -610,11 +622,19 @@ export class RemoteProcessManager {
       });
       throw error;
     }
+    const diagnosticContext = windowsWorkspaceWrite && !trustedTailscale &&
+      forwardedArgs.sandbox_permissions !== 'approved_escalated' &&
+      /\btailscale(?:\.exe)?\b/i.test(args.cmd)
+      ? { command: args.cmd, environment, trusted: false }
+      : null;
     const recorded = this.#recordExecResult(
-      result,
+      diagnosticContext
+        ? this.#addTailscaleDeniedHint(result, args.cmd, environment)
+        : result,
       environment,
       workspaceHandle,
       operationId,
+      diagnosticContext,
     );
     if (trustedPackageScriptRule) {
       return {
@@ -936,6 +956,13 @@ export class RemoteProcessManager {
       throw new Error(
         'Session identity changed while write_stdin was in flight: ' +
         args.session_id + '.',
+      );
+    }
+    if (session.tailscaleHint) {
+      result = this.#addTailscaleDeniedHint(
+        result,
+        session.tailscaleHint.command,
+        session.tailscaleHint.environment,
       );
     }
     if (result?.session_id !== undefined) {

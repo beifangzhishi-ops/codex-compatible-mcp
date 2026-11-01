@@ -527,6 +527,8 @@ There is no model-driven approval retry path and no public text-decision approva
 
 This approval mechanism controls CCM's sandbox boundary; it does **not** grant Windows Administrator/UAC privileges. The approval app is the interaction mechanism, while the server-side frozen action, approval capability, state machine, and workspace revalidation remain the security boundary. If ChatGPT supplies its anonymous `openai/session` metadata on both calls, CCM also binds the request and app resolver to that host session as defense in depth.
 
+When an untrusted, restricted Tailscale command actually reports a local-service pipe access denial (`failed to connect to local tailscaled ... Access is denied`), CCM appends the applicable Tailscale no-approval command forms and tells the caller to run Tailscale as a separate `exec_command`. This diagnostic is included both in initial results and subsequent `write_stdin` polling, even when a compound script exits with code 0. Successful invocations, DNS health warnings, unrelated access errors, and escalated calls receive no hint. CCM does not change the command or expand its trust; the advice is emitted only on the relevant failure, not in always-on model instructions.
+
 ## Output and transport protection
 
 CCM treats oversized output as a reliability and context-safety problem.

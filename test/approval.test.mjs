@@ -834,6 +834,72 @@ test('Tailscale runs through the installed path without CCM approval in PowerShe
   }
 });
 
+test('Tailscale compound shell denial returns scoped allowlist hint even with exit code zero', async () => {
+  const workerHub = new FakeWorkerHub();
+  workerHub.call = async () => ({
+    chunk_id: 'fake',
+    wall_time_seconds: 0.01,
+    exit_code: 0,
+    output: 'failed to connect to local tailscaled: Access is denied.\nprobe\n',
+  });
+  const manager = new RemoteProcessManager({
+    environmentRegistry: restrictedRegistry(),
+    workerHub,
+    workspaceHandleManager: fakeWorkspaceHandleManager(),
+  });
+  try {
+    const denied = await manager.execCommand({
+      workspace_handle: '00000000-0000-4000-8000-000000000001',
+      cmd: 'tailscale status; Write-Output probe',
+    });
+    assert.equal(denied.exit_code, 0);
+    assert.match(denied.output, /failed to connect to local tailscaled/);
+    assert.match(denied.output, /no-approval Tailscale allowlist/);
+    assert.match(denied.output, /separate calls/);
+
+    const unrelated = await manager.execCommand({
+      workspace_handle: '00000000-0000-4000-8000-000000000001',
+      cmd: 'Write-Output something',
+    });
+    assert.doesNotMatch(unrelated.output, /no-approval Tailscale allowlist/);
+  } finally {
+    await manager.close();
+  }
+});
+
+test('Tailscale denial during write_stdin polling also includes the allowlist hint', async () => {
+  const workerHub = new FakeWorkerHub();
+  workerHub.call = async (_environment, method) => method === 'exec_command'
+    ? { chunk_id: 'fake', wall_time_seconds: 0.01, output: '', session_id: 456 }
+    : {
+      chunk_id: 'fake-next',
+      wall_time_seconds: 0.05,
+      exit_code: 0,
+      output: 'failed to connect to local tailscaled: Access is denied',
+    };
+  const manager = new RemoteProcessManager({
+    environmentRegistry: restrictedRegistry(),
+    workerHub,
+    workspaceHandleManager: fakeWorkspaceHandleManager(),
+  });
+  try {
+    const started = await manager.execCommand({
+      workspace_handle: '00000000-0000-4000-8000-000000000001',
+      cmd: 'tailscale status; Write-Output probe',
+    });
+    assert.ok(started.session_id);
+    const finished = await manager.writeStdin({
+      workspace_handle: started.workspace_handle,
+      session_id: started.session_id,
+      chars: '',
+    });
+    assert.equal(finished.exit_code, 0);
+    assert.match(finished.output, /no-approval Tailscale allowlist/);
+  } finally {
+    await manager.close();
+  }
+});
+
 test('approval can persist a token-prefix workspace policy and reuse it for suffixes', async () => {
   const environmentRegistry = restrictedRegistry();
   const workerHub = new FakeWorkerHub();
