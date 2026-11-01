@@ -263,6 +263,23 @@ The `preworker` script builds the native helper for the current platform first.
 
 ## Windows scheduled-task operation
 
+### User-command environment refresh
+
+CCM keeps Supervisor, Controller, and Worker runtime environments stable. On Windows,
+each new user command reads the current Machine and User environment registry keys,
+merges their variables (User overrides Machine), and constructs PATH in the Windows
+order (Machine entries followed by User entries). The command-only environment is
+applied consistently to pipe, PTY, restricted-sandbox, and approved execution. This
+lets commands discover newly installed tools and DLL directories without restarting
+the Supervisor or Worker. Existing running commands are unaffected.
+
+Worker-specific `CCM_*` settings remain owned by the Worker and cannot be overwritten
+by registry values. Existing command proxy-mode selection and the validated
+`CURL_CA_BUNDLE` override from `config/worker.env` are applied afterward. Other
+platforms continue using the Worker's inherited environment. The Windows registry
+must be readable when starting a new command; errors are reported rather than
+silently executing with an outdated environment.
+
 CCM includes public Task Scheduler helpers for both Controller hosts and standalone Remote Workers. They run hidden under the current Windows user, start at logon, use `IgnoreNew` to avoid duplicate instances, and configure Task Scheduler restart-on-failure behavior. Each supervisor also restarts its own child process if that child exits unexpectedly. Both installers register their tasks with `RunLevel Highest` (elevated administrator token for an administrator account). Run the installers once from an **elevated PowerShell** to create or update the existing tasks; changing the installer source does not update an already registered task or elevate an already running Supervisor. Restart the task through Task Scheduler after updating it. Normal `ccm.restart` only restarts Supervisor-owned child processes and preserves the existing Supervisor token; it does not perform UAC elevation.
 
 Keep `CCM_PERMISSION_PROFILE=workspace-write` when using an elevated Supervisor to retain the normal restricted-token execution path. The Controller host's task elevates the Controller, local Worker, and OAuth sidecar together; the standalone Remote Worker task elevates its Worker. A successfully elevated parent is not itself proof that the Windows restricted sandbox still denies writes outside the selected workspace: validate the boundary on the actual host before relying on it. Approved/escalated and separately trusted full-access commands inherit the Worker's administrator token.

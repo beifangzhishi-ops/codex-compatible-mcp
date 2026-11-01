@@ -15,7 +15,7 @@ function fakeChild() {
   return child;
 }
 
-function createHarness({ workerEnvPath } = {}) {
+function createHarness({ workerEnvPath, commandEnvironment = (env) => ({ ...env }) } = {}) {
   const spawned = [];
   let mode = 'proxy';
   const executor = new NativeEnvironmentExecutor({
@@ -29,6 +29,7 @@ function createHarness({ workerEnvPath } = {}) {
       CCM_PROXY: 'http://127.0.0.1:7890',
       PATH: 'test-path',
     },
+    commandEnvironment,
     ptyProxyPath: 'ccm-pty-proxy.exe',
     workerEnvPath,
     fileExists: () => true,
@@ -97,4 +98,18 @@ test('native executor reads machine-local CURL_CA_BUNDLE for each pipe and PTY c
   fs.rmSync(config);
   harness.start();
   assert.equal('CURL_CA_BUNDLE' in harness.spawned[3].options.env, false);
+});
+
+test('native executor refreshes command environment for both pipe and PTY', () => {
+  let latestPath = 'first-path';
+  const harness = createHarness({
+    commandEnvironment: (baseEnv) => ({ ...baseEnv, Path: latestPath }),
+  });
+  harness.start(false);
+  assert.equal(harness.spawned[0].options.env.Path, 'first-path');
+  assert.equal(harness.spawned[0].options.env.CCM_PROXY, 'http://127.0.0.1:7890');
+  latestPath = 'second-path';
+  harness.start(true);
+  assert.equal(harness.spawned[1].options.env.Path, 'second-path');
+  assert.equal(harness.spawned[1].options.env.HTTPS_PROXY, 'http://127.0.0.1:7890');
 });

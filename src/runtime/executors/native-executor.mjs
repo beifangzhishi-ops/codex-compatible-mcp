@@ -6,6 +6,7 @@ import {
 } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { buildProxyEnvironment } from '../proxy-env.mjs';
+import { readCurrentCommandEnvironment } from '../windows-command-env.mjs';
 
 const DEFAULT_PTY_PROXY_PATH = fileURLToPath(
   new URL('../../../native/bin/ccm-pty-proxy.exe', import.meta.url),
@@ -101,6 +102,7 @@ export class NativeEnvironmentExecutor {
     ptyProxyPath = DEFAULT_PTY_PROXY_PATH,
     workerEnvPath = DEFAULT_WORKER_ENV_PATH,
     baseEnv = process.env,
+    commandEnvironment = readCurrentCommandEnvironment,
     spawnProcess = spawnChild,
     fileExists = fs.existsSync,
   }) {
@@ -109,6 +111,7 @@ export class NativeEnvironmentExecutor {
     this.ptyProxyPath = ptyProxyPath;
     this.workerEnvPath = workerEnvPath;
     this.baseEnv = baseEnv;
+    this.commandEnvironment = commandEnvironment;
     this.spawnProcess = spawnProcess;
     this.fileExists = fileExists;
   }
@@ -123,7 +126,7 @@ export class NativeEnvironmentExecutor {
     onData,
     onExit,
   }) {
-    const childEnv = buildProxyEnvironment(this.baseEnv, {
+    const childEnv = buildProxyEnvironment(this.commandEnvironment(this.baseEnv), {
       mode: this.childProxyPolicy?.getMode?.() || 'proxy',
     });
     Object.assign(childEnv, readWorkerChildEnvironment(this.workerEnvPath));
