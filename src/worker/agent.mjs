@@ -8,6 +8,7 @@ import {
 } from './worker-state.mjs';
 import { supervisorOwnsProcess } from './supervisor-ownership.mjs';
 import { normalizeWorkerTokenOwner } from './token-owner.mjs';
+import { createBoundedShutdown } from './bounded-shutdown.mjs';
 
 const installRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -99,14 +100,14 @@ function startHealthHeartbeat() {
   }, healthIntervalMs);
 }
 
-async function shutdown() {
-  if (stopping) return;
+const shutdown = createBoundedShutdown({ cleanup: async () => {
   stopping = true;
   stopHealthHeartbeat();
   await setHealth('stopping');
   await activeClient?.close().catch(() => {});
   runtime.close();
-}
+  await instanceLock?.release();
+} });
 
 function requestWorkerRestart() {
   if (restartQueued) return;

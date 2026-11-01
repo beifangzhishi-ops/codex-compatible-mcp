@@ -38,6 +38,7 @@ export class LocalWorkerSupervisor {
     this.onOutput = onOutput;
     this.child = null;
     this.restartTimer = null;
+    this.restartDeadline = null;
     this.restartCount = 0;
     this.restartAttempts = 0;
     this.stopping = false;
@@ -91,9 +92,30 @@ export class LocalWorkerSupervisor {
     this.restartAttempts = 0;
   }
 
+  // 仅由经过身份和白名单校验的主动重启调用；普通断网不触发强杀。
+  armRestartDeadline(timeoutMs = 15_000) {
+    if (this.stopping || !this.child || this.restartDeadline) return;
+    const child = this.child;
+    this.restartDeadline = setTimeout(() => {
+      this.restartDeadline = null;
+      if (this.stopping || this.child !== child) return;
+      this.lastError = '主动重启停止超时，Supervisor 正在终止其拥有的旧 Worker。';
+      this.log(this.lastError);
+      // Windows 的 child.kill() 使用 TerminateProcess；不接受外部 PID。
+      try {
+        if (!child.kill('SIGKILL')) this.log('旧 Worker 终止请求未成功；等待实际退出，不启动重复实例。');
+      } catch (error) {
+        this.lastError = '旧 Worker 终止失败：' + String(error?.message || error);
+        this.log(this.lastError);
+      }
+    }, timeoutMs);
+  }
+
   async stop() {
     if (this.stopping) return;
     this.stopping = true;
+    clearTimeout(this.restartDeadline);
+    this.restartDeadline = null;
     this.state = 'stopping';
     this.workerHub.off('environment_connected', this.onEnvironmentConnected);
     this.workerHub.off(
@@ -145,6 +167,8 @@ export class LocalWorkerSupervisor {
     const onTerminated = (code, signal, error = null) => {
       if (terminated) return;
       terminated = true;
+      clearTimeout(this.restartDeadline);
+      this.restartDeadline = null;
       if (error) {
         this.lastError = String(error?.message || error);
         this.log('local Worker process error: ' + this.lastError);
@@ -167,7 +191,11 @@ export class LocalWorkerSupervisor {
       this.#scheduleRestart();
     };
     child.once('error', (error) => {
-      onTerminated(null, null, error);
+      // 有 PID 的 error 可能来自终止失败，并不证明进程已经退出。
+      if (child.pid) {
+        this.lastError = String(error?.message || error);
+        this.log('local Worker process error: ' + this.lastError);
+      } else onTerminated(null, null, error);
     });
     child.once('exit', (code, signal) => {
       onTerminated(code, signal);

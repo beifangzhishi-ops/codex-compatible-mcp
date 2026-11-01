@@ -28,6 +28,9 @@ function requestControllerRestart() {
 const runtime = createControllerRuntime({
   defaultEnvironmentId: localEnvironmentId,
   requestControllerRestart,
+  armWorkerRestart: (environmentId) => {
+    if (environmentId === localEnvironmentId) localWorkerSupervisor?.armRestartDeadline();
+  },
   workerTakeoverToken: localWorkerTakeoverToken,
   workspaceHandleStateFile:
     process.env.CCM_WORKSPACE_HANDLE_FILE ||

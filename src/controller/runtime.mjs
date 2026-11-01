@@ -111,6 +111,7 @@ export function createControllerRuntime(options = {}) {
     workerHub,
     controllerEnvironmentId: options.defaultEnvironmentId || null,
     requestControllerRestart: options.requestControllerRestart,
+    armWorkerRestart: options.armWorkerRestart,
     policyFile: options.restartPolicyFile,
   });
 

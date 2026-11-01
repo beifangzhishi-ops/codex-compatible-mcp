@@ -273,6 +273,10 @@ For an assistant-operated restart use the Deferred `ccm.restart` capability rath
 
 The dedicated restart RPC makes the supervised target exit after acknowledging the request. `ccm-supervisor.ps1` restarts the Controller, local Worker and OAuth sidecar as a group; `ccm-worker-supervisor.ps1` or `LocalWorkerSupervisor` restores an individual Worker. Controller service-group restart checks the existing Supervisor-owned gateway parent PID; remote-Worker restart checks the Supervisor-owned Worker PID; the local Worker uses its Supervisor launch marker. Processes without verified supervision reject restart. An accepted response means **requested, not recovered**: after the relevant reconnect, independently verify Controller health, Worker normal state, and OAuth sidecar health. The Controller connection will be interrupted when restarting its service group. The installer scripts manage startup, not routine restart; do not alter Task Scheduler configuration just to issue a restart.
 
+主动重启现已增加停止期限：Worker 在停止清理完成后明确退出，清理超过 10 秒则以失败状态退出，避免残留句柄使旧进程永久存活。本地 Supervisor 只在白名单重启请求成功受理后设置 15 秒停止期限；届时只终止其仍拥有的旧子进程，收到退出事件后才启动替代进程。普通网络断线仍由 Worker 自行重连，不触发此强制终止。远端 Worker 同样使用上述 10 秒退出兜底，其现有 Supervisor 负责重新启动。
+
+`ccm.restart` 的 Worker 请求返回 `operation_id`，通过只读 `ccm.restart_status({operation_id})` 查询 `requested`、`reconnecting`、`recovered` 或 `failed`。仅观察到目标断开后重新注册健康连接才标为恢复；60 秒未恢复则记录失败。重复的进行中请求返回同一操作，不再次发送重启。Controller 内存最多保存 128 条操作，优先淘汰终态；Controller 重启后记录失效，未知记录不能当作成功。服务组重启仍需独立检查 Controller、OAuth 和各 Worker 健康。旧版本本地 Supervisor 只等待进程退出，无法自行恢复停止后仍存活的 Worker；遇到旧版本这一情况，使用专用 `ccm.restart` 的 `controller_service_group` 路由恢复，随后升级。
+
 For a Controller machine that should run the Controller, its local Worker, and the OAuth sidecar as one service group:
 
 ```powershell

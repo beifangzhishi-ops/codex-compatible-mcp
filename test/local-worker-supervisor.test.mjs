@@ -96,3 +96,32 @@ test('local Worker supervisor exposes reconnecting state and does not respawn on
   assert.equal(supervisor.status().state, 'stopped');
   assert.equal(children.length, 1);
 });
+
+test('主动重启超时会终止旧 Worker，等退出后再拉起；普通断线不触发', async () => {
+  const hub = new FakeWorkerHub();
+  const children = [];
+  let signal;
+  const supervisor = new LocalWorkerSupervisor({
+    workerHub: hub, environmentId: 'local-test', agentPath: 'agent.mjs', restartMinMs: 1,
+    spawnProcess: () => {
+      const child = new FakeChild(300 + children.length);
+      child.kill = (value) => { signal = value; };
+      children.push(child);
+      return child;
+    },
+  });
+  try {
+    await supervisor.start();
+    hub.emit('environment_disconnected', 'local-test');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(signal, undefined);
+    supervisor.armRestartDeadline(5);
+    await waitFor(() => signal === 'SIGKILL');
+    assert.equal(children.length, 1);
+    children[0].emit('error', new Error('终止被拒绝'));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(children.length, 1);
+    children[0].emit('exit', 1, null);
+    await waitFor(() => children.length === 2);
+  } finally { await supervisor.stop(); }
+});
