@@ -5,6 +5,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string] $AudioUrl,
     [Parameter(Mandatory = $true)]
+    [ValidateRange(1, 10000)]
+    [int] $ExpectedHeight,
+    [Parameter(Mandatory = $true)]
     [string] $OutputPath,
     [string] $Referer = 'https://www.bilibili.com/',
     [string] $UserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36',
@@ -15,7 +18,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $curl = (Get-Command curl.exe -ErrorAction Stop | Select-Object -First 1).Source
 $ffmpeg = (Get-Command ffmpeg.exe -ErrorAction Stop | Select-Object -First 1).Source
-$ffprobe = (Get-Command ffprobe.exe -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+$ffprobe = (Get-Command ffprobe.exe -ErrorAction Stop | Select-Object -First 1).Source
 
 $resolvedOutput = [IO.Path]::GetFullPath($OutputPath)
 $outputDir = Split-Path -Parent $resolvedOutput
@@ -68,6 +71,26 @@ try {
         throw "ffmpeg failed with exit code $LASTEXITCODE"
     }
 
+    $probeArgs = @(
+        '-v', 'error',
+        '-show_entries', 'stream=codec_type,codec_name,width,height',
+        '-show_entries', 'format=duration,size',
+        '-of', 'json',
+        $mergedTemp
+    )
+    $probeJson = & $ffprobe @probeArgs
+    if ($LASTEXITCODE -ne 0 -or -not $probeJson) {
+        throw 'ffprobe failed to verify the downloaded video.'
+    }
+    $probe = $probeJson | ConvertFrom-Json
+    $videoStream = $probe.streams | Where-Object { $_.codec_type -eq 'video' } | Select-Object -First 1
+    if (-not $videoStream -or -not $videoStream.height) {
+        throw 'ffprobe did not find a valid video resolution.'
+    }
+    if ([int]$videoStream.height -lt $ExpectedHeight) {
+        throw "Downloaded video is $($videoStream.height)p, lower than the BMG-selected ${ExpectedHeight}p; refusing to save downgraded output."
+    }
+
     Move-Item -LiteralPath $mergedTemp -Destination $resolvedOutput -Force
 
     $result = [ordered]@{
@@ -75,22 +98,9 @@ try {
         output_path = $resolvedOutput
         byte_length = (Get-Item -LiteralPath $resolvedOutput).Length
         remux = 'ffmpeg -c copy'
-    }
-
-    if ($ffprobe) {
-        $probeArgs = @(
-            '-v', 'error',
-            '-show_entries', 'stream=index,codec_type,codec_name,width,height',
-            '-show_entries', 'format=duration,size',
-            '-of', 'json',
-            $resolvedOutput
-        )
-        $probeJson = & $ffprobe @probeArgs
-        if ($LASTEXITCODE -eq 0 -and $probeJson) {
-            try {
-                $result.probe = $probeJson | ConvertFrom-Json
-            } catch {}
-        }
+        expected_height = $ExpectedHeight
+        actual_height = [int]$videoStream.height
+        probe = $probe
     }
     $result | ConvertTo-Json -Depth 8 -Compress
 }

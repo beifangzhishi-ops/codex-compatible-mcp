@@ -359,12 +359,18 @@ test('Bilibili deferred tool passes signed DASH URLs without exposing them in re
 
   const videoUrl = 'https://example.invalid/video.m4s?token=a&x=1';
   const audioUrl = 'https://example.invalid/audio.m4s?token=b&x=2';
-  const result = await registry
-    .get('ccm-extra.bilibili_download_dash')
+  const tool = registry.get('ccm-extra.bilibili_download_dash');
+  assert.match(tool.description, /BMG IS REQUIRED/);
+  assert.match(tool.description, /Do not fall back to anonymous/);
+  assert.equal(tool.inputSchema.expected_height.safeParse(undefined).success, false);
+  assert.equal(tool.inputSchema.expected_height.safeParse(0).success, false);
+  assert.equal(tool.inputSchema.expected_height.safeParse(1080).success, true);
+  const result = await tool
     .handler({
       environment_id: 'worker-b',
       video_url: videoUrl,
       audio_url: audioUrl,
+      expected_height: 1080,
       output_path: 'C:\\media\\result.mp4',
       timeout_seconds: 90,
     });
@@ -377,7 +383,9 @@ test('Bilibili deferred tool passes signed DASH URLs without exposing them in re
   );
   assert.equal(result.structuredContent.video_url, undefined);
   assert.equal(result.structuredContent.audio_url, undefined);
+  assert.equal(result.structuredContent.expected_height, 1080);
   assert.match(runtime.calls[0].cmd, /download-dash\.ps1/);
+  assert.match(runtime.calls[0].cmd, /-ExpectedHeight 1080/);
   assert.match(runtime.calls[0].cmd, /-TimeoutSeconds 90/);
   assert.match(runtime.calls[0].cmd, /video\.m4s\?token=a&x=1/);
   assert.match(runtime.calls[0].cmd, /audio\.m4s\?token=b&x=2/);

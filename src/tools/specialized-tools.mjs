@@ -475,7 +475,7 @@ export function registerSpecializedTools(registry, runtime) {
     namespace: 'ccm-extra',
     name: 'bilibili_download_dash',
     provider: 'ccm-specialized',
-    provenance: 'ported-from-wcm/tools/bilibili-download',
+    provenance: 'ccm-bilibili-authenticated-dash',
     surfaces: { deferred: true, codeMode: true },
     tags: [
       'bilibili',
@@ -488,12 +488,13 @@ export function registerSpecializedTools(registry, runtime) {
     environmentRequirements: {
       platform: 'windows',
       capabilities: ['exec'],
-      localSoftware: ['curl', 'ffmpeg'],
+      localSoftware: ['curl', 'ffmpeg', 'ffprobe'],
     },
     description: [
-      'Download signed Bilibili DASH video and audio URLs on a Windows Remote Worker and remux them losslessly with ffmpeg.',
-      'Use an authenticated browser/BMG session to obtain the Bilibili playurl response and select the desired permitted video/audio representations first. Then pass those short-lived signed URLs here. CCM does not export browser cookies or bypass Bilibili account/quality permissions.',
-      'The resulting media is remuxed with ffmpeg -c copy. Long downloads may return a live session; poll that session through exec with nested ccm.write_stdin, reusing the returned workspace_handle and session_id.',
+      'Download Bilibili DASH streams selected through the user\'s authenticated BMG browser session; remux without re-encoding and verify the resulting video resolution.',
+      'BMG IS REQUIRED for discovery: use the logged-in Bilibili tab, verify that Bilibili reports the user as logged in, get the actual playurl DASH representations with the account\'s permissions, and choose the highest available video quality and suitable highest-quality audio. DASH qn alone does not select a representation. Do not fall back to anonymous requests, unauthenticated yt-dlp, or lower quality without telling the user. If BMG is not authorized or login has expired, stop and request access/login instead.',
+      'Pass the selected short-lived URLs and the actual DASH video height as expected_height. The Worker checks the output with ffprobe and rejects a mismatched or downgraded result before publishing it. Do not export Bilibili cookies, SESSDATA, or credentials to CCM. Video availability and VIP entitlement remain subject to Bilibili.',
+      'Long downloads may return a live session; poll through exec with nested ccm.write_stdin, reusing workspace_handle and session_id.',
     ].join('\n\n'),
     inputSchema: {
       video_url: z.string().url().describe(
@@ -501,6 +502,9 @@ export function registerSpecializedTools(registry, runtime) {
       ),
       audio_url: z.string().url().describe(
         'Signed DASH audio representation URL obtained from Bilibili playurl.',
+      ),
+      expected_height: z.number().int().min(1).max(10000).describe(
+        'Actual height (pixels) of the highest permitted DASH video representation selected in the logged-in BMG browser, e.g. 1080. Required to reject lower-resolution output.',
       ),
       output_path: z.string().min(1).describe(
         'Destination MP4 path on the selected Worker.',
@@ -533,6 +537,7 @@ export function registerSpecializedTools(registry, runtime) {
           '& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $tool' +
             ' -VideoUrl ' + psQuote(args.video_url) +
             ' -AudioUrl ' + psQuote(args.audio_url) +
+            ' -ExpectedHeight ' + Number(args.expected_height) +
             ' -OutputPath ' + psQuote(args.output_path) +
             ' -Referer ' + psQuote(
               args.referer || 'https://www.bilibili.com/',
@@ -546,6 +551,7 @@ export function registerSpecializedTools(registry, runtime) {
           environment_id: environment.id,
           capability: 'bilibili_download_dash',
           output_path: args.output_path,
+          expected_height: args.expected_height,
         });
       } catch (error) {
         return toolError(error);
