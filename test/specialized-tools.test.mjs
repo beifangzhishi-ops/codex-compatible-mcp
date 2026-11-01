@@ -360,8 +360,10 @@ test('Bilibili deferred tool passes signed DASH URLs without exposing them in re
   const videoUrl = 'https://example.invalid/video.m4s?token=a&x=1';
   const audioUrl = 'https://example.invalid/audio.m4s?token=b&x=2';
   const tool = registry.get('ccm-extra.bilibili_download_dash');
-  assert.match(tool.description, /BMG IS REQUIRED/);
-  assert.match(tool.description, /Do not fall back to anonymous/);
+  assert.match(tool.description, /BMGCTL IS REQUIRED/);
+  assert.match(tool.description, /bmgctl\.cmd/);
+  assert.match(tool.description, /Do not invoke BMG MCP tools/);
+  assert.match(tool.description, /stop rather than silently using anonymous requests/);
   assert.equal(tool.inputSchema.expected_height.safeParse(undefined).success, false);
   assert.equal(tool.inputSchema.expected_height.safeParse(0).success, false);
   assert.equal(tool.inputSchema.expected_height.safeParse(1080).success, true);

@@ -475,7 +475,7 @@ export function registerSpecializedTools(registry, runtime) {
     namespace: 'ccm-extra',
     name: 'bilibili_download_dash',
     provider: 'ccm-specialized',
-    provenance: 'ccm-bilibili-authenticated-dash',
+    provenance: 'ccm-bilibili-bmgctl-dash',
     surfaces: { deferred: true, codeMode: true },
     tags: [
       'bilibili',
@@ -491,9 +491,10 @@ export function registerSpecializedTools(registry, runtime) {
       localSoftware: ['curl', 'ffmpeg', 'ffprobe'],
     },
     description: [
-      'Download Bilibili DASH streams selected through the user\'s authenticated BMG browser session; remux without re-encoding and verify the resulting video resolution.',
-      'BMG IS REQUIRED for discovery: use the logged-in Bilibili tab, verify that Bilibili reports the user as logged in, get the actual playurl DASH representations with the account\'s permissions, and choose the highest available video quality and suitable highest-quality audio. DASH qn alone does not select a representation. Do not fall back to anonymous requests, unauthenticated yt-dlp, or lower quality without telling the user. If BMG is not authorized or login has expired, stop and request access/login instead.',
-      'Pass the selected short-lived URLs and the actual DASH video height as expected_height. The Worker checks the output with ffprobe and rejects a mismatched or downgraded result before publishing it. Do not export Bilibili cookies, SESSDATA, or credentials to CCM. Video availability and VIP entitlement remain subject to Bilibili.',
+      'Download Bilibili DASH streams obtained with BMGCTL from the user\'s logged-in browser; remux without re-encoding and verify the resulting video resolution.',
+      'BMGCTL IS REQUIRED for discovery: on the 6v Windows machine, invoke the installed BMGCTL command through CCM exec_command. The verified executable is C:\\Users\\Songjx\\AppData\\Roaming\\npm\\bmgctl.cmd. First run `health`, then `call get_windows_and_tabs --args {}`; use `call chrome_navigate` and `call chrome_javascript` to operate the logged-in Bilibili browser. For nonempty JSON args, prefer `--args-base64 BASE64` to avoid Windows cmd argument quoting. BMGCTL accesses the existing browser session locally and does not need the BMG MCP phone-authenticator grant. Do not invoke BMG MCP tools for this workflow.',
+      'Using BMGCTL browser JavaScript, verify Bilibili login (the nav API must report `code: 0` and `data.isLogin: true`). Resolve the requested BV/CID and obtain the account-authorized DASH playurl response. Select the highest actually available video representation and appropriate audio; the requested DASH qn alone does not determine the returned quality. If BMGCTL is unavailable or Bilibili login is expired, stop rather than silently using anonymous requests, yt-dlp, or reduced quality.',
+      'Pass the selected short-lived URLs and the actual DASH video height as expected_height. The Worker checks output with ffprobe and rejects mismatched or downgraded video before publishing it. Never export Bilibili cookies, SESSDATA, or credentials to CCM. Video availability and VIP entitlement remain subject to Bilibili.',
       'Long downloads may return a live session; poll through exec with nested ccm.write_stdin, reusing workspace_handle and session_id.',
     ].join('\n\n'),
     inputSchema: {
@@ -504,7 +505,7 @@ export function registerSpecializedTools(registry, runtime) {
         'Signed DASH audio representation URL obtained from Bilibili playurl.',
       ),
       expected_height: z.number().int().min(1).max(10000).describe(
-        'Actual height (pixels) of the highest permitted DASH video representation selected in the logged-in BMG browser, e.g. 1080. Required to reject lower-resolution output.',
+        'Actual height (pixels) of the highest permitted DASH video representation selected through BMGCTL in the logged-in browser, e.g. 1080. Required to reject lower-resolution output.',
       ),
       output_path: z.string().min(1).describe(
         'Destination MP4 path on the selected Worker.',
