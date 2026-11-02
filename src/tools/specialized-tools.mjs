@@ -495,12 +495,16 @@ export function registerSpecializedTools(registry, runtime) {
       'BMGCTL IS REQUIRED for discovery: on 6v invoke C:\\Users\\Songjx\\AppData\\Roaming\\npm\\bmgctl.cmd via CCM exec_command. First call `health` and `call get_windows_and_tabs --args {}`; use `call chrome_navigate` / `call chrome_javascript` to operate the logged-in Bilibili browser. Use `--args-base64 BASE64` for nonempty JSON to preserve Windows command quoting. BMGCTL reuses the browser login without the BMG MCP phone-authenticator grant. Do not invoke BMG MCP tools for this workflow.',
       'Using BMGCTL browser JavaScript, verify Bilibili login (the nav API must report `code: 0` and `data.isLogin: true`). Resolve the requested BV/CID and obtain the account-authorized DASH playurl response. Select the highest actually available video representation and appropriate audio; the requested DASH qn alone does not determine the returned quality. If BMGCTL is unavailable or Bilibili login is expired, stop rather than silently using anonymous requests, yt-dlp, or reduced quality.',
       'BROWSER CLEANUP IS REQUIRED after using a Bilibili video page, including failed calls and tests: use BMGCTL chrome_javascript to pause playback (`document.querySelector("video")?.pause()`), or close only a tab created specifically for this task. Do not leave autoplay running; do not close a tab that was already open for the user.',
-      'BRIDGE IS REQUIRED: BMGCTL redacts signed DASH URLs in its tool results. Start the bundled tools/bilibili-download/bridge.py on 6v through CCM exec_command; wait for BRIDGE_READY. In the logged-in Bilibili tab use chrome_javascript to POST JSON {video_url,audio_url,expected_height} from actual selected DASH representations directly to http://127.0.0.1:8765/dash with Content-Type application/json. Expect HTTP 204 and BRIDGE_RECEIVED; do not print signed URLs in tool results. The one-shot Bridge stores them only in ignored .cache/bilibili-download/dash_urls.json on 6v. Then call this capability with only output_path (and optional timeout); the Worker uses Python to consume and delete the handoff, download via curl.exe, remux with ffmpeg -c copy and check ffprobe video height and audio presence. Do not call before Bridge success. Never export cookies, SESSDATA, or credentials. Follow Bilibili account permissions.',
+      'BRIDGE IS REQUIRED: BMGCTL redacts signed DASH URLs. For an existing 6v projectless workspace_handle, start tools/bilibili-download/bridge.py via CCM exec_command with the SAME handle and --projectless-handoff. The Bridge writes .bilibili-dash-urls.json in that projectless workspace. Call this tool with workspace_handle and an output_path MP4 filename: the Python downloader reads and deletes that file from the same workspace, without a new handle. If no existing handle is used, the shared Bridge mode still writes to ignored .cache/bilibili-download/dash_urls.json under CCM install root, and this download tool creates its own projectless handle. Never mix these two handoff modes.',
+      'In the BMGCTL logged-in Bilibili tab use chrome_javascript to POST JSON {video_url,audio_url,expected_height} from actual selected DASH representations directly to http://127.0.0.1:8765/dash with Content-Type application/json. Require HTTP 204 and BRIDGE_RECEIVED; never print signed URLs in tool results. The one-shot Bridge transfers only to a local file; the Worker consumes and deletes that file, downloads via curl.exe, remuxes with ffmpeg -c copy, and checks ffprobe video height and audio presence. Do not call before Bridge success. Never export cookies, SESSDATA, or credentials. Follow Bilibili account permissions.',
       'Long downloads may return a live session; poll through exec with nested ccm.write_stdin, reusing workspace_handle and session_id.',
     ].join('\n\n'),
     inputSchema: {
       output_path: z.string().regex(/^[^\\/:*?"<>|]+\.mp4$/i).describe(
-        'MP4 filename only, e.g. video.mp4, inside the new 6v projectless workspace returned by the tool. Do not pass absolute paths or a destination in another workspace. Use returned workspace_handle/workspace_root to access or publish the file. Existing files are not overwritten.',
+        'MP4 filename only, e.g. video.mp4. When workspace_handle is supplied, save inside that existing 6v projectless workspace; otherwise create a new one. No absolute paths or writing to another workspace. Existing files are not overwritten.',
+      ),
+      workspace_handle: z.string().uuid().optional().describe(
+        'Optional existing 6v projectless workspace_handle. If supplied, start the Bridge through CCM exec_command using this SAME handle with --projectless-handoff, then invoke this download tool with the handle. No new workspace is created. Omit only for the earlier shared-Bridge workflow.',
       ),
       environment_id: z.literal('DESKTOP-KFL6V1F').optional().describe(
         'The 6v Controller host: DESKTOP-KFL6V1F. The BMGCTL Bridge is local to 6v; omission also selects 6v.',
@@ -519,6 +523,13 @@ export function registerSpecializedTools(registry, runtime) {
         if (environmentId !== 'DESKTOP-KFL6V1F') {
           throw new Error('BMGCTL Bridge handoff is only available on 6v.');
         }
+        if (args.workspace_handle) {
+          const current = runtime.workspaceHandleManager.resolve(args.workspace_handle);
+          if (current.workspace_kind !== 'projectless' ||
+              current.environment_id !== environmentId) {
+            throw new Error('Bilibili workspace_handle must be a projectless handle on 6v.');
+          }
+        }
         const environment = resolveWindowsEnvironment(
           runtime,
           environmentId,
@@ -527,9 +538,18 @@ export function registerSpecializedTools(registry, runtime) {
           toolPath('tools\\bilibili-download\\download-dash.py'),
           '& python.exe $tool' +
             ' --output ' + psQuote(args.output_path) +
+            (args.workspace_handle ? ' --projectless-handoff' : '') +
             ' --timeout ' + Number(args.timeout_seconds || 900),
         ].join('; ');
-        return execResult(await run(runtime, { ...args, environment_id: environmentId }, command), {
+        const result = args.workspace_handle
+          ? await runtime.processManager.execCommand({
+              workspace_handle: args.workspace_handle,
+              cmd: command,
+              yield_time_ms: args.yield_time_ms,
+              max_output_tokens: args.max_output_tokens,
+            })
+          : await run(runtime, { ...args, environment_id: environmentId }, command);
+        return execResult(result, {
           environment_id: environment.id,
           capability: 'bilibili_download_dash',
           output_path: args.output_path,

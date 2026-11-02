@@ -4,13 +4,16 @@ The browser sends secrets directly to an ignored Worker-local file, not through
 the BMGCTL tool response (which intentionally redacts signed URLs).
 """
 
+import argparse
 import json
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 
-OUTPUT = Path(__file__).resolve().parents[2] / ".cache" / "bilibili-download" / "dash_urls.json"
+DEFAULT_OUTPUT = Path(__file__).resolve().parents[2] / ".cache" / "bilibili-download" / "dash_urls.json"
+PROJECTLESS_OUTPUT = ".bilibili-dash-urls.json"
+OUTPUT = DEFAULT_OUTPUT
 ORIGIN = "https://www.bilibili.com"
 
 
@@ -64,6 +67,11 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--projectless-handoff", action="store_true")
+    args = parser.parse_args()
+    if args.projectless_handoff:
+        OUTPUT = Path.cwd() / PROJECTLESS_OUTPUT
     OUTPUT.unlink(missing_ok=True)
     with HTTPServer(("127.0.0.1", 8765), Handler) as server:
         server.timeout = 2

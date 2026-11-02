@@ -25,13 +25,12 @@ def run(*args, timeout=900):
 def main():
     root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser()
-    parser.add_argument("--handoff-file", default=str(root / ".cache" / "bilibili-download" / "dash_urls.json"))
+    parser.add_argument("--projectless-handoff", action="store_true")
     parser.add_argument("--output", required=True)
     parser.add_argument("--timeout", type=int, default=900)
     args = parser.parse_args()
-    handoff = Path(args.handoff_file).resolve()
-    if handoff != (root / ".cache" / "bilibili-download" / "dash_urls.json").resolve():
-        raise ValueError("Handoff path must be the fixed ignored Bilibili bridge file")
+    handoff = (Path.cwd() / ".bilibili-dash-urls.json" if args.projectless_handoff
+               else root / ".cache" / "bilibili-download" / "dash_urls.json").resolve()
     try:
         data = json.loads(handoff.read_text(encoding="utf-8"))
     finally:

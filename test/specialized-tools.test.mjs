@@ -373,6 +373,7 @@ test('Bilibili deferred tool consumes only a local bridge handoff on 6v without 
   assert.equal(tool.inputSchema.output_path.safeParse('video.mp4').success, true);
   assert.equal(tool.inputSchema.output_path.safeParse('C:\\media\\video.mp4').success, false);
   assert.equal(tool.inputSchema.output_path.safeParse('../video.mp4').success, false);
+  assert.equal(tool.inputSchema.workspace_handle.safeParse(undefined).success, true);
   assert.equal(tool.inputSchema.environment_id.safeParse('noha').success, false);
   const result = await tool
     .handler({
@@ -395,4 +396,19 @@ test('Bilibili deferred tool consumes only a local bridge handoff on 6v without 
   assert.doesNotMatch(runtime.calls[0].cmd, /video_url|audio_url|SESSDATA/i);
   assert.equal(runtime.calls[0].workspace_handle, '00000000-0000-4000-8000-000000000001');
   assert.equal((await tool.handler({ environment_id: 'noha', output_path: 'C:\\media\\bad.mp4' })).isError, true);
+  const existingHandle = '00000000-0000-4000-8000-000000000001';
+  const reusable = await runtime.workspaceHandleManager.createProjectless('DESKTOP-KFL6V1F');
+  assert.equal(reusable.workspace_handle, existingHandle);
+  const reusedResult = await tool.handler({
+    workspace_handle: existingHandle,
+    output_path: 'projectless.mp4',
+  });
+  assert.equal(reusedResult.isError, undefined);
+  assert.equal(runtime.calls[1].workspace_handle, existingHandle);
+  assert.match(runtime.calls[1].cmd, /--projectless-handoff/);
+  assert.doesNotMatch(runtime.calls[0].cmd, /--projectless-handoff/);
+  assert.equal((await tool.handler({
+    workspace_handle: '00000000-0000-4000-8000-000000000002',
+    output_path: 'rejected.mp4',
+  })).isError, true);
 });
