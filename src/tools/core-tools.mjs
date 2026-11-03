@@ -1,6 +1,7 @@
 import * as z from 'zod/v4';
 import { APPROVAL_UI_URI } from '../ui/approval-app.mjs';
 import { WORKSPACE_HANDLE_UI_URI } from '../ui/workspace-handle-app.mjs';
+import { VERIFICATION_INPUT_UI_URI } from '../ui/verification-input-app.mjs';
 
 const UNIFIED_EXEC_OUTPUT_SCHEMA = {
   chunk_id: z.string().optional(),
@@ -384,6 +385,93 @@ function toolError(error) {
 }
 
 export function registerCoreTools(registry, runtime) {
+  registry.register({
+    name: 'request_verification_input',
+    provider: 'ccm-core',
+    surfaces: { direct: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    mcpMeta: {
+      ui: { resourceUri: VERIFICATION_INPUT_UI_URI, visibility: ['model', 'app'] },
+      'ui/resourceUri': VERIFICATION_INPUT_UI_URI,
+      'openai/outputTemplate': VERIFICATION_INPUT_UI_URI,
+      'openai/widgetAccessible': true,
+    },
+    tags: ['verification', 'input', 'ui', 'session'],
+    description: [
+      'Show a CCM verification-input card for an existing live process session. The user types the code in the card, which submits through an App-only tool directly to the same CCM session; do not request the code in chat or pass it through exec_command or write_stdin.',
+      'Call only when the running process is waiting for interactive verification input. Reuse the exact workspace_handle and session_id from exec_command. The card sends the input and Enter; the model receives only the delivery status, never the code. No separate model tool call is needed for submission.',
+      'Do not call for a process that has already exited. If no interactive session exists, start a suitable interactive command first.',
+    ].join('\n\n'),
+    inputSchema: {
+      workspace_handle: z.string().uuid().describe('Workspace handle that owns the live session.'),
+      session_id: z.number().int().describe('Live public session_id returned by exec_command.'),
+      label: z.string().min(1).max(100).optional().describe('Short purpose displayed above the code field. Defaults to Verification code.'),
+    },
+    handler: async (args, context) => {
+      try {
+        const prepared = runtime.verificationInputManager.create({
+          workspaceHandle: args.workspace_handle,
+          sessionId: args.session_id,
+          label: args.label,
+          hostSession: context?.extra?._meta?.['openai/session'] || null,
+        });
+        return {
+          content: [{ type: 'text', text:
+            'CCM verification input card is ready for the live process session. ' +
+            'The user submits directly in the card; do not request or transmit the code in model tool arguments.' }],
+          structuredContent: prepared,
+        };
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  });
+
+  registry.register({
+    name: 'get_verification_input_status',
+    provider: 'ccm-core',
+    surfaces: { direct: true },
+    mcpMeta: { ui: { visibility: ['app'] }, 'openai/widgetAccessible': true },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    tags: ['verification', 'status', 'app-only'],
+    description: 'App-only read of a CCM verification-input card state; never returns input content.',
+    inputSchema: { request_id: z.string().uuid() },
+    handler: async (args, context) => {
+      try {
+        return jsonResult(runtime.verificationInputManager.status(args.request_id, {
+          hostSession: context?.extra?._meta?.['openai/session'] || null,
+        }));
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  });
+
+  registry.register({
+    name: 'submit_verification_input',
+    provider: 'ccm-core',
+    surfaces: { direct: true },
+    mcpMeta: { ui: { visibility: ['app'] }, 'openai/widgetAccessible': true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    tags: ['verification', 'input', 'app-only'],
+    description: 'App-only delivery of verification input to the live process session bound to the card. The response never contains the value or process stdout.',
+    inputSchema: {
+      request_id: z.string().uuid(),
+      value: z.string().min(1).max(256),
+    },
+    handler: async (args, context) => {
+      try {
+        return jsonResult(await runtime.verificationInputManager.submit(
+          args.request_id, args.value, {
+            hostSession: context?.extra?._meta?.['openai/session'] || null,
+          },
+        ));
+      } catch {
+        return toolError(new Error('CCM verification input could not be delivered.'));
+      }
+    },
+  });
+
   registry.register({
     name: 'list_projects',
     provider: 'ccm-core',

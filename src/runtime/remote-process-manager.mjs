@@ -77,7 +77,7 @@ export class RemoteProcessManager {
     this.audit({ component: 'process', event, ...fields });
   }
 
-  #recordExecResult(result, environment, workspaceHandle, operationId = null, sessionHint = null) {
+  #recordExecResult(result, environment, workspaceHandle, operationId = null, sessionHint = null, tty = false) {
     if (result?.session_id !== undefined) {
       const publicSessionId = this.#allocateSessionId();
       this.sessions.set(publicSessionId, {
@@ -87,6 +87,8 @@ export class RemoteProcessManager {
         workspace: { ...workspaceHandle },
         operationId,
         tailscaleHint: sessionHint,
+        tty,
+        verificationEchoes: [],
       });
       this.#emit('session_created', {
         operation_id: operationId || undefined,
@@ -635,6 +637,7 @@ export class RemoteProcessManager {
       workspaceHandle,
       operationId,
       diagnosticContext,
+      Boolean(args.tty),
     );
     if (trustedPackageScriptRule) {
       return {
@@ -849,6 +852,8 @@ export class RemoteProcessManager {
       environment,
       workspaceHandle,
       claimed.request.operation_id,
+      null,
+      Boolean(action.tty),
     );
     if (decision === 'approve_workspace') {
       try {
@@ -965,6 +970,17 @@ export class RemoteProcessManager {
         session.tailscaleHint.environment,
       );
     }
+    // Short-lived echo masking applies to later ordinary model polls too.
+    session.verificationEchoes = (session.verificationEchoes || [])
+      .filter((entry) => entry.expiresAt > Date.now());
+    if (typeof result?.output === 'string') {
+      for (const entry of session.verificationEchoes) {
+        result = {
+          ...result,
+          output: result.output.replaceAll(entry.value, '[verification input]'),
+        };
+      }
+    }
     if (result?.session_id !== undefined) {
       this.#emit('session_continued', {
         operation_id: session.operationId || undefined,
@@ -994,6 +1010,39 @@ export class RemoteProcessManager {
       ...result,
       ...(session.operationId ? { operation_id: session.operationId } : {}),
       ...(session.workspace || {}),
+    };
+  }
+
+  async writeVerificationInput({ session_id, workspace_handle, value }) {
+    const session = this.sessions.get(session_id);
+    if (!session || session.workspaceHandle !== workspace_handle) {
+      throw new Error('Unknown or mismatched live CCM process session.');
+    }
+    // Nothing is written to the audit log, disk, or model tool result.
+    // Keep an in-memory echo mask briefly in case the PTY repeats the code
+    // in a subsequent output chunk.
+    const echo = {
+      value,
+      expiresAt: Date.now() + 2 * 60 * 1000,
+    };
+    session.verificationEchoes.push(echo);
+    // Remove plaintext even if no subsequent session poll happens.
+    const cleanup = setTimeout(() => {
+      session.verificationEchoes = session.verificationEchoes.filter(
+        (entry) => entry !== echo,
+      );
+    }, 2 * 60 * 1000);
+    cleanup.unref?.();
+    const result = await this.writeStdin({
+      session_id,
+      workspace_handle,
+      chars: value + (session.tty ? '\r' : '\n'),
+      yield_time_ms: 250,
+      max_output_tokens: 1200,
+    });
+    return {
+      session_running: result.session_id !== undefined,
+      ...(result.exit_code !== undefined ? { exit_code: result.exit_code } : {}),
     };
   }
 

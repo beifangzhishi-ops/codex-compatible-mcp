@@ -116,6 +116,9 @@ When adding stateful features, choose an identity according to the feature's rea
 | `show_workspace_handle` | Display a validated registered handle in a copyable card after full-access entry; read-only, Direct only. |
 | `request_approval` | Render the CCM approval app for one already-frozen pending action. It accepts only the returned `approval_id`. |
 | `resolve_pending_action` | App-only resolver used by the CCM approval app to approve/deny and resume a frozen execution or workspace action. It is hidden from normal model use through MCP Apps visibility metadata. |
+| `request_verification_input` | Open a verification-code MCP App for a live process using its exact `(workspace_handle, session_id)`; no code is passed through model arguments. |
+| `submit_verification_input` | App-only tool: send the typed code and Enter to the bound process; return only the delivery state. |
+| `get_verification_input_status` | App-only read of the input-card state, including after reopening. |
 | `write_stdin` | Write to or poll a live process session returned by `exec_command`; requires both `session_id` and the owning `workspace_handle`. |
 | `apply_patch` | Apply a Codex-style patch inside an existing `workspace_handle`. |
 | `view_image` | Read and validate a bounded image inside an existing `workspace_handle`. |
@@ -124,6 +127,14 @@ When adding stateful features, choose an identity according to the feature's rea
 | `wait` | Resume a nested `exec` cell that yielded before completion. |
 
 Normal repository inspection, search, Git, builds, tests, and diagnostics should usually go through `exec_command`.
+
+### Verification input card
+
+When a running interactive command pauses for a verification code, call Direct `request_verification_input({workspace_handle, session_id, label?})`. The user enters the code **in its MCP App card, not in chat**. The card calls App-only `submit_verification_input({request_id, value})` through `tools/call`. Controller sends the input plus Enter to the already running Worker process session (CR for PTY, LF for pipes), then the card returns only delivery state and a code-free conversation continuation. The model can poll the original session through nested `ccm.write_stdin`.
+
+The submit/status tools have `ui.visibility=['app']` and are not ordinary model-facing tools. Each card sends input at most once, including after remounts and duplicate clicks. Controller retains only routing metadata in memory for up to four hours, never the entered value. CCM does not write the value into its own persisted logs, approval receipts, widgetState, model context, or follow-up messages; the target program's own logging behavior remains outside this contract. A two-minute transient in-memory echo mask also scrubs the exact entered value from later ordinary process output; the mask expires even without further polling. An uncertain delivery is not retried automatically.
+
+This is a **live process stdin** feature, not a general-purpose website form filler or a model-readable code mailbox. An exited session cannot receive input. MCP App calls still traverse the ChatGPT Host and may be filtered there: App-only routing avoids model-generated code arguments but cannot guarantee Host acceptance. No new public endpoint, long-term secret store, or external service is required. Refresh CCM tools in ChatGPT after deploying the new Direct tool.
 
 ### Core deferred capabilities
 

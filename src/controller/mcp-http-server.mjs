@@ -25,6 +25,10 @@ import {
   WORKSPACE_HANDLE_UI_HTML,
   WORKSPACE_HANDLE_UI_URI,
 } from '../ui/workspace-handle-app.mjs';
+import {
+  VERIFICATION_INPUT_UI_HTML,
+  VERIFICATION_INPUT_UI_URI,
+} from '../ui/verification-input-app.mjs';
 
 function createProtocolServer(
   toolRegistry,
@@ -52,6 +56,7 @@ function createProtocolServer(
       'CCM is a Codex-compatible execution harness.',
       'Always reuse an existing workspace_handle for the target workspace; it is not an environment_id, workspace_id, or conversation context. Call select_workspace only if no usable handle exists AND the user explicitly requests workspace entry. Call register_workspace only if the user explicitly requests workspace registration and no usable handle exists for that project. Reading, inspecting, searching, editing, or working on a project (including saying "read the workspace") does not authorize entry or registration. Never initiate workspace-entry approval implicitly.',
       'Use exec_command for ordinary shell/repository work. When a live process only needs polling and no stdin bytes are being written, invoke ccm.write_stdin through exec from the first poll, reusing the exact workspace_handle and session_id returned by exec_command. CCM rejects top-level Direct empty write_stdin polls before they reach the process session or Worker; keep the top-level Direct write_stdin path only for real non-empty interactive/TTY stdin writes. If an empty nested poll is blocked by a Host/tool-call failure before CCM returns a structured result, retry the same exec -> ccm.write_stdin route at most twice; do not fall back to Direct empty polling or create a replacement session.',
+      'When a live CCM process prompts for a verification code, prefer the Direct request_verification_input tool using the exact workspace_handle and session_id. The user enters the code into its MCP App card, which submits it through an App-only tool and sends only a status message back into model context. Do not ask the user to paste the code into chat and do not transmit the code through model-generated command or write_stdin arguments. Continue the same session after the card completes; client/Host tool-call filtering is outside CCM control.',
       'Use tool_search to discover list_projects, then invoke it through exec to inspect connected environments and registered projects. Omit environment_id to inspect every connected environment; pass all=true only when existing projectless workspaces also need to be listed.',
       'Use tool_search to discover deferred capabilities without expanding the top-level MCP schema.',
       'To deregister one registered project, discover deferred ccm.unregister_workspace and invoke it through exec with environment_id and workspace_id. It always returns a frozen one-shot approval request, including on full-access Workers: present request_approval with its approval_id and never bypass it. Successful approval revokes previous workspace handles, but never deletes project directories/files or forcibly stops existing OS processes.',
@@ -161,6 +166,24 @@ function createProtocolServer(
         uri: WORKSPACE_HANDLE_UI_URI,
         mimeType: 'text/html;profile=mcp-app',
         text: WORKSPACE_HANDLE_UI_HTML,
+        _meta: { ui: { prefersBorder: true } },
+      }],
+    }),
+  );
+
+  server.registerResource(
+    'ccm-verification-input-ui',
+    VERIFICATION_INPUT_UI_URI,
+    {
+      title: 'CCM verification input',
+      description: 'User-entered verification input delivered to a live CCM session.',
+      mimeType: 'text/html;profile=mcp-app',
+    },
+    async () => ({
+      contents: [{
+        uri: VERIFICATION_INPUT_UI_URI,
+        mimeType: 'text/html;profile=mcp-app',
+        text: VERIFICATION_INPUT_UI_HTML,
         _meta: { ui: { prefersBorder: true } },
       }],
     }),

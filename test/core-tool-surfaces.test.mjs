@@ -195,17 +195,27 @@ test('core tool surface separates successful workspace handle rendering from app
     'apply_patch',
     'exec_command',
     'get_approval_status',
+    'get_verification_input_status',
     'register_workspace',
     'request_approval',
+    'request_verification_input',
     'resolve_pending_action',
     'select_workspace',
     'show_workspace_handle',
+    'submit_verification_input',
     'view_image',
     'write_stdin',
   ]);
   assert.deepEqual(
     registry.get('resolve_pending_action').mcpMeta.ui.visibility,
     ['app'],
+  );
+  for (const name of ['get_verification_input_status', 'submit_verification_input']) {
+    assert.deepEqual(registry.get(name).mcpMeta.ui.visibility, ['app']);
+  }
+  assert.equal(
+    registry.get('request_verification_input').mcpMeta.ui.resourceUri,
+    'ui://ccm/verification-input-v1.html',
   );
   assert.match(
     registry.get('list_projects').description,
@@ -469,11 +479,14 @@ test('core tool surface separates successful workspace handle rendering from app
         'exec',
         'exec_command',
         'get_approval_status',
+        'get_verification_input_status',
         'register_workspace',
         'request_approval',
+        'request_verification_input',
         'resolve_pending_action',
         'select_workspace',
         'show_workspace_handle',
+        'submit_verification_input',
         'tool_search',
         'view_image',
         'wait',

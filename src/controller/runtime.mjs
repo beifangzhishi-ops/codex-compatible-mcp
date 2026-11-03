@@ -18,6 +18,7 @@ import { WorkerQuarantinePolicy } from './worker-quarantine-policy.mjs';
 import { ControlledRestart } from './controlled-restart.mjs';
 import { TransferTaskManager } from './transfer-task-manager.mjs';
 import { ApprovalReceiptStore } from './approval-receipt-store.mjs';
+import { VerificationInputManager } from './verification-input-manager.mjs';
 
 const installRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -83,6 +84,8 @@ export function createControllerRuntime(options = {}) {
     trustedPackageScriptStore,
     audit,
   });
+  const verificationInputManager = options.verificationInputManager ||
+    new VerificationInputManager({ processManager });
   const fileService = options.fileService || new RemoteFileService({
     environmentRegistry,
     workerHub,
@@ -124,6 +127,7 @@ export function createControllerRuntime(options = {}) {
     audit,
     workspaceHandleManager,
     processManager,
+    verificationInputManager,
     fileService,
     transferTaskManager,
     fileTransferStore,
@@ -141,6 +145,7 @@ export function createControllerRuntime(options = {}) {
     },
     async close() {
       try {
+        verificationInputManager.close();
         await transferTaskManager.close();
         await processManager.close();
         fileTransferStore.close();

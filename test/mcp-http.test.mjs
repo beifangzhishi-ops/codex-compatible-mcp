@@ -168,12 +168,15 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       'exec',
       'exec_command',
       'get_approval_status',
+      'get_verification_input_status',
       'publish_worker_file',
       'register_workspace',
       'request_approval',
+      'request_verification_input',
       'resolve_pending_action',
       'select_workspace',
       'show_workspace_handle',
+      'submit_verification_input',
       'tool_search',
       'view_image',
       'wait',
@@ -204,6 +207,17 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
         ?._meta?.ui?.visibility,
       ['app'],
     );
+    for (const name of ['get_verification_input_status', 'submit_verification_input']) {
+      assert.deepEqual(
+        listed.tools.find((tool) => tool.name === name)?._meta?.ui?.visibility,
+        ['app'],
+      );
+    }
+    assert.equal(
+      listed.tools.find((tool) => tool.name === 'request_verification_input')
+        ?._meta?.ui?.resourceUri,
+      'ui://ccm/verification-input-v1.html',
+    );
     const approvalTool = listed.tools.find(
       (tool) => tool.name === 'request_approval',
     );
@@ -220,6 +234,10 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(handleTool?._meta?.ui?.resourceUri, WORKSPACE_HANDLE_UI_URI);
     assert.equal(handleTool?._meta?.['openai/outputTemplate'], WORKSPACE_HANDLE_UI_URI);
     const keyResource = await client.readResource({ uri: WORKSPACE_HANDLE_UI_URI });
+    const inputResource = await client.readResource({
+      uri: 'ui://ccm/verification-input-v1.html',
+    });
+    assert.match(inputResource.contents[0].text, /submit_verification_input/);
     assert.equal(keyResource.contents[0].text, WORKSPACE_HANDLE_UI_HTML);
     assert.equal(listed.tools.some((tool) => tool.name === 'list_projects'), false);
     assert.equal(listed.tools.some((tool) => tool.name === 'send_file'), false);
