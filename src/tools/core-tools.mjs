@@ -565,7 +565,7 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'create_projectless_handle',
     provider: 'ccm-core',
-    surfaces: { deferred: true, codeMode: true },
+    surfaces: { direct: true, codeMode: true },
     tags: ['workspace', 'projectless', 'context', 'environment'],
     supportsParallel: true,
     description: [
@@ -593,7 +593,7 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'select_workspace',
     provider: 'ccm-core',
-    surfaces: { direct: true, codeMode: true },
+    surfaces: { deferred: true, codeMode: true },
     tags: ['workspace', 'project', 'approval'],
     description: [
       'Enter one registered workspace. Full-access environments return the workspace_handle directly; restricted environments return a frozen approval request.',
@@ -656,7 +656,7 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'register_workspace',
     provider: 'ccm-core',
-    surfaces: { direct: true, codeMode: true },
+    surfaces: { deferred: true, codeMode: true },
     tags: ['workspace', 'project', 'approval', 'register'],
     description: [
       'Register and enter one exact project directory. Full-access environments return the workspace_handle directly; restricted environments return a frozen approval request.',

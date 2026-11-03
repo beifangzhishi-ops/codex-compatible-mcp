@@ -120,11 +120,15 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     );
     assert.match(
       client.getInstructions(),
-      /Call select_workspace only if no usable handle exists AND the user explicitly requests workspace entry/i,
+      /Discover deferred select_workspace through tool_search and invoke it through exec only if no usable handle exists AND the user explicitly requests workspace entry/i,
     );
     assert.match(
       client.getInstructions(),
-      /Call register_workspace only if the user explicitly requests workspace registration and no usable handle exists/i,
+      /Discover deferred register_workspace through tool_search and invoke it through exec only if the user explicitly requests workspace registration and no usable handle exists/i,
+    );
+    assert.match(
+      client.getInstructions(),
+      /call the Direct create_projectless_handle tool/i,
     );
     assert.match(
       client.getInstructions(),
@@ -165,16 +169,15 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const names = listed.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, [
       'apply_patch',
+      'create_projectless_handle',
       'exec',
       'exec_command',
       'get_approval_status',
       'get_verification_input_status',
       'publish_worker_file',
-      'register_workspace',
       'request_approval',
       'request_verification_input',
       'resolve_pending_action',
-      'select_workspace',
       'show_workspace_handle',
       'submit_verification_input',
       'tool_search',
@@ -226,9 +229,14 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(publishedFileUiTool?._meta?.ui?.resourceUri, PUBLISHED_FILE_UI_URI);
     assert.equal(publishedFileUiTool?._meta?.['openai/outputTemplate'], PUBLISHED_FILE_UI_URI);
     for (const name of ['select_workspace', 'register_workspace']) {
-      const tool = listed.tools.find((entry) => entry.name === name);
-      assert.equal(tool?._meta?.ui?.resourceUri, undefined);
-      assert.equal(tool?._meta?.['openai/outputTemplate'], undefined);
+      assert.equal(listed.tools.some((entry) => entry.name === name), false);
+      const found = await client.callTool({
+        name: 'tool_search',
+        arguments: { query: name, limit: 5 },
+      });
+      const deferred = found.structuredContent.tools.find((entry) => entry.name === name);
+      assert.ok(deferred, name + ' must be discoverable');
+      assert.deepEqual(deferred.surfaces, ['deferred', 'code_mode']);
     }
     const handleTool = listed.tools.find((entry) => entry.name === 'show_workspace_handle');
     assert.equal(handleTool?._meta?.ui?.resourceUri, WORKSPACE_HANDLE_UI_URI);
@@ -363,19 +371,11 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(fileResource.contents[0].text, /openExternal/);
 
     const projectless = await client.callTool({
-      name: 'exec',
-      arguments: {
-        calls: [{
-          tool: 'ccm.create_projectless_handle',
-          arguments: {},
-        }],
-        yield_time_ms: 1000,
-      },
+      name: 'create_projectless_handle',
+      arguments: {},
     });
     assert.equal(projectless.isError, undefined);
-    assert.equal(projectless.structuredContent.state, 'completed');
-    const projectlessResult =
-      projectless.structuredContent.calls[0].result.structured_content;
+    const projectlessResult = projectless.structuredContent;
     const workspaceHandle = projectlessResult.workspace_handle;
     const workspaceRoot = projectlessResult.workspace_root;
     assert.equal(projectlessResult.workspace_kind, 'projectless');

@@ -193,14 +193,13 @@ test('core tool surface separates successful workspace handle rendering from app
   const direct = registry.listDirect().map((tool) => tool.name).sort();
   assert.deepEqual(direct, [
     'apply_patch',
+    'create_projectless_handle',
     'exec_command',
     'get_approval_status',
     'get_verification_input_status',
-    'register_workspace',
     'request_approval',
     'request_verification_input',
     'resolve_pending_action',
-    'select_workspace',
     'show_workspace_handle',
     'submit_verification_input',
     'view_image',
@@ -301,7 +300,8 @@ test('core tool surface separates successful workspace handle rendering from app
 
   for (const name of [
     'list_projects',
-    'create_projectless_handle',
+    'select_workspace',
+    'register_workspace',
   ]) {
     const tool = registry.get(name);
     assert.equal(tool.surfaces.direct, false, name + ' should not be direct');
@@ -310,11 +310,15 @@ test('core tool surface separates successful workspace handle rendering from app
   }
   for (const name of ['select_workspace', 'register_workspace']) {
     const tool = registry.get(name);
-    assert.equal(tool.surfaces.direct, true);
-    assert.equal(tool.surfaces.deferred, false);
+    assert.equal(tool.surfaces.direct, false);
+    assert.equal(tool.surfaces.deferred, true);
     assert.equal(tool.surfaces.codeMode, true);
     assert.equal(tool.mcpMeta?.ui?.resourceUri, undefined, name + ' must not render an empty card before approval');
   }
+  const projectlessTool = registry.get('create_projectless_handle');
+  assert.equal(projectlessTool.surfaces.direct, true);
+  assert.equal(projectlessTool.surfaces.deferred, false);
+  assert.equal(projectlessTool.surfaces.codeMode, true);
   const showHandle = registry.get('show_workspace_handle');
   assert.equal(showHandle.surfaces.direct, true);
   assert.equal(showHandle.surfaces.codeMode, false);
@@ -476,15 +480,14 @@ test('core tool surface separates successful workspace handle rendering from app
       registry.listDirect().map((tool) => tool.name).sort(),
       [
         'apply_patch',
+        'create_projectless_handle',
         'exec',
         'exec_command',
         'get_approval_status',
         'get_verification_input_status',
-        'register_workspace',
         'request_approval',
         'request_verification_input',
         'resolve_pending_action',
-        'select_workspace',
         'show_workspace_handle',
         'submit_verification_input',
         'tool_search',
@@ -495,14 +498,22 @@ test('core tool surface separates successful workspace handle rendering from app
     );
 
     const search = await registry.get('tool_search').handler({
-      query: 'projectless workspace',
+      query: 'select_workspace',
       limit: 5,
     });
     assert.ok(
       search.structuredContent.tools.some(
-        (tool) => tool.qualified_name === 'ccm.create_projectless_handle',
+        (tool) => tool.qualified_name === 'ccm.select_workspace',
       ),
     );
+    const registerSearch = await registry.get('tool_search').handler({
+      query: 'register_workspace',
+      limit: 5,
+    });
+    assert.ok(registerSearch.structuredContent.tools.some(
+      (tool) => tool.qualified_name === 'ccm.register_workspace',
+    ));
+    assert.equal(registry.searchDeferred('create_projectless_handle').length, 0);
 
     const projectSearch = await registry.get('tool_search').handler({
       query: 'list projects',
