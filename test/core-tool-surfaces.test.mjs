@@ -193,7 +193,6 @@ test('core tool surface separates successful workspace handle rendering from app
   const direct = registry.listDirect().map((tool) => tool.name).sort();
   assert.deepEqual(direct, [
     'apply_patch',
-    'claim_web_unlock',
     'create_projectless_handle',
     'exec_command',
     'get_approval_status',
@@ -206,6 +205,9 @@ test('core tool surface separates successful workspace handle rendering from app
     'view_image',
     'write_stdin',
   ]);
+  assert.equal(registry.get('claim_full_access').surfaces.direct, false);
+  assert.equal(registry.get('claim_full_access').surfaces.deferred, true);
+  assert.equal(registry.get('claim_full_access').surfaces.codeMode, true);
   assert.deepEqual(
     registry.get('resolve_pending_action').mcpMeta.ui.visibility,
     ['app'],
@@ -481,7 +483,6 @@ test('core tool surface separates successful workspace handle rendering from app
       registry.listDirect().map((tool) => tool.name).sort(),
       [
         'apply_patch',
-        'claim_web_unlock',
         'create_projectless_handle',
         'exec',
         'exec_command',
@@ -515,6 +516,17 @@ test('core tool surface separates successful workspace handle rendering from app
     assert.ok(registerSearch.structuredContent.tools.some(
       (tool) => tool.qualified_name === 'ccm.register_workspace',
     ));
+    const grantSearch = await registry.get('tool_search').handler({
+      query: 'claim_full_access',
+      limit: 5,
+    });
+    assert.ok(grantSearch.structuredContent.tools.some(
+      (tool) => tool.qualified_name === 'ccm.claim_full_access' && tool.exposure === 'Deferred',
+    ));
+    const grantClaim = await registry.get('exec').handler({
+      calls: [{ tool: 'ccm.claim_full_access', arguments: {} }],
+    });
+    assert.equal(grantClaim.structuredContent.calls[0].result.structured_content.claimed, false);
     assert.equal(registry.searchDeferred('create_projectless_handle').length, 0);
 
     const projectSearch = await registry.get('tool_search').handler({

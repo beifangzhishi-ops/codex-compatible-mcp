@@ -387,9 +387,9 @@ function toolError(error) {
 
 export function registerCoreTools(registry, runtime) {
   registry.register({
-    name: 'claim_web_unlock',
+    name: 'claim_full_access',
     provider: 'ccm-core',
-    surfaces: { direct: true, codeMode: true },
+    surfaces: { deferred: true, codeMode: true },
     tags: ['approval', 'full-access', 'unlock'],
     description: 'Claim the one pending owner-issued CCM web unlock exactly once. No arguments. The returned full_access_grant_id must be supplied explicitly with subsequent exec_command, apply_patch, or workspace entry/registration calls; it works across all connected and future Workers until expiry. Claiming does not extend the unlock or change permanent Worker configuration.',
     inputSchema: {},
@@ -837,7 +837,7 @@ export function registerCoreTools(registry, runtime) {
     supportsParallel: true,
     description: [
       'Runs a command using plain pipes by default; set tty=true to allocate a PTY. Returns output or a session ID for ongoing interaction.',
-      'When the owner has unlocked CCM through the web page and you have claimed it once through claim_web_unlock, include full_access_grant_id in each command that should run with timed Full Access. This bypasses the sandbox for that dispatch on any Worker until expiration, without persistent shell rules or changes to Worker configuration. Missing grants continue with existing sandbox/approval behavior; unknown or expired grants fail closed.',
+      'When the owner has unlocked CCM through the web page and you have claimed it once through deferred ccm.claim_full_access using tool_search -> exec, include full_access_grant_id in each command that should run with timed Full Access. This bypasses the sandbox for that dispatch on any Worker until expiration, without persistent shell rules or changes to Worker configuration. Missing grants continue with existing sandbox/approval behavior; unknown or expired grants fail closed.',
       'workspace_handle is required and determines the Worker, cwd/session ownership, and restricted-write root. It does not narrow filesystem reads below the environment\'s sandbox_read_scope. Do not pass or infer a separate environment for this command.',
       'Reuse a supplied workspace_handle directly. Without one, create_projectless_handle may support projectless work and permitted absolute-path reads; do not select/register merely to inspect a project. For registered-project writes without a handle, ask the user for a handle or explicit entry instruction. Never bypass a pending explicit workspace approval.',
       'In workspace-write environments, normal remote Git commands such as git clone/fetch/pull/push/ls-remote are handled automatically and do not require sandbox_permissions=require_escalated. Run remote Git as Git-only shell commands so CCM can recognize the trusted path.',
@@ -1056,7 +1056,7 @@ export function registerCoreTools(registry, runtime) {
     environmentRequirements: { capabilities: ['applyPatch'] },
     description: [
       'Apply a Codex-style Begin/End Patch inside an existing workspace_handle.',
-      'For timed Full Access, pass the full_access_grant_id obtained from claim_web_unlock. Otherwise the original Worker write boundary remains in force.',
+      'For timed Full Access, pass the full_access_grant_id obtained from deferred ccm.claim_full_access. Otherwise the original Worker write boundary remains in force.',
       'Reuse the existing workspace_handle. For genuinely projectless edits, use create_projectless_handle; for registered-project edits without a handle, request the handle or an explicit workspace-entry instruction. Never select/register implicitly or bypass pending approval.',
     ].join('\n\n'),
     inputSchema: {

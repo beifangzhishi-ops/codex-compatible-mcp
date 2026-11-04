@@ -91,7 +91,7 @@ CCM keeps its original per-Worker `CCM_PERMISSION_PROFILE` (normally `workspace-
 
 After enrollment, visit the CCM HTTPS origin's **`/ccm/unlock`** page. The browser pairs once with a phone TOTP code (replay-protected, rate-limited); subsequent visits use its secure HttpOnly pairing cookie. The owner selects 1 minute, 5 minutes, 30 minutes, 1 hour, 6 hours, 1 day, or 7 days and clicks **临时解锁 CCM**. The Controller keeps one pending grant for at most five minutes. Repeated clicks while pending **never create a new grant, overwrite the old one, or extend the claim deadline**, and the webpage shows the remaining claim window. If the grant is unclaimed after five minutes it expires; another click then issues a new pending grant.
 
-Once the owner reports an unlock, the model calls Direct `claim_web_unlock()` exactly once. The reply contains the `full_access_grant_id` and expiration timestamp. Supply that ID explicitly on `exec_command`, `apply_patch`, and explicitly requested deferred `select_workspace` / `register_workspace` calls to use the granted permission. The claim removes the webpage's pending state **without revoking the claimed grant**. Unrecognized/expired IDs fail closed. Other sessions and calls without the ID continue under their original policies; a model must not infer authorization just because another caller has unlocked CCM. The grant lives only in Controller memory and is revoked on Controller restart. The model must not send any TOTP seed or one-time verification code to an ordinary CCM tool.
+Once the owner reports an unlock, the model discovers Deferred `ccm.claim_full_access` through `tool_search` and invokes it through `exec` with no arguments exactly once. The reply contains the `full_access_grant_id` and expiration timestamp. Supply that ID explicitly on `exec_command`, `apply_patch`, and explicitly requested deferred `select_workspace` / `register_workspace` calls to use the granted permission. The claim removes the webpage's pending state **without revoking the claimed grant**. Unrecognized/expired IDs fail closed. Other sessions and calls without the ID continue under their original policies; a model must not infer authorization just because another caller has unlocked CCM. The grant lives only in Controller memory and is revoked on Controller restart. The model must not send any TOTP seed or one-time verification code to an ordinary CCM tool.
 
 The public `/ccm/unlock` path is forwarded through Tailscale Funnel to the existing HTTPS OAuth sidecar; the internal sidecar-to-Controller `/ccm/internal/web-unlock` bridge stays loopback-only, uses the existing ignored CCM approval secret, and must never be added to public Funnel rules. The browser has a one-time CSRF cookie and form token on every page load and uses `Secure; HttpOnly; SameSite=Lax` pairing cookies. Local browser tokens are saved as hashes under ignored `.state/`. Access to the Windows account, the sidecar credentials, and the Controller's local bridge remains a trusted administrative boundary; timed Full Access is an owner-controlled convenience guard, not a separate OS administrator login.
 
@@ -122,7 +122,6 @@ When adding stateful features, choose an identity according to the feature's rea
 
 | Tool | Purpose |
 | --- | --- |
-| `claim_web_unlock` | Claim one owner-issued pending global Full Access grant (one claim within five minutes), then pass its returned ID to privileged operations. |
 | `exec_command` | Run a native shell command inside an existing `workspace_handle`. |
 | `create_projectless_handle` | Create a projectless execution handle for temporary tasks without a suitable existing handle; no UI attached. |
 | `show_workspace_handle` | Display a validated registered handle in a copyable card after full-access entry; read-only, Direct only. |
@@ -154,6 +153,7 @@ These are core CCM operations but intentionally stay off the top-level MCP schem
 
 | Capability | Purpose |
 | --- | --- |
+| `ccm.claim_full_access` | Claim one owner-issued pending global Full Access grant within five minutes of the webpage unlock; pass the returned `full_access_grant_id` explicitly to privileged operations. |
 | `ccm.list_projects` | Show connected execution environments, their registered projects, capabilities, and coarse effective filesystem read/write scope. Omit `environment_id` to inspect all connected Workers; use `all=true` only to include projectless workspaces separately. |
 | `ccm.select_workspace` | Enter an existing registered workspace only on explicit request and without a usable handle; returns a handle or frozen approval request. |
 | `ccm.register_workspace` | Register/enter a project path (optionally create it) only on explicit request; returns a handle or frozen approval request. |

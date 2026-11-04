@@ -153,6 +153,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(client.getInstructions(), /truncated.*next_start_line.*ordered range reads/i);
     assert.match(client.getInstructions(), /later plan_read calls used during implementation remain lifecycle-neutral/i);
     assert.match(client.getInstructions(), /does not maintain a Plan-Mode state machine/i);
+    assert.match(client.getInstructions(), /discover deferred ccm\.claim_full_access with tool_search and call it through exec/i);
     assert.match(
       client.getInstructions(),
       /live process only needs polling.*invoke ccm\.write_stdin through exec from the first poll/i,
@@ -169,7 +170,6 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const names = listed.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, [
       'apply_patch',
-      'claim_web_unlock',
       'create_projectless_handle',
       'exec',
       'exec_command',
