@@ -1,4 +1,5 @@
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { EnvironmentRegistry } from '../runtime/environment-registry.mjs';
 import { RemoteProcessManager } from '../runtime/remote-process-manager.mjs';
@@ -19,6 +20,7 @@ import { ControlledRestart } from './controlled-restart.mjs';
 import { TransferTaskManager } from './transfer-task-manager.mjs';
 import { ApprovalReceiptStore } from './approval-receipt-store.mjs';
 import { VerificationInputManager } from './verification-input-manager.mjs';
+import { WebFullAccess } from './web-full-access.mjs';
 
 const installRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -57,6 +59,20 @@ export function createControllerRuntime(options = {}) {
     ttlMs: process.env.CCM_APPROVAL_TTL_MS,
     receiptStore: approvalReceiptStore,
   });
+  const enrollmentMarker = path.join(
+    process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'),
+    'CCM', 'secrets', 'confirmed.flag',
+  );
+  const webFullAccess = options.webFullAccess || new WebFullAccess({
+    audit,
+    enrollmentRevision: () => {
+      try { return fs.statSync(enrollmentMarker).mtimeMs; }
+      catch (error) {
+        if (error.code === 'ENOENT') return null;
+        throw error;
+      }
+    },
+  });
   const execPolicyStore = options.execPolicyStore || new ExecPolicyStore({
     stateFile: options.execPolicyStateFile ||
       defaultControllerStateFile('exec-policy.json'),
@@ -83,6 +99,7 @@ export function createControllerRuntime(options = {}) {
     execPolicyStore,
     trustedPackageScriptStore,
     audit,
+    webFullAccess,
   });
   const verificationInputManager = options.verificationInputManager ||
     new VerificationInputManager({ processManager });
@@ -90,6 +107,7 @@ export function createControllerRuntime(options = {}) {
     environmentRegistry,
     workerHub,
     workspaceHandleManager,
+    webFullAccess,
   });
   const transferTaskManager = options.transferTaskManager || new TransferTaskManager({
     workspaceHandleManager,
@@ -122,6 +140,7 @@ export function createControllerRuntime(options = {}) {
     environmentRegistry,
     workerHub,
     approvalManager,
+    webFullAccess,
     execPolicyStore,
     trustedPackageScriptStore,
     audit,

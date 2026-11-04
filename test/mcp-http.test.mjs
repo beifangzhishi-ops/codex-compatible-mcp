@@ -169,6 +169,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const names = listed.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, [
       'apply_patch',
+      'claim_web_unlock',
       'create_projectless_handle',
       'exec',
       'exec_command',

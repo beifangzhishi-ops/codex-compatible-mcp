@@ -1,4 +1,9 @@
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { constantTimeEqual } from '../../ccm-sidecar/oauth.mjs';
+import { parseEnvFile } from '../../ccm-sidecar/config.mjs';
 import {
   PUBLISHED_FILE_UI_HTML,
   PUBLISHED_FILE_UI_URI,
@@ -57,6 +62,7 @@ function createProtocolServer(
       'Always reuse an existing workspace_handle for the target workspace; it is not an environment_id, workspace_id, or conversation context. Discover deferred select_workspace through tool_search and invoke it through exec only if no usable handle exists AND the user explicitly requests workspace entry. Discover deferred register_workspace through tool_search and invoke it through exec only if the user explicitly requests workspace registration and no usable handle exists for that project. Reading, inspecting, searching, editing, or working on a project (including saying "read the workspace") does not authorize entry or registration. Never initiate workspace-entry approval implicitly.',
       'Use exec_command for ordinary shell/repository work. When a live process only needs polling and no stdin bytes are being written, invoke ccm.write_stdin through exec from the first poll, reusing the exact workspace_handle and session_id returned by exec_command. CCM rejects top-level Direct empty write_stdin polls before they reach the process session or Worker; keep the top-level Direct write_stdin path only for real non-empty interactive/TTY stdin writes. If an empty nested poll is blocked by a Host/tool-call failure before CCM returns a structured result, retry the same exec -> ccm.write_stdin route at most twice; do not fall back to Direct empty polling or create a replacement session.',
       'When a live CCM process prompts for a verification code, prefer the Direct request_verification_input tool using the exact workspace_handle and session_id. The user enters the code into its MCP App card, which submits it through an App-only tool and sends only a status message back into model context. Do not ask the user to paste the code into chat and do not transmit the code through model-generated command or write_stdin arguments. Continue the same session after the card completes; client/Host tool-call filtering is outside CCM control.',
+      'Owner-issued timed CCM Full Access uses the separate /ccm/unlock browser page: the owner pairs a browser once using a phone TOTP code, chooses a duration and clicks unlock. Once the owner says it is unlocked, call the Direct claim_web_unlock with no arguments exactly once. Pass its returned full_access_grant_id to subsequent exec_command, apply_patch or explicitly requested select_workspace/register_workspace calls; the same grant works across all Workers, including new arrivals, until expiry. Never auto-claim or guess an ID, never expose the phone seed or TOTP to the model, and never treat the absence of a grant as authorization. Repeated web clicks while pending do not replace or extend the first unclaimed grant. Expiry forbids new Full Access operations but does not kill already-running processes. Unregister always requires its own approval.',
       'Use tool_search to discover list_projects, then invoke it through exec to inspect connected environments and registered projects. Omit environment_id to inspect every connected environment; pass all=true only when existing projectless workspaces also need to be listed.',
       'Use tool_search to discover deferred capabilities without expanding the top-level MCP schema.',
       'To deregister one registered project, discover deferred ccm.unregister_workspace and invoke it through exec with environment_id and workspace_id. It always returns a frozen one-shot approval request, including on full-access Workers: present request_approval with its approval_id and never bypass it. Successful approval revokes previous workspace handles, but never deletes project directories/files or forcibly stops existing OS processes.',
@@ -224,6 +230,7 @@ export function createHttpController({
   runtime,
   iconPath = CCM_ICON_PATH,
   healthProvider = null,
+  unlockBridgeSecret = null,
   port = Number(process.env.CCM_PORT || 18209),
   host = process.env.CCM_HOST || '127.0.0.1',
   mcpPath = process.env.CCM_MCP_PATH || '/ccm/mcp',
@@ -235,6 +242,42 @@ export function createHttpController({
   ),
 } = {}) {
   const app = createMcpExpressApp();
+  // The sidecar and Controller are independent local processes. The bridge is
+  // loopback-only and authenticated with their existing ignored OAuth secret.
+  // This route is deliberately not exposed by the Funnel allowlist.
+  const resolveBridgeSecret = () => {
+    if (unlockBridgeSecret != null) return unlockBridgeSecret;
+    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+    const vars = parseEnvFile(fs.readFileSync(path.join(root, 'config', 'ccm.env'), 'utf8'));
+    return vars.CCM_APPROVAL_SECRET ||
+      fs.readFileSync(path.resolve(root, vars.CCM_APPROVAL_SECRET_FILE ||
+        '.state/ccm-approval-secret.txt'), 'utf8').trim();
+  };
+  app.post('/ccm/internal/web-unlock', (req, res) => {
+    const remote = req.socket.remoteAddress;
+    if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remote)) {
+      res.status(403).json({ error: 'forbidden' });
+      return;
+    }
+    try {
+      const provided = req.headers['x-ccm-unlock-bridge'];
+      if (typeof provided !== 'string' ||
+          !constantTimeEqual(provided, resolveBridgeSecret())) {
+        res.status(403).json({ error: 'forbidden' });
+        return;
+      }
+      res.setHeader('Cache-Control', 'no-store');
+      if (req.body?.action === 'status') {
+        res.json(runtime.webFullAccess.status());
+      } else if (req.body?.action === 'issue') {
+        res.json(runtime.webFullAccess.issue(req.body.duration_seconds));
+      } else {
+        res.status(400).json({ error: 'invalid_action' });
+      }
+    } catch {
+      res.status(503).json({ error: 'unlock_unavailable' });
+    }
+  });
   // These maps are keyed by the MCP Streamable HTTP protocol/transport session.
   // Mcp-Session-Id is not a host conversation id, workspace_handle, process
   // session_id, approval_id, or durable plan/task identity. Do not persist

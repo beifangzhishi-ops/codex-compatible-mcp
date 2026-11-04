@@ -1,11 +1,12 @@
 export class RemoteFileService {
-  constructor({ environmentRegistry, workerHub, workspaceHandleManager = null }) {
+  constructor({ environmentRegistry, workerHub, workspaceHandleManager = null, webFullAccess = null }) {
     if (!environmentRegistry || !workerHub) {
       throw new Error('RemoteFileService requires environmentRegistry and workerHub.');
     }
     this.environmentRegistry = environmentRegistry;
     this.workerHub = workerHub;
     this.workspaceHandleManager = workspaceHandleManager;
+    this.webFullAccess = webFullAccess;
   }
 
   #resolveExecution(args) {
@@ -36,6 +37,7 @@ export class RemoteFileService {
   async applyPatch(args) {
     const execution = this.#resolveExecution(args);
     const environment = execution.environment;
+    const timedFullAccess = this.webFullAccess?.authorize(args.full_access_grant_id) || false;
     if (!environment.capabilities?.applyPatch) {
       throw new Error(
         'Environment does not support apply_patch: ' + environment.id,
@@ -47,9 +49,11 @@ export class RemoteFileService {
       environment_id: environment.id,
       workspace_id: execution.workspaceId,
       expected_workspace_root: execution.workspaceHandle.workspace_root,
+      ...(timedFullAccess ? { sandbox_permissions: 'approved_escalated' } : {}),
     };
     delete forwarded.workspace_handle;
     delete forwarded.workspace_scoped;
+    delete forwarded.full_access_grant_id;
     const result = await this.workerHub.call(
       environment.id,
       'apply_patch',

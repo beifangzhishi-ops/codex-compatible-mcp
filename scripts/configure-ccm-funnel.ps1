@@ -3,6 +3,7 @@ param([switch]$Apply)
 $ErrorActionPreference='Stop'
 $port=18208
 $routes=@(
+  '/ccm/unlock',
   '/ccm/mcp',
   '/ccm/download',
   '/ccm/preview',

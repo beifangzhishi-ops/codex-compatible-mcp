@@ -4,6 +4,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CCM_ICON_PATH, CCM_ICON_ROUTE, readCcmIcon } from '../src/server-icon.mjs';
+import { CcmWebUnlock, WEB_UNLOCK_PATH } from './web-unlock.mjs';
 import { loadConfig } from './config.mjs';
 import {
   OAuthError,
@@ -1186,6 +1187,10 @@ async function handleProtectedMcp(request, response, runtime, url) {
 
 async function handleRequest(request, response, runtime) {
   const url = new URL(request.url || '/', 'http://127.0.0.1');
+  if (url.pathname === WEB_UNLOCK_PATH) {
+    await runtime.webUnlock.handleHttp(request, response, readBody);
+    return;
+  }
   if (url.pathname === CCM_ICON_ROUTE) {
     if (request.method !== 'GET') {
       response.writeHead(405, { Allow: 'GET' });
@@ -1298,6 +1303,7 @@ export function createCcmOAuthServer(options = {}) {
     upstreamUrl,
     downloadUpstreamPort: options.downloadUpstreamPort ?? 18209,
     approvalSecret,
+    webUnlock: options.webUnlock || new CcmWebUnlock({ secret: approvalSecret }),
     upstreamSession: null,
     registrationAttempts: new Map(),
     server: null,

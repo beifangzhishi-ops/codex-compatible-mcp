@@ -193,6 +193,7 @@ test('core tool surface separates successful workspace handle rendering from app
   const direct = registry.listDirect().map((tool) => tool.name).sort();
   assert.deepEqual(direct, [
     'apply_patch',
+    'claim_web_unlock',
     'create_projectless_handle',
     'exec_command',
     'get_approval_status',
@@ -480,6 +481,7 @@ test('core tool surface separates successful workspace handle rendering from app
       registry.listDirect().map((tool) => tool.name).sort(),
       [
         'apply_patch',
+        'claim_web_unlock',
         'create_projectless_handle',
         'exec',
         'exec_command',

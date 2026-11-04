@@ -50,7 +50,9 @@ export class NativeFileService {
       ? resolveWorkspaceRelativePath(environment.cwd, args.workdir, 'workdir')
       : args.workdir;
     return applyPatchToEnvironment({
-      environment,
+      environment: args.sandbox_permissions === 'approved_escalated'
+        ? { ...environment, permissionProfile: 'full-access' }
+        : environment,
       patch: args.patch,
       workdir,
     });

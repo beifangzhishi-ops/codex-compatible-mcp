@@ -37,6 +37,7 @@ export class RemoteProcessManager {
     workspaceHandleManager = null,
     execPolicyStore = null,
     trustedPackageScriptStore = null,
+    webFullAccess = null,
     audit = null,
   }) {
     if (!environmentRegistry || !workerHub) {
@@ -48,6 +49,7 @@ export class RemoteProcessManager {
     this.workspaceHandleManager = workspaceHandleManager;
     this.execPolicyStore = execPolicyStore;
     this.trustedPackageScriptStore = trustedPackageScriptStore;
+    this.webFullAccess = webFullAccess;
     this.audit = typeof audit === 'function' ? audit : null;
     this.sessions = new Map();
     this.nextSessionId = 1000;
@@ -407,12 +409,17 @@ export class RemoteProcessManager {
     };
     delete forwardedArgs.workspace_handle;
     delete forwardedArgs.prefix_rule;
+    delete forwardedArgs.full_access_grant_id;
     const requestedYieldMs = clampInitialExecYield(args.yield_time_ms);
     forwardedArgs = {
       ...forwardedArgs,
       yield_time_ms: requestedYieldMs,
     };
     const requestedEscalation = args.sandbox_permissions === 'require_escalated';
+    const timedFullAccess = this.webFullAccess?.authorize(args.full_access_grant_id) || false;
+    if (timedFullAccess && args.prefix_rule !== undefined) {
+      throw new Error('Persistent prefix rules cannot be saved through timed Full Access.');
+    }
     if (args.prefix_rule !== undefined && !requestedEscalation) {
       throw new Error(
         'prefix_rule is only valid with sandbox_permissions=require_escalated.',
@@ -460,6 +467,7 @@ export class RemoteProcessManager {
     const trustedPackageScript = Boolean(trustedPackageScriptRule);
     const wantsEscalation =
       requestedEscalation &&
+      !timedFullAccess &&
       !trustedGit &&
       !trustedNodeOrMixed &&
       !trustedTailscale &&
@@ -517,6 +525,19 @@ export class RemoteProcessManager {
         environment_id: environment.id,
         workspace_handle: workspaceHandle.workspace_handle,
         workspace_id: workspaceHandle.workspace_id,
+      });
+    }
+
+    if (timedFullAccess) {
+      forwardedArgs = {
+        ...forwardedArgs,
+        sandbox_permissions: 'approved_escalated',
+      };
+      delete forwardedArgs.justification;
+      this.#emit('web_full_access_dispatch', {
+        operation_id: operationId,
+        environment_id: environment.id,
+        workspace_handle: workspaceHandle.workspace_handle,
       });
     }
 
@@ -589,6 +610,9 @@ export class RemoteProcessManager {
     );
     let dispatch;
     try {
+      // A grant may expire while parsing/probing policy. Recheck immediately
+      // before dispatch; once started the OS process is allowed to finish.
+      if (timedFullAccess) this.webFullAccess.authorize(args.full_access_grant_id);
       this.#emit('exec_dispatch', {
         operation_id: operationId,
         environment_id: environment.id,
