@@ -6,7 +6,6 @@ import {
   DEFAULT_MAX_OUTPUT_TOKENS,
 } from './output-budget.mjs';
 import { resolvePermissionProfile } from './sandbox/sandbox-policy.mjs';
-import { resolveGitAwarePermissionProfile } from './sandbox/git-policy.mjs';
 import { resolveWorkspaceRelativePath } from './workspace-registry.mjs';
 
 const MIN_YIELD_TIME_MS = 250;
@@ -126,14 +125,7 @@ export class ProcessManager {
       environment,
       args.sandbox_permissions,
     );
-    const permissionProfile = resolveGitAwarePermissionProfile(
-      basePermissionProfile,
-      args.cmd,
-      {
-        shell: args.shell || environment.shell?.path || environment.shell?.type,
-        platform: environment.platform,
-      },
-    );
+    const permissionProfile = basePermissionProfile;
     const processId = this.#allocateProcessId();
     const requestedShell = args.shell ? { path: args.shell } : environment.shell;
 
@@ -150,7 +142,7 @@ export class ProcessManager {
       exitCode: null,
       signal: null,
       permissionProfile,
-      sandboxed: !['full-access', 'trusted-git'].includes(permissionProfile),
+      sandboxed: permissionProfile !== 'full-access',
       exitWaiters: new Set(),
       tty: Boolean(args.tty),
       child: null,

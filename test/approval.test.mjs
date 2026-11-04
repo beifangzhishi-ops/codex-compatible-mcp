@@ -731,7 +731,8 @@ test('RemoteProcessManager does not request approval for trusted remote Git', as
     assert.equal(result.approval_required, undefined);
     assert.equal(result.exit_code, 0);
     assert.equal(workerHub.calls.length, 1);
-    assert.equal(workerHub.calls[0].params.sandbox_permissions, 'use_default');
+    assert.equal(workerHub.calls[0].params.sandbox_permissions, 'approved_escalated');
+    assert.deepEqual(result.trusted_command_rule_ids, ['git-remote']);
     assert.equal(Object.hasOwn(workerHub.calls[0].params, 'approval_id'), false);
     assert.equal(Object.hasOwn(workerHub.calls[0].params, 'justification'), false);
   } finally {
@@ -758,7 +759,7 @@ test('RemoteProcessManager runs direct node --test through built-in Windows trus
       cmd: 'node --test test/approval.test.mjs',
     });
     assert.equal(result.exit_code, 0);
-    assert.equal(result.trusted_node_test, true);
+    assert.deepEqual(result.trusted_command_rule_ids, ['node-test']);
     assert.equal(workerHub.calls.length, 1);
     assert.equal(
       workerHub.calls[0].params.sandbox_permissions,
@@ -783,7 +784,7 @@ test('built-in node --test trust does not apply through an explicit cmd shell', 
       cmd: 'node --test test/approval.test.mjs',
       shell: 'cmd.exe',
     });
-    assert.equal(result.trusted_node_test, undefined);
+    assert.equal(result.trusted_command_rule_ids, undefined);
     assert.equal(workerHub.calls.length, 1);
     assert.equal(workerHub.calls[0].params.sandbox_permissions, undefined);
   } finally {
@@ -818,7 +819,7 @@ test('Tailscale runs through the installed path without CCM approval in PowerShe
         ...args,
       });
       assert.equal(result.exit_code, 0);
-      assert.equal(result.trusted_tailscale, true);
+      assert.deepEqual(result.trusted_command_rule_ids, ['tailscale']);
       const forwarded = workerHub.calls.at(-1).params;
       assert.equal(forwarded.sandbox_permissions, 'approved_escalated');
       assert.equal(
@@ -834,7 +835,7 @@ test('Tailscale runs through the installed path without CCM approval in PowerShe
   }
 });
 
-test('Tailscale compound shell denial returns scoped allowlist hint even with exit code zero', async () => {
+test('Tailscale with an untrusted segment returns the config hint when its pipe is denied', async () => {
   const workerHub = new FakeWorkerHub();
   workerHub.call = async () => ({
     chunk_id: 'fake',
@@ -854,20 +855,20 @@ test('Tailscale compound shell denial returns scoped allowlist hint even with ex
     });
     assert.equal(denied.exit_code, 0);
     assert.match(denied.output, /failed to connect to local tailscaled/);
-    assert.match(denied.output, /no-approval Tailscale allowlist/);
-    assert.match(denied.output, /separate calls/);
+    assert.match(denied.output, /config\/trusted-commands\.json/);
+    assert.doesNotMatch(denied.output, /separate calls/);
 
     const unrelated = await manager.execCommand({
       workspace_handle: '00000000-0000-4000-8000-000000000001',
       cmd: 'Write-Output something',
     });
-    assert.doesNotMatch(unrelated.output, /no-approval Tailscale allowlist/);
+    assert.doesNotMatch(unrelated.output, /config\/trusted-commands\.json/);
   } finally {
     await manager.close();
   }
 });
 
-test('Tailscale denial during write_stdin polling also includes the allowlist hint', async () => {
+test('Tailscale denial during write_stdin polling also includes the config hint', async () => {
   const workerHub = new FakeWorkerHub();
   workerHub.call = async (_environment, method) => method === 'exec_command'
     ? { chunk_id: 'fake', wall_time_seconds: 0.01, output: '', session_id: 456 }
@@ -894,7 +895,7 @@ test('Tailscale denial during write_stdin polling also includes the allowlist hi
       chars: '',
     });
     assert.equal(finished.exit_code, 0);
-    assert.match(finished.output, /no-approval Tailscale allowlist/);
+    assert.match(finished.output, /config\/trusted-commands\.json/);
   } finally {
     await manager.close();
   }

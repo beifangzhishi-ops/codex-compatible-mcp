@@ -1,14 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import {
-  isTrustedRemoteGitSegment,
-} from './sandbox/git-policy.mjs';
-import {
-  isTrustedNodeTestSegment,
-} from './sandbox/node-test-policy.mjs';
-import {
-  trustedTailscaleInvocation,
-  tailscaleSandboxDenialHint,
-} from './sandbox/tailscale-policy.mjs';
+  DEFAULT_TRUSTED_COMMANDS_FILE,
+  evaluateTrustedCommand,
+  loadTrustedCommands,
+  trustedCommandDenialHint,
+} from './sandbox/trusted-commands.mjs';
 import {
   effectiveShell,
   parseShellCommand,
@@ -37,6 +33,7 @@ export class RemoteProcessManager {
     workspaceHandleManager = null,
     execPolicyStore = null,
     trustedPackageScriptStore = null,
+    trustedCommandsFile = DEFAULT_TRUSTED_COMMANDS_FILE,
     webFullAccess = null,
     audit = null,
   }) {
@@ -49,6 +46,7 @@ export class RemoteProcessManager {
     this.workspaceHandleManager = workspaceHandleManager;
     this.execPolicyStore = execPolicyStore;
     this.trustedPackageScriptStore = trustedPackageScriptStore;
+    this.trustedCommandsFile = trustedCommandsFile;
     this.webFullAccess = webFullAccess;
     this.audit = typeof audit === 'function' ? audit : null;
     this.sessions = new Map();
@@ -88,7 +86,7 @@ export class RemoteProcessManager {
         workspaceHandle: workspaceHandle.workspace_handle,
         workspace: { ...workspaceHandle },
         operationId,
-        tailscaleHint: sessionHint,
+        trustedCommandHint: sessionHint,
         tty,
         verificationEchoes: [],
       });
@@ -121,8 +119,8 @@ export class RemoteProcessManager {
     };
   }
 
-  #addTailscaleDeniedHint(result, command, environment, trusted = false) {
-    const hint = tailscaleSandboxDenialHint({
+  #addTrustedCommandDeniedHint(result, command, environment, trusted = false) {
+    const hint = trustedCommandDenialHint({
       command, output: result?.output, environment, trusted,
     });
     if (!hint) return result;
@@ -275,31 +273,15 @@ export class RemoteProcessManager {
     };
   }
 
-  #matchEscalationSegments(
-    args,
-    workspaceHandle,
-    environment,
-    parsed,
-    {
-      allowBuiltInTrust = false,
-      trustedNodeShell = false,
-    } = {},
-  ) {
-    if (!parsed?.segments.length) return null;
+  #matchEscalationSegments(args, workspaceHandle, environment, parsed, snapshot) {
+    if (!parsed?.segments.length || parsed.operators.includes('|')) return null;
     const genericRules = [];
-    let usedBuiltIn = false;
     for (const segment of parsed.segments) {
-      if (allowBuiltInTrust && isTrustedRemoteGitSegment(segment.tokens, {
-        platform: environment.platform,
-      })) {
-        usedBuiltIn = true;
-        continue;
-      }
-      if (allowBuiltInTrust && trustedNodeShell &&
-          isTrustedNodeTestSegment(segment.tokens, {
-            platform: environment.platform,
-          })) {
-        usedBuiltIn = true;
+      const builtIn = snapshot && !snapshot.error &&
+        evaluateTrustedCommand(segment.source, args.shell, environment, { snapshot });
+      if (builtIn?.matched && builtIn.cmd === segment.source && !builtIn.shell) {
+        // Pinned targets must already be literal. Never elevate an alias in a
+        // mixed saved-prefix command without rewriting its actual executable.
         continue;
       }
       const rule = this.execPolicyStore?.matchSegment?.({
@@ -311,15 +293,12 @@ export class RemoteProcessManager {
       if (!rule) return null;
       genericRules.push(rule);
     }
-    if (!genericRules.length) return usedBuiltIn
-      ? { decision: 'allow', built_in_only: true, rules: [] }
-      : null;
+    if (!genericRules.length) return null;
     const unique = [...new Map(
       genericRules.map((rule) => [rule.rule_id, rule]),
     ).values()];
     return {
       decision: 'allow',
-      built_in_only: false,
       rule_id: unique[0].rule_id,
       rule_ids: unique.map((rule) => rule.rule_id),
       prefix_tokens: unique.length === 1
@@ -434,31 +413,16 @@ export class RemoteProcessManager {
         parsedCommand,
       );
     }
-    const shellKind = effectiveShell(args, environment);
     const windowsWorkspaceWrite =
       environment.permissionProfile === 'workspace-write' &&
       environment.platform === 'windows';
-    const trustedTailscale = windowsWorkspaceWrite &&
-      trustedTailscaleInvocation(args.cmd, args.shell, environment);
-    const trustedNodeShell = ['powershell', 'pwsh'].includes(shellKind);
-    const allBuiltInSegments = windowsWorkspaceWrite &&
-      Boolean(parsedCommand?.segments.length) &&
-      parsedCommand.segments.every((segment) => (
-        isTrustedRemoteGitSegment(segment.tokens, { platform: environment.platform }) ||
-        (trustedNodeShell &&
-          isTrustedNodeTestSegment(segment.tokens, { platform: environment.platform }))
-      ));
-    const hasTrustedGitSegment = allBuiltInSegments &&
-      parsedCommand.segments.some((segment) =>
-        isTrustedRemoteGitSegment(segment.tokens, { platform: environment.platform }));
-    const hasTrustedNodeTestSegment = allBuiltInSegments &&
-      parsedCommand.segments.some((segment) =>
-        trustedNodeShell &&
-        isTrustedNodeTestSegment(segment.tokens, { platform: environment.platform }));
-    const trustedGit = allBuiltInSegments &&
-      hasTrustedGitSegment &&
-      !hasTrustedNodeTestSegment;
-    const trustedNodeOrMixed = allBuiltInSegments && hasTrustedNodeTestSegment;
+    const trustedConfiguration = windowsWorkspaceWrite
+      ? loadTrustedCommands(this.trustedCommandsFile) : null;
+    const trustedCommand = windowsWorkspaceWrite
+      ? evaluateTrustedCommand(args.cmd, args.shell, environment, {
+          snapshot: trustedConfiguration,
+        })
+      : null;
     const trustedPackageScriptRule = await this.#matchTrustedPackageScript(
       args,
       workspaceHandle,
@@ -468,19 +432,9 @@ export class RemoteProcessManager {
     const wantsEscalation =
       requestedEscalation &&
       !timedFullAccess &&
-      !trustedGit &&
-      !trustedNodeOrMixed &&
-      !trustedTailscale &&
+      !trustedCommand?.matched &&
       !trustedPackageScript;
     let policyRule = null;
-
-    if (requestedEscalation && trustedGit) {
-      forwardedArgs = {
-        ...forwardedArgs,
-        sandbox_permissions: 'use_default',
-      };
-      delete forwardedArgs.justification;
-    }
 
     if (trustedPackageScript) {
       forwardedArgs = {
@@ -497,30 +451,16 @@ export class RemoteProcessManager {
       });
     }
 
-    if (trustedNodeOrMixed) {
+    if (trustedCommand?.matched) {
       forwardedArgs = {
         ...forwardedArgs,
+        cmd: trustedCommand.cmd,
+        ...(trustedCommand.shell ? { shell: trustedCommand.shell } : {}),
         sandbox_permissions: 'approved_escalated',
       };
       delete forwardedArgs.justification;
-      this.#emit('node_test_builtin_auto_allowed', {
-        operation_id: operationId,
-        environment_id: environment.id,
-        workspace_handle: workspaceHandle.workspace_handle,
-        workspace_id: workspaceHandle.workspace_id,
-        mixed_with_trusted_git: hasTrustedGitSegment || undefined,
-      });
-    }
-
-    if (trustedTailscale) {
-      forwardedArgs = {
-        ...forwardedArgs,
-        cmd: trustedTailscale.cmd,
-        ...(trustedTailscale.shell ? { shell: trustedTailscale.shell } : {}),
-        sandbox_permissions: 'approved_escalated',
-      };
-      delete forwardedArgs.justification;
-      this.#emit('tailscale_builtin_auto_allowed', {
+      this.#emit('trusted_command_auto_allowed', {
+        rule_ids: trustedCommand.rule_ids,
         operation_id: operationId,
         environment_id: environment.id,
         workspace_handle: workspaceHandle.workspace_handle,
@@ -546,14 +486,7 @@ export class RemoteProcessManager {
         throw new Error('Escalated execution requires an approval manager.');
       }
       policyRule = this.#matchEscalationSegments(
-        args,
-        workspaceHandle,
-        environment,
-        parsedCommand,
-        {
-          allowBuiltInTrust: windowsWorkspaceWrite,
-          trustedNodeShell,
-        },
+        args, workspaceHandle, environment, parsedCommand, trustedConfiguration,
       );
       if (policyRule?.decision === 'allow') {
         forwardedArgs = {
@@ -648,14 +581,14 @@ export class RemoteProcessManager {
       });
       throw error;
     }
-    const diagnosticContext = windowsWorkspaceWrite && !trustedTailscale &&
+    const diagnosticContext = windowsWorkspaceWrite && !trustedCommand?.matched &&
       forwardedArgs.sandbox_permissions !== 'approved_escalated' &&
       /\btailscale(?:\.exe)?\b/i.test(args.cmd)
       ? { command: args.cmd, environment, trusted: false }
       : null;
     const recorded = this.#recordExecResult(
       diagnosticContext
-        ? this.#addTailscaleDeniedHint(result, args.cmd, environment)
+        ? this.#addTrustedCommandDeniedHint(result, args.cmd, environment)
         : result,
       environment,
       workspaceHandle,
@@ -670,16 +603,16 @@ export class RemoteProcessManager {
         trusted_package_script_rule_id: trustedPackageScriptRule.rule_id,
       };
     }
-    if (trustedNodeOrMixed) {
+    if (trustedCommand?.matched) {
       return {
         ...recorded,
-        trusted_node_test: true,
+        trusted_command_rule_ids: trustedCommand.rule_ids,
       };
     }
-    if (trustedTailscale) {
+    if (trustedCommand?.reason?.startsWith('Trusted-command configuration unavailable:')) {
       return {
         ...recorded,
-        trusted_tailscale: true,
+        trusted_command_diagnostic: trustedCommand.reason,
       };
     }
     return policyRule
@@ -987,11 +920,11 @@ export class RemoteProcessManager {
         args.session_id + '.',
       );
     }
-    if (session.tailscaleHint) {
-      result = this.#addTailscaleDeniedHint(
+    if (session.trustedCommandHint) {
+      result = this.#addTrustedCommandDeniedHint(
         result,
-        session.tailscaleHint.command,
-        session.tailscaleHint.environment,
+        session.trustedCommandHint.command,
+        session.trustedCommandHint.environment,
       );
     }
     // Short-lived echo masking applies to later ordinary model polls too.

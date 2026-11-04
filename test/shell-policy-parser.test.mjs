@@ -5,9 +5,6 @@ import {
   parseShellCommand,
   tokenPrefixMatches,
 } from '../src/runtime/sandbox/shell-policy-parser.mjs';
-import {
-  isTrustedNodeTestCommand,
-} from '../src/runtime/sandbox/node-test-policy.mjs';
 
 test('PowerShell parser keeps quoted WSL bash syntax inside one outer segment', () => {
   const parsed = parseShellCommand(
@@ -151,36 +148,5 @@ test('shell normalization handles remote Windows paths independent of controller
     'powershell',
   );
   assert.equal(canonicalShell('C:/Program Files/PowerShell/7/pwsh.exe'), 'pwsh');
-});
-
-test('node test trust matches only direct node --test segments', () => {
-  assert.equal(
-    isTrustedNodeTestCommand('node --test test/a.test.mjs', {
-      shell: 'powershell.exe',
-      platform: 'windows',
-    }),
-    true,
-  );
-  assert.equal(
-    isTrustedNodeTestCommand('node script.js --test', {
-      shell: 'powershell.exe',
-      platform: 'windows',
-    }),
-    false,
-  );
-  assert.equal(
-    isTrustedNodeTestCommand('node --inspect --test', {
-      shell: 'powershell.exe',
-      platform: 'windows',
-    }),
-    false,
-  );
-  assert.equal(
-    isTrustedNodeTestCommand('node --test', {
-      shell: 'powershell.exe',
-      platform: 'linux',
-    }),
-    false,
-  );
 });
 
