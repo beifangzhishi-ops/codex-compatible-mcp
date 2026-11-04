@@ -24,9 +24,9 @@ const original = JSON.parse(fs.readFileSync(DEFAULT_TRUSTED_COMMANDS_FILE, 'utf8
 const evaluate = (cmd, shell = 'powershell.exe', file = DEFAULT_TRUSTED_COMMANDS_FILE) =>
   evaluateTrustedCommand(cmd, shell, environment, { file });
 
-test('tracked trusted-command configuration validates current Git, Node and Tailscale rules', () => {
+test('tracked trusted-command configuration validates Git, Node, native build and Tailscale rules', () => {
   assert.deepEqual(validateTrustedCommands(original).map((rule) => rule.id),
-    ['git-remote', 'node-test', 'tailscale']);
+    ['git-remote', 'node-test', 'npm-build-native', 'tailscale']);
   for (const command of [
     'git clone https://example.invalid/repo.git',
     'git fetch --all --prune',
@@ -34,6 +34,7 @@ test('tracked trusted-command configuration validates current Git, Node and Tail
     'git push origin main',
     'git ls-remote origin HEAD',
     'node --test test/approval.test.mjs',
+    'npm run build:native',
   ]) {
     assert.equal(evaluate(command).matched, true, command);
   }
@@ -41,10 +42,15 @@ test('tracked trusted-command configuration validates current Git, Node and Tail
     'git status', 'git submodule update --init',
     'git -c core.sshCommand=whoami push origin main',
     'node -e process.exit(0)',
+    'npm run random-script',
+    'npm install',
+    'npm run build',
   ]) {
     assert.equal(evaluate(command).matched, false, command);
   }
   assert.equal(evaluate('node --test', 'cmd.exe').matched, false);
+  assert.deepEqual(evaluate('npm run build:native').rule_ids, ['npm-build-native']);
+  assert.deepEqual(evaluate('npm run build:native', 'cmd.exe').rule_ids, ['npm-build-native']);
   assert.equal(evaluateTrustedCommand('git push', null,
     { ...environment, platform: 'linux' }), null);
 });

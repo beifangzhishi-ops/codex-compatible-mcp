@@ -23,6 +23,15 @@
       "execution": { "type": "original" }
     },
     {
+      "id": "npm-build-native",
+      "platform": "windows",
+      "permission_profile": "workspace-write",
+      "shells": ["powershell", "pwsh", "cmd"],
+      "executables": ["npm"],
+      "arguments": { "type": "prefix", "tokens": ["run", "build:native"] },
+      "execution": { "type": "original" }
+    },
+    {
       "id": "tailscale",
       "platform": "windows",
       "permission_profile": "workspace-write",
