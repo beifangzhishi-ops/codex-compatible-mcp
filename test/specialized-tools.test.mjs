@@ -433,10 +433,8 @@ test('Bilibili deferred tool consumes only a local bridge handoff on 6v without 
   assert.match(tool.description, /bmgctl\.cmd/);
   assert.match(tool.description, /Do not invoke BMG MCP tools/);
   assert.match(tool.description, /stop rather than silently using anonymous requests/);
-  assert.match(tool.description, /BROWSER PLAYBACK SAFETY IS MANDATORY/);
-  assert.match(tool.description, /IMMEDIATELY/);
-  assert.match(tool.description, /fail-closed automatic pause\/verification/);
-  assert.match(tool.description, /NEVER leave autoplay running, close pre-existing user tabs/);
+  assert.match(tool.description, /Before downloading, the tool automatically pauses/);
+  assert.doesNotMatch(tool.description, /IMMEDIATELY|autoplay|before doing anything else|cleanup|non-video/i);
   assert.match(tool.description, /BRIDGE IS REQUIRED/);
   assert.equal(tool.inputSchema.video_url, undefined);
   assert.equal(tool.inputSchema.audio_url, undefined);

@@ -1,4 +1,4 @@
-"""Offline unit tests for mandatory Bilibili playback cleanup."""
+"""Offline unit tests for automatic Bilibili pre-download pause."""
 
 import base64
 import importlib.util

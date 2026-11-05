@@ -1,7 +1,4 @@
-"""Verify and pause the selected Bilibili tab through the local BMGCTL boundary.
-
-Never close tabs, export browser credentials, or target unrelated user tabs.
-"""
+"""Automatically pause the selected Bilibili tab before a media download."""
 
 import base64
 import json
