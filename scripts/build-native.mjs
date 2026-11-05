@@ -170,19 +170,11 @@ function buildWindowsTokenOwner() {
   }
 }
 
-function buildRustHelper(crate, executableName) {
+function buildRustHelper(crate, executableName, additionalExecutableNames = []) {
   const cargo = findCargo();
   if (!cargo) throw new Error('Rust cargo was not found.');
 
   const manifest = path.join(root, 'native', crate, 'Cargo.toml');
-  const target = path.join(
-    root,
-    'native',
-    crate,
-    'target',
-    'release',
-    process.platform === 'win32' ? executableName + '.exe' : executableName,
-  );
 
   if (process.platform === 'win32') {
     const devCmd = findVsDevCmd();
@@ -210,13 +202,14 @@ function buildRustHelper(crate, executableName) {
     run(cargo, ['build', '--release', '--manifest-path', manifest]);
   }
 
-  const output = path.join(
-    outputDir,
-    process.platform === 'win32' ? executableName + '.exe' : executableName,
-  );
-  const tempOutput = output + '.' + process.pid + '.tmp';
-  fs.copyFileSync(target, tempOutput);
-  replaceBuiltFile(tempOutput, output);
+  for (const name of [executableName, ...additionalExecutableNames]) {
+    const file = process.platform === 'win32' ? name + '.exe' : name;
+    const source = path.join(root, 'native', crate, 'target', 'release', file);
+    const output = path.join(outputDir, file);
+    const tempOutput = output + '.' + process.pid + '.tmp';
+    fs.copyFileSync(source, tempOutput);
+    replaceBuiltFile(tempOutput, output);
+  }
 }
 
 fs.mkdirSync(outputDir, { recursive: true });
@@ -227,3 +220,5 @@ if (process.platform === 'win32') {
 }
 buildRustHelper('pty-proxy', 'ccm-pty-proxy');
 buildRustHelper('codex-powershell-parser', 'ccm-codex-powershell-parser');
+buildRustHelper('codex-execpolicy', 'ccm-codex-execpolicy',
+  ['ccm-codex-execpolicy-bridge']);
