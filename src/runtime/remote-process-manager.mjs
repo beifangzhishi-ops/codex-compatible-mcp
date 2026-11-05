@@ -362,6 +362,19 @@ export class RemoteProcessManager {
     const environment = this.environmentRegistry.resolve(
       workspaceHandle.environment_id,
     );
+    const experimentalAdmin = args.run_as_admin === true;
+    if (experimentalAdmin && (
+      environment.platform !== 'windows' ||
+      environment.permissionProfile !== 'workspace-write'
+    )) {
+      throw new Error('run_as_admin requires a Windows workspace-write Worker.');
+    }
+    if (experimentalAdmin && (
+      (args.sandbox_permissions && args.sandbox_permissions !== 'use_default') ||
+      args.prefix_rule !== undefined || args.full_access_grant_id !== undefined
+    )) {
+      throw new Error('run_as_admin cannot be combined with escalation, prefix_rule or a Full Access grant.');
+    }
     const operationId = randomUUID();
     let forwardedArgs = {
       ...args,
@@ -372,6 +385,11 @@ export class RemoteProcessManager {
     delete forwardedArgs.workspace_handle;
     delete forwardedArgs.prefix_rule;
     delete forwardedArgs.full_access_grant_id;
+    delete forwardedArgs.run_as_admin;
+    if (experimentalAdmin) {
+      forwardedArgs.sandbox_permissions = 'experimental_admin_restricted';
+      delete forwardedArgs.justification;
+    }
     const requestedYieldMs = clampInitialExecYield(args.yield_time_ms);
     forwardedArgs = {
       ...forwardedArgs,
@@ -399,20 +417,17 @@ export class RemoteProcessManager {
     const windowsWorkspaceWrite =
       environment.permissionProfile === 'workspace-write' &&
       environment.platform === 'windows';
-    const trustedConfiguration = windowsWorkspaceWrite
+    const trustedConfiguration = windowsWorkspaceWrite && !experimentalAdmin
       ? loadTrustedCommands(this.trustedCommandsFile) : null;
-    const trustedCommand = windowsWorkspaceWrite
+    const trustedCommand = windowsWorkspaceWrite && !experimentalAdmin
       ? evaluateTrustedCommand(args.cmd, args.shell, environment, {
           snapshot: trustedConfiguration,
         })
       : null;
-    const trustedPackageScriptRule = await this.#matchTrustedPackageScript(
-      args,
-      workspaceHandle,
-      environment,
-    );
+    const trustedPackageScriptRule = experimentalAdmin ? null :
+      await this.#matchTrustedPackageScript(args, workspaceHandle, environment);
     const trustedPackageScript = Boolean(trustedPackageScriptRule);
-    const policyRule = !timedFullAccess &&
+    const policyRule = !experimentalAdmin && !timedFullAccess &&
       environment.permissionProfile !== 'full-access' &&
       !trustedCommand?.matched &&
       !trustedPackageScript
@@ -569,7 +584,7 @@ export class RemoteProcessManager {
       });
       throw error;
     }
-    const diagnosticContext = windowsWorkspaceWrite && !trustedCommand?.matched &&
+    const diagnosticContext = !experimentalAdmin && windowsWorkspaceWrite && !trustedCommand?.matched &&
       forwardedArgs.sandbox_permissions !== 'approved_escalated' &&
       /\btailscale(?:\.exe)?\b/i.test(args.cmd)
       ? { command: args.cmd, environment, trusted: false }
@@ -584,6 +599,14 @@ export class RemoteProcessManager {
       diagnosticContext,
       Boolean(args.tty),
     );
+    if (experimentalAdmin) {
+      this.#emit('experimental_admin_restricted_dispatch', {
+        operation_id: operationId,
+        environment_id: environment.id,
+        workspace_handle: workspaceHandle.workspace_handle,
+      });
+      return { ...recorded, experimental_admin_restricted: true };
+    }
     if (trustedPackageScriptRule) {
       return {
         ...recorded,

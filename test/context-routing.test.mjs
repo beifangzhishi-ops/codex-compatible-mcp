@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { RemoteProcessManager } from '../src/runtime/remote-process-manager.mjs';
+import { resolvePermissionProfile } from '../src/runtime/sandbox/sandbox-policy.mjs';
 import { RemoteFileService } from '../src/runtime/filesystem/remote-file-service.mjs';
 import { NativeFileService } from '../src/runtime/filesystem/native-file-service.mjs';
 
@@ -104,6 +105,59 @@ test('RemoteProcessManager requires context and rejects environment routing', as
     assert.equal(workerHub.calls.length, 0);
   } finally {
     await manager.close();
+  }
+});
+
+test('experimental administrator command stays sandboxed and cannot inherit trust or full-access grants', async () => {
+  const workerHub = new FakeWorkerHub();
+  const registry = {
+    resolve(id) {
+      return {
+        ...environmentRegistry().resolve(id),
+        platform: 'windows',
+        shell: { path: 'powershell.exe', type: 'powershell' },
+      };
+    },
+  };
+  const manager = new RemoteProcessManager({
+    environmentRegistry: registry,
+    workerHub,
+    workspaceHandleManager: workspaceHandleManager(),
+    execPolicyStore: { match() { throw new Error('must not consult Full Access allow rules'); } },
+  });
+  const base = { workspace_handle: CONTEXT_ID, cmd: 'whoami /groups' };
+  try {
+    const result = await manager.execCommand({ ...base, run_as_admin: true });
+    assert.equal(result.experimental_admin_restricted, true);
+    assert.equal(workerHub.calls.length, 1);
+    assert.equal(workerHub.calls[0].params.sandbox_permissions, 'experimental_admin_restricted');
+    assert.equal('run_as_admin' in workerHub.calls[0].params, false);
+    await assert.rejects(manager.execCommand({
+      ...base, run_as_admin: true, sandbox_permissions: 'require_escalated',
+    }), /cannot be combined/);
+    await assert.rejects(manager.execCommand({
+      ...base, run_as_admin: true, full_access_grant_id: '00000000-0000-4000-8000-000000000002',
+    }), /cannot be combined/);
+    await assert.rejects(manager.execCommand({
+      ...base, run_as_admin: true, prefix_rule: ['whoami'],
+    }), /cannot be combined/);
+    assert.equal(workerHub.calls.length, 1);
+  } finally {
+    await manager.close();
+  }
+});
+
+test('Worker rejects experimental restricted admin on non-Windows and non-workspace-write profiles', () => {
+  assert.equal(resolvePermissionProfile({ platform: 'windows', permissionProfile: 'workspace-write' }, 'experimental_admin_restricted'), 'admin-workspace-write');
+  for (const environment of [
+    { platform: 'linux', permissionProfile: 'workspace-write' },
+    { platform: 'windows', permissionProfile: 'full-access' },
+    { platform: 'windows', permissionProfile: 'read-only' },
+  ]) {
+    assert.throws(
+      () => resolvePermissionProfile(environment, 'experimental_admin_restricted'),
+      /requires Windows workspace-write/,
+    );
   }
 });
 

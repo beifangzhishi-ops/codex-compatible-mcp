@@ -18,6 +18,7 @@ internal static class CcmSandboxRunner
     const UInt32 CREATE_UNICODE_ENVIRONMENT = 0x00000400;
     const UInt32 INFINITE = 0xFFFFFFFF;
     const UInt32 SE_PRIVILEGE_ENABLED = 0x00000002;
+    const UInt32 SE_PRIVILEGE_REMOVED = 0x00000004;
     const Int32 TOKEN_DEFAULT_DACL_CLASS = 6;
     const UInt32 SDDL_REVISION_1 = 1;
     const Int32 TOKEN_GROUPS_CLASS = 2;
@@ -334,6 +335,23 @@ internal static class CcmSandboxRunner
             throw new InvalidOperationException("AdjustTokenPrivileges error: " + err);
     }
 
+    static void RemovePrivilegeIfPresent(IntPtr token, string name)
+    {
+        LUID luid;
+        if (!LookupPrivilegeValue(null, name, out luid))
+            throw new InvalidOperationException("LookupPrivilegeValue failed: " + name);
+        var tp = new TOKEN_PRIVILEGES();
+        tp.PrivilegeCount = 1;
+        tp.Privileges = new LUID_AND_ATTRIBUTES();
+        tp.Privileges.Luid = luid;
+        tp.Privileges.Attributes = SE_PRIVILEGE_REMOVED;
+        if (!AdjustTokenPrivileges(token, false, ref tp, 0, IntPtr.Zero, IntPtr.Zero))
+            throw new InvalidOperationException("Remove privilege failed: " + name);
+        int err = Marshal.GetLastWin32Error();
+        if (err != 0 && err != 1300) // ERROR_NOT_ALL_ASSIGNED: not present
+            throw new InvalidOperationException("Remove privilege error: " + name + " (" + err + ")");
+    }
+
     static string QuoteArg(string value)
     {
         char slash = (char)92;
@@ -403,14 +421,15 @@ internal static class CcmSandboxRunner
             !args.TryGetValue("--command", out command))
             return Fail("missing required arguments");
 
-        if (profile != "read-only" && profile != "workspace-write")
+        if (profile != "read-only" && profile != "workspace-write" &&
+            profile != "admin-workspace-write")
             return Fail("unsupported permission profile: " + profile);
 
         workspace = Path.GetFullPath(workspace);
         cwd = Path.GetFullPath(cwd);
         var capabilitySid = new SecurityIdentifier(CapabilitySidForRoot(workspace, profile));
 
-        if (profile == "workspace-write")
+        if (profile == "workspace-write" || profile == "admin-workspace-write")
             EnsureWorkspaceWriteAce(workspace, capabilitySid);
         IntPtr baseToken = IntPtr.Zero;
         IntPtr restrictedToken = IntPtr.Zero;
@@ -423,6 +442,16 @@ internal static class CcmSandboxRunner
         {
             if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ALL_ACCESS, out baseToken))
                 return Fail("OpenProcessToken failed: " + Marshal.GetLastWin32Error());
+
+            if (profile == "admin-workspace-write")
+            {
+                using (var identity = new WindowsIdentity(baseToken))
+                {
+                    var principal = new WindowsPrincipal(identity);
+                    if (!principal.IsInRole(WindowsBuiltInRole.Administrator))
+                        return Fail("experimental administrator mode requires an elevated Worker");
+                }
+            }
 
             var logonSid = GetLogonSid(baseToken);
             var worldSid = new SecurityIdentifier(WellKnownSidType.WorldSid, null);
@@ -437,7 +466,13 @@ internal static class CcmSandboxRunner
             restricted[2].Sid = worldSidPtr;
             restricted[2].Attributes = 0;
 
-            UInt32 flags = DISABLE_MAX_PRIVILEGE | LUA_TOKEN | WRITE_RESTRICTED;
+            // Experimental: retain the administrator group, but apply the
+            // workspace restricting SID on ordinary write access checks.
+            // This is not a complete security boundary for an admin token.
+            bool adminRestricted = profile == "admin-workspace-write";
+            UInt32 flags = adminRestricted
+                ? WRITE_RESTRICTED
+                : DISABLE_MAX_PRIVILEGE | LUA_TOKEN | WRITE_RESTRICTED;
             if (!CreateRestrictedToken(
                 baseToken, flags, 0, IntPtr.Zero, 0, IntPtr.Zero,
                 (UInt32)restricted.Length, restricted, out restrictedToken))
@@ -446,7 +481,15 @@ internal static class CcmSandboxRunner
             SetDefaultDacl(restrictedToken, new SecurityIdentifier[] {
                 logonSid, worldSid, capabilitySid
             });
-            EnableChangeNotifyPrivilege(restrictedToken);
+            if (adminRestricted)
+            {
+                foreach (string privilege in new string[] {
+                    "SeBackupPrivilege", "SeRestorePrivilege",
+                    "SeTakeOwnershipPrivilege", "SeSecurityPrivilege",
+                    "SeManageVolumePrivilege"
+                }) RemovePrivilegeIfPresent(restrictedToken, privilege);
+            }
+            else EnableChangeNotifyPrivilege(restrictedToken);
 
             var si = new STARTUPINFO();
             si.cb = (UInt32)Marshal.SizeOf(typeof(STARTUPINFO));

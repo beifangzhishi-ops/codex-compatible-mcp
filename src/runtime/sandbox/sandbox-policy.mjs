@@ -16,5 +16,12 @@ export function resolvePermissionProfile(
     return 'full-access';
   }
 
+  if (sandboxPermissions === 'experimental_admin_restricted') {
+    if (environment.platform !== 'windows' || environment.permissionProfile !== 'workspace-write') {
+      throw new Error('Experimental administrator token requires Windows workspace-write.');
+    }
+    return 'admin-workspace-write';
+  }
+
   throw new Error(`Unknown sandbox_permissions value: ${sandboxPermissions}`);
 }
