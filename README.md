@@ -14,6 +14,8 @@ OpenAI Codex is the normative upstream for every CCM behavior except the ChatGPT
 
 **Alignment is not complete.** CCM still has a separate JavaScript command parser/policy store, Controller approval flow, native Windows sandbox, and independent proxy, CA and registry-environment refresh mechanisms. The current environment-policy port below matches the documented Codex policy transformation but **does not** establish parity for the whole launch pipeline or configuration layering. Sandbox selection, escalation, persistence, error and session semantics still require source-by-source comparison. Do not silently preserve behavior merely because CCM had it before.
 
+The continuing source-to-implementation audit matrix, evidence and remaining gates live in [docs/codex-parity.md](docs/codex-parity.md). Keep it current whenever a Codex-derived behavior is modified.
+
 ### Codex shell environment policy: first integrated subsystem
 
 **Upstream pinned source:** `ed8eac40832e6a79f30eaeb3c521912f231d43eb`: `codex-rs/protocol/src/{shell_environment.rs,config_types.rs}`, `codex-rs/config/src/shell_environment_policy.rs`, `codex-rs/core/src/exec_env.rs`, and upstream `shell_environment_tests.rs`.
