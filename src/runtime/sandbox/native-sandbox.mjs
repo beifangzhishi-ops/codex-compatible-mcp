@@ -18,7 +18,7 @@ function detectShellType(shellPath, platform) {
   return platform === 'windows' ? 'powershell' : 'bash';
 }
 
-function directShellInvocation({ platform, shell, command, useProfile = false }) {
+export function directShellInvocation({ platform, shell, command, useProfile = false }) {
   const selected = shell?.path ||
     (platform === 'windows' ? 'powershell.exe' : '/bin/bash');
   const shellType = shell?.type || detectShellType(selected, platform);

@@ -17,10 +17,26 @@
 | Policy evaluation and rules | `codex-rs/execpolicy/src/{parser,rule,policy,decision,execpolicycheck,amend}.rs`; `codex-rs/utils/absolute-path/src`; `codex-rs/core/src/exec_policy.rs` | `native/codex-execpolicy`, `native/codex-utils-absolute-path`, `src/controller/exec-policy-store.mjs`, `src/runtime/remote-process-manager.mjs` | **Native engine ported and tested, not connected to Controller**: exact upstream Starlark parser/evaluator/decision/file-locked append code builds as standalone Rust; independent tests cover alternatives, embedded examples, canonical matching, host paths, conflicting decisions and persistence. Controller still uses CCM's JSON Allow store. **Not aligned end-to-end**: actual policy routing, Codex `.rules` loading, heuristics, requirements and approval/sandbox handling remain. |
 | Approval and escalation state machine | `codex-rs/protocol/src/approvals.rs`; `codex-rs/core/src/exec_policy.rs` | `src/controller/approval-manager.mjs`, `src/runtime/remote-process-manager.mjs` | **Not aligned**; approval card is Host adaptation, but the decision model and escalation must be checked upstream. |
 | Windows sandbox / administrator profiles | `codex-rs/windows-sandbox-rs`, `codex-rs/windows-sandbox-service`; `codex-rs/protocol/src/sandbox.rs` | `native/windows-sandbox/CcmSandboxRunner.cs`, `src/runtime/sandbox/native-sandbox.mjs` | **Not aligned**; CCM-specific restricted administrator token behavior is not proof of Codex equivalence. |
+
 | Process, terminal, PTY and session lifecycle | `codex-rs/core/src/exec.rs`; `codex-rs/exec` | `src/runtime/process-manager.mjs`, `src/runtime/executors/native-executor.mjs` | **Not aligned**; stream/yield/exit/cancellation behavior requires comparison. |
 | Patch and filesystem semantics | `codex-rs/apply-patch`; `codex-rs/core/src/apply_patch.rs` | `src/runtime/filesystem`, `apply_patch` tools | **Not aligned**; existing CCM tests are not an upstream-differential suite. |
 | Configuration loading, inheritance and policy | `codex-rs/config`, `codex-rs/protocol/src/config_types.rs` | Worker bootstrap and `config/` | **Not aligned overall**; only the shell environment policy TOML subset has been ported. |
 | Worker routing and GPT Host delivery | Codex execution host and protocol interfaces | CCM Controller/Worker RPC, MCP, OAuth, approval UI | **Adaptation surface**; Host-specific presentation excluded, but execution semantics must still be equivalent. |
+
+**Staged upstream native Windows execution (separate integration branch):**
+`feat/codex-elevated-parity` pins `openai/codex` at
+`f79b26ccbb3116b052544666a181012fb45dc49b` and adds
+`src/runtime/sandbox/codex-windows-sandbox.mjs` with native CLI/runtime
+version lookup, native named permission profiles, and dedicated `CODEX_HOME`
+provisioning. It is not the production default. On 6v, CCM's actual
+`ProcessManager` successfully used this adapter to launch a native
+`CodexSandboxOnline` process, write within the workspace, deny an ordinary
+outside write, and report its output/exit code. Separate upstream probes
+demonstrated the known outside-file hardlink limitation, accepted by the owner
+as outside the accidental-write safety goal. The pinned binary is currently
+available on 6v; noha's installed CLI is alpha.6 rather than alpha.5.1.
+See `docs/codex-upstream-windows-parity.md` for exact upstream source locations,
+native setup evidence, accepted limitations and remaining integration gaps.
 
 ## Evidence and remaining acceptance gates
 

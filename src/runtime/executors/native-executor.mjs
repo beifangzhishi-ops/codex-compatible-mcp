@@ -145,6 +145,9 @@ export class NativeEnvironmentExecutor {
       permissionProfile,
       useProfile: this.shellEnvironmentPolicy.use_profile === true,
     });
+    if (invocation.environmentOverrides) {
+      Object.assign(childEnv, invocation.environmentOverrides);
+    }
 
     if (tty) {
       if (!this.fileExists(this.ptyProxyPath)) {
