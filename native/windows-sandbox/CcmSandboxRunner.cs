@@ -381,7 +381,7 @@ internal static class CcmSandboxRunner
         return sb.ToString();
     }
 
-    static string BuildCommandLine(string shell, string command)
+    static string BuildCommandLine(string shell, string command, bool useProfile)
     {
         string name = Path.GetFileName(shell).ToLowerInvariant();
         var parts = new List<string>();
@@ -392,7 +392,7 @@ internal static class CcmSandboxRunner
         }
         else if (name.Contains("powershell") || name == "pwsh.exe" || name == "pwsh")
         {
-            parts.Add("-NoLogo"); parts.Add("-NoProfile");
+            parts.Add("-NoLogo"); if (!useProfile) parts.Add("-NoProfile");
             parts.Add("-NonInteractive"); parts.Add("-Command"); parts.Add(command);
         }
         else
@@ -498,7 +498,10 @@ internal static class CcmSandboxRunner
             si.hStdOutput = GetStdHandle(-11);
             si.hStdError = GetStdHandle(-12);
 
-            var cmdline = new StringBuilder(BuildCommandLine(shell, command));
+            string profileFlag;
+            bool useProfile = args.TryGetValue("--use-profile", out profileFlag) &&
+                profileFlag == "true";
+            var cmdline = new StringBuilder(BuildCommandLine(shell, command, useProfile));
             if (!CreateProcessAsUser(
                 restrictedToken, null, cmdline, IntPtr.Zero, IntPtr.Zero,
                 true, CREATE_UNICODE_ENVIRONMENT, IntPtr.Zero, cwd, ref si, out pi))

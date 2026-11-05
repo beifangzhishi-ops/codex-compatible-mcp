@@ -15,7 +15,8 @@ function fakeChild() {
   return child;
 }
 
-function createHarness({ workerEnvPath, commandEnvironment = (env) => ({ ...env }) } = {}) {
+function createHarness({ workerEnvPath, commandEnvironment = (env) => ({ ...env }),
+  shellEnvironmentPolicy = {} } = {}) {
   const spawned = [];
   let mode = 'proxy';
   const executor = new NativeEnvironmentExecutor({
@@ -30,6 +31,7 @@ function createHarness({ workerEnvPath, commandEnvironment = (env) => ({ ...env 
       PATH: 'test-path',
     },
     commandEnvironment,
+    shellEnvironmentPolicy,
     ptyProxyPath: 'ccm-pty-proxy.exe',
     workerEnvPath,
     fileExists: () => true,
@@ -112,4 +114,40 @@ test('native executor refreshes command environment for both pipe and PTY', () =
   harness.start(true);
   assert.equal(harness.spawned[1].options.env.Path, 'second-path');
   assert.equal(harness.spawned[1].options.env.HTTPS_PROXY, 'http://127.0.0.1:7890');
+});
+
+test('Codex shell policy controls inherited and overridden environment for pipe and PTY', () => {
+  const harness = createHarness({
+    shellEnvironmentPolicy: {
+      inherit: 'none',
+      set: { TEXMFHOME: 'C:\\fonts', CODEX_GUARDIAN_DECISIONS_API_KEY: 'synthetic' },
+    },
+  });
+  harness.start(false);
+  harness.start(true);
+  for (const { options } of harness.spawned) {
+    assert.deepEqual(options.env, {
+      TEXMFHOME: 'C:\\fonts',
+      PATHEXT: '.COM;.EXE;.BAT;.CMD',
+    });
+  }
+});
+
+test('Codex shell policy set wins over inherited, proxied and Worker CA values', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-codex-env-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const config = path.join(dir, 'worker.env');
+  const bundle = path.join(dir, 'ca-bundle.crt');
+  fs.writeFileSync(bundle, 'test certificate');
+  fs.writeFileSync(config, 'CURL_CA_BUNDLE=' + bundle + '\n');
+  const harness = createHarness({
+    workerEnvPath: config,
+    shellEnvironmentPolicy: {
+      set: { CURL_CA_BUNDLE: 'C:\\codex-ca.crt', HTTP_PROXY: 'http://codex-proxy' },
+    },
+  });
+  harness.start();
+  assert.equal(harness.spawned[0].options.env.CURL_CA_BUNDLE, 'C:\\codex-ca.crt');
+  assert.equal(harness.spawned[0].options.env.HTTP_PROXY, 'http://codex-proxy');
+  assert.equal(harness.spawned[0].options.env.HTTPS_PROXY, 'http://127.0.0.1:7890');
 });

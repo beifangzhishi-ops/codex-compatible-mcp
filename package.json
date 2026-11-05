@@ -23,6 +23,7 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "markdown-it": "^14.3.3",
     "sharp": "^0.35.5",
+    "smol-toml": "1.9.1",
     "zod": "^4.6.5"
   }
 }
