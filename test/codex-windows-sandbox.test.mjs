@@ -46,6 +46,15 @@ test('Codex adapter uses upstream read-only profile without any writable roots o
   assert.equal(result.args.some((arg) => arg.includes('workspace_roots')), false);
 });
 
+test('approved Full Access bypasses Codex restricted runner just like upstream', () => {
+  const result = invocation({ permissionProfile: 'full-access' });
+  assert.equal(result.file, 'pwsh.exe');
+  assert.equal(result.sandboxed, false);
+  assert.equal(result.permissionProfile, 'full-access');
+  assert.equal(result.args.at(-1), "Write-Output 'works'");
+  assert.equal(result.environmentOverrides, undefined);
+});
+
 test('Codex adapter preserves upstream Shell Environment Policy login profile choice', () => {
   const withProfile = invocation({ useProfile: true });
   assert.equal(withProfile.args.includes('-NoProfile'), false);
@@ -64,7 +73,6 @@ test('Codex adapter rejects workdir escape, external home and unsupported CCM pr
   assert.throws(() => invocation({ cwd: 'C:\\other' }), /outside the registered workspace/);
   assert.throws(() => invocation({ cwd: path.win32.join(ROOT, '..', 'other') }), /outside the registered workspace/);
   assert.throws(() => invocation({ permissionProfile: 'admin-workspace-write' }), /cannot accept/);
-  assert.throws(() => invocation({ permissionProfile: 'full-access' }), /cannot accept/);
   assert.throws(() => invocation({ environment: { platform: 'linux', cwd: ROOT, workspaceRoots: [ROOT] } }), /Windows-only/);
   const unsafe = new CodexWindowsSandboxBackend({
     resolveRuntime: () => EXE, codexHome: path.win32.join(ROOT, '.codex'),

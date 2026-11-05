@@ -318,7 +318,11 @@ The isolated `feat/codex-elevated-parity` worktree pins the **entire** upstream
 `docs/codex-upstream-windows-parity.md` for the exact native source,
 configuration decision chain, host findings, and required acceptance matrix.
 The Codex-schema `config/codex/config.toml` is a *non-secret staged
-configuration*, not yet active Worker configuration.
+configuration*: the trusted runtime helper copies its exact bytes to
+`%LOCALAPPDATA%\\CCM\\CodexSandbox\\config.toml`, without modifying the
+interactive user's `%USERPROFILE%\\.codex\\config.toml`. This native config
+is exercised by the isolated execution tests; it is not yet the production
+Worker default.
 
 **Not deployed:** CCM still uses its existing Windows native sandbox and approval
 logic. Neither Worker has been switched to the upstream Codex runtime. Until
@@ -327,17 +331,32 @@ Codex-equivalent or assume experimental `run_as_admin` is safe.
 
 The staged native Codex CLI launcher has 13 targeted unit tests passing, and
 the isolated branch's full Node suite completed with 321 passes, 0 failures
-and 1 intentionally skipped native containment integration test, but
-there is an actual **containment failure** in the pinned upstream Elevated
-Sandbox. On 6v, a pre-existing NTFS hardlink from a selected writable root to a
-disposable outside file caused Codex's ACL setup to grant `CodexSandboxUsers`
-modify rights to that outside file; writes through either path succeeded. A
-separate ACL-only probe confirmed the ACL changed during setup, before any
-attempted file write. Do **not** enable this backend until this release-blocking
-outside-workspace write escape is addressed and verified with the permanent
-opt-in test `test/codex-elevated-containment.test.mjs`. The noha CLI also moved
-to 0.166.0-alpha.6, different from the pinned 0.166.0-alpha.5.1. All tests used
-disposable files; no persistent CCM Worker or Codex configuration was changed.
+and 1 intentionally skipped privileged Windows integration test. On 6v,
+an existing NTFS hardlink from the selected writable root to a disposable
+outside file caused Codex ACL setup to grant its sandbox account write rights
+to the outside file. **The owner explicitly accepts this upstream limitation**:
+the purpose is to prevent accidental modifications of important files, not to
+enforce a malicious-actor-proof or absolute outside-workspace security boundary.
+Do not fork Codex to patch hardlinks or claim guaranteed confinement.
+Continue testing ordinary outside-file write denial and functional compatibility
+before enabling the new backend. The noha-installed Codex CLI was updated to
+0.166.0-alpha.6 while this branch pins 0.166.0-alpha.5.1. All probes used
+disposable files and left running Workers unchanged.
+
+The 6v trusted-host `ProcessManager → NativeEnvironmentExecutor → codex sandbox`
+integration test **passed**, including the staged
+`createWorkerRuntime({codexSandbox:true})` selection and dedicated Codex home.
+The selection checks the pinned native executable and its two helpers, then
+provisions the native config before accepting commands. It captured the normal
+exit code and `CodexSandboxOnline` identity, permitted an inside write, and
+denied an accidental outside write. The first run provisioned native sandbox
+users, ACLs and offline networking and may take noticeably longer; reusing the
+same dedicated home avoids re-creating its initial configuration. Permanent
+native tests are `test/codex-elevated-execution.test.mjs` and
+`test/codex-elevated-containment.test.mjs` (both opt-in on trusted Windows).
+Neither test requires patching upstream Codex.
+The actual Worker Agent has not selected this staged backend yet: the
+interactive/TTY, cancellation and cross-machine version gates remain open.
 
 ### User-command environment refresh
 

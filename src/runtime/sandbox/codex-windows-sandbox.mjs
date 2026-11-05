@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { directShellInvocation } from './native-sandbox.mjs';
+import { codexRuntimeHome } from './codex-runtime-home.mjs';
 
 // Both values are from upstream openai/codex at f79b26ccbb3116b052544666a181012fb45dc49b.
 // The installed CLI, setup helper and command runner must be from the same release.
@@ -86,7 +87,7 @@ export function codexWorkspaceRootsOverride(workspaceRoot) {
 export class CodexWindowsSandboxBackend {
   constructor({
     resolveRuntime = resolvePinnedCodexRuntime,
-    codexHome,
+    codexHome = codexRuntimeHome(),
     fileExists = fs.existsSync,
   } = {}) {
     this.resolveRuntime = resolveRuntime;
@@ -99,6 +100,15 @@ export class CodexWindowsSandboxBackend {
   }) {
     if (environment.platform !== 'windows') {
       throw new Error('Upstream Codex Windows sandbox is Windows-only.');
+    }
+    if (permissionProfile === 'full-access') {
+      return {
+        ...directShellInvocation({
+          platform: 'windows', shell: shell || environment.shell, command, useProfile,
+        }),
+        sandboxed: false,
+        permissionProfile,
+      };
     }
     if (!['workspace-write', 'read-only'].includes(permissionProfile)) {
       throw new Error('Codex sandbox cannot accept CCM-specific or unsandboxed profile: ' + permissionProfile);
