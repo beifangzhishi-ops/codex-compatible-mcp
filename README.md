@@ -295,6 +295,22 @@ The `preworker` script builds the native helper for the current platform first.
 
 ## Windows scheduled-task operation
 
+### Upstream Codex Elevated Sandbox alignment (staging only)
+
+The isolated `feat/codex-elevated-parity` worktree pins the **entire** upstream
+`openai/codex` source tree as a Git submodule at commit
+`f79b26ccbb3116b052544666a181012fb45dc49b`
+(`rust-v0.166.0-alpha.5.1`). See
+`docs/codex-upstream-windows-parity.md` for the exact native source,
+configuration decision chain, host findings, and required acceptance matrix.
+The Codex-schema `config/codex/config.toml` is a *non-secret staged
+configuration*, not yet active Worker configuration.
+
+**Not deployed:** CCM still uses its existing Windows native sandbox and approval
+logic. Neither Worker has been switched to the upstream Codex runtime. Until
+the entire decision chain is integrated and tested, do not call the CCM sandbox
+Codex-equivalent or assume experimental `run_as_admin` is safe.
+
 ### User-command environment refresh
 
 CCM keeps Supervisor, Controller, and Worker runtime environments stable. On Windows,

@@ -1,0 +1,17 @@
+# Codex-native permissions configuration for the pinned Windows sandbox runtime.
+# This is an upstream TOML schema, not a CCM-specific rules language.
+# Staged for parity work; CCM does not yet consume it.
+default_permissions = "workspace-online"
+approval_policy = "on-request"
+
+[windows]
+sandbox = "elevated"
+
+[permissions.workspace-online]
+extends = ":workspace"
+
+[permissions.workspace-online.network]
+enabled = true
+
+[permissions.read-only]
+extends = ":read-only"
