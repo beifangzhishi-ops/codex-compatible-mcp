@@ -15,22 +15,22 @@ Working workflow:
 
    ```javascript
    const response = await fetch('http://127.0.0.1:8765/dash', {
-     method: 'POST', mode: 'cors',
-     headers: { 'Content-Type': 'application/json' },
+     method: 'POST', mode: 'no-cors',
+     headers: { 'Content-Type': 'text/plain' },
      body: JSON.stringify({
        video_url: selectedVideo.baseUrl || selectedVideo.base_url,
        audio_url: selectedAudio.baseUrl || selectedAudio.base_url,
        expected_height: selectedVideo.height,
      }),
    });
-   return { ok: response.ok, status: response.status };
+   return { attempted: response.type === 'opaque' };
    ```
 
-   Expect HTTP 204 and `BRIDGE_RECEIVED`. Never return signed URLs through BMGCTL: it redacts them. The projectless Bridge writes only to its own workspace; the shared Bridge instead writes to Git-ignored `.cache/bilibili-download/dash_urls.json` under the CCM install root. Either handoff is consumed and deleted by the matching downloader, including on failure.
+   The browser blocks CORS requests to the local Bridge, so use `no-cors` with a `text/plain` JSON body. The opaque response does **not** reveal status or prove delivery. Require the one-shot Bridge process to print **`BRIDGE_RECEIVED`**, which occurs only after accepting the JSON and sending HTTP 204; otherwise stop. Never return signed URLs through BMGCTL: it redacts them. The projectless Bridge writes only to its own workspace; the shared Bridge instead writes to Git-ignored `.cache/bilibili-download/dash_urls.json` under the CCM install root. Either handoff is consumed and deleted by the matching downloader, including on failure.
 5. Use `tool_search` -> `exec` to call `ccm-extra.bilibili_download_dash` with **required `browser_tab_id`**, taken from `get_windows_and_tabs`, and `output_path` (a **filename**, e.g. `video.mp4`) and optional `timeout_seconds`. For the projectless Bridge mode, also supply **the same existing `workspace_handle`**. In shared Bridge mode, omit `workspace_handle` and the tool creates a fresh projectless workspace. **Do not pass an absolute output path or a path into another workspace.** The downloader first invokes BMGCTL to verify the exact selected Bilibili tab, pause all of its `video` elements, and verify a positive pause acknowledgement. If the tab is missing, points to another site, BMGCTL is unavailable, or pause confirmation is absent, the tool **fails before any media download**. The one-shot handoff is still deleted. After the pause, the Python Worker downloads through `curl.exe`, remuxes with `ffmpeg -c copy`, and checks video height and audio with `ffprobe`. Reuse the returned `workspace_handle` to publish or access the MP4. Never mix handoff modes.
 
 ## Real test
 
-Offline pre-download pause tests: `python.exe -B -m unittest discover -s test -p test_bilibili_pause.py`. The CCM restricted Worker currently blocks `node --test` child-process isolation and Node-to-Python `spawnSync` with `EPERM`, so run this Python suite directly (without a Node wrapper). Browser integration requires a functioning BMGCTL connection; a BMGCTL error fails the download closed rather than claiming playback was paused. On 2026-11-05, 6v BMGCTL navigation failed HTTP 502 while recovering its Edge workspace and `get_windows_and_tabs` failed with exit code 2; therefore the live pause could not be verified, although the offline guard tests passed (5/5).
+Offline pre-download pause tests: `python.exe -B -m unittest discover -s test -p test_bilibili_pause.py`. The CCM restricted Worker blocks `node --test` child-process isolation and Node-to-Python `spawnSync` with `EPERM`, so run this Python suite directly (without a Node wrapper). BMGCTL emits UTF-8 JSON, which the Python caller must explicitly decode as UTF-8 instead of using the Windows default GBK codec.
 
-On 6v, the logged-in Bilibili tab for `BV11H4y1Z7UX` returned 1080P video and AAC audio. BMGCTL -> Bridge handed off the signed URLs (HTTP 204). Both direct Python execution in the registered CCM workspace and the real deferred `ccm-extra.bilibili_download_dash` call using a projectless-relative filename produced a 1920x1080 H.264 + AAC MP4 (12,701,104 bytes, 274.218 seconds), verified with ffprobe. The Windows restricted token blocks PowerShell script execution and Python private temporary-directory ACLs in this environment; the active Python downloader writes temporary files directly into an existing writable directory instead.
+On 2026-11-05, the logged-in Bilibili tab for `BV11H4y1Z7UX` returned `isLogin: true` and an actual 1920x1080 DASH video representation with AAC audio. The `no-cors` browser POST resulted in `BRIDGE_RECEIVED`; the real deferred `ccm-extra.bilibili_download_dash` invoked automatic pre-download pause successfully. The tab was independently checked afterward and reported `paused: true`. `ffprobe` verified the resulting MP4 as **1920x1080 HEVC + AAC, 274.218 seconds, 21,202,061 bytes**. The Windows restricted token blocks PowerShell script execution and Python private temporary-directory ACLs in this environment; the downloader writes temporary streams directly into an existing writable directory. `ccm-extra.publish` cannot publish this 21 MB MP4 because the current send_file limit is 12 MiB; the original local MP4 is intact.

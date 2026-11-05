@@ -32,7 +32,7 @@ def call_bmgctl(name, arguments, bmgctl=None, runner=subprocess.run):
     # are placed in command arguments or returned to the model.
     completed = runner(["cmd.exe", "/d", "/c", str(executable), "call", name,
                         "--args-base64", payload], capture_output=True,
-                       text=True, timeout=35)
+                       text=True, encoding="utf-8", timeout=35)
     if completed.returncode:
         raise RuntimeError(f"BMGCTL {name} failed (exit {completed.returncode})")
     try:

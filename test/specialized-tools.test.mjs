@@ -436,6 +436,8 @@ test('Bilibili deferred tool consumes only a local bridge handoff on 6v without 
   assert.match(tool.description, /Before downloading, the tool automatically pauses/);
   assert.doesNotMatch(tool.description, /IMMEDIATELY|autoplay|before doing anything else|cleanup|non-video/i);
   assert.match(tool.description, /BRIDGE IS REQUIRED/);
+  assert.match(tool.description, /mode no-cors, and Content-Type text\/plain/);
+  assert.match(tool.description, /Require the Bridge process to exit with BRIDGE_RECEIVED/);
   assert.equal(tool.inputSchema.video_url, undefined);
   assert.equal(tool.inputSchema.audio_url, undefined);
   assert.equal(tool.inputSchema.expected_height, undefined);

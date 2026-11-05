@@ -68,12 +68,13 @@ class PauseTests(unittest.TestCase):
 
         def runner(cmd, **kwargs):
             seen.append(cmd)
+            self.assertEqual(kwargs["encoding"], "utf-8")
             return SimpleNamespace(returncode=0, stdout=json.dumps({
-                "success": True, "result": {"content": [{"type": "text", "text": "OK"}]}}))
+                "success": True, "result": {"content": [{"type": "text", "text": "中文输出 OK"}]}}))
 
         result = pause.call_bmgctl("chrome_javascript", {"tabId": 17, "code": "return 'OK'"},
                                   bmgctl=SOURCE, runner=runner)
-        self.assertEqual(result["content"][0]["text"], "OK")
+        self.assertEqual(result["content"][0]["text"], "中文输出 OK")
         self.assertEqual(seen[0][:3], ["cmd.exe", "/d", "/c"])
         self.assertEqual(json.loads(base64.b64decode(seen[0][-1])),
                          {"tabId": 17, "code": "return 'OK'"})
