@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { codexRuntimeHome, provisionCodexRuntimeHome } from '../src/runtime/sandbox/codex-runtime-home.mjs';
 
 test('Codex runtime home is independent of the interactive Codex user config', () => {
@@ -16,7 +16,9 @@ test('Codex runtime home is independent of the interactive Codex user config', (
 
 test('Codex runtime bootstrap persists exact native TOML and refuses mismatched config', (t) => {
   if (process.platform !== 'win32') return t.skip('Windows paths only');
-  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-codex-home-test-'));
+  const cache = fileURLToPath(new URL('../.cache/', import.meta.url));
+  fs.mkdirSync(cache, { recursive: true });
+  const temp = fs.mkdtempSync(path.join(cache, 'ccm-codex-home-test-'));
   t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
   const template = path.join(temp, 'source.toml');
   const home = path.join(temp, 'protected-home');
