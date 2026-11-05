@@ -327,10 +327,11 @@ The `preworker` script builds the native helper for the current platform first.
 
 ### Upstream Codex Elevated Sandbox alignment (staging only)
 
-The isolated `feat/codex-elevated-parity` worktree pins the **entire** upstream
+The merged sandbox implementation records the **entire** reviewed upstream
 `openai/codex` source tree as a Git submodule at commit
 `f79b26ccbb3116b052544666a181012fb45dc49b`
-(`rust-v0.166.0-alpha.5.1`). See
+(`rust-v0.166.0-alpha.5.1`). This is a **source-audit baseline, not a required
+Codex CLI runtime version**. See
 `docs/codex-upstream-windows-parity.md` for the exact native source,
 configuration decision chain, host findings, and required acceptance matrix.
 The Codex-schema `config/codex/config.toml` is a *non-secret staged
@@ -345,9 +346,9 @@ logic. Neither Worker has been switched to the upstream Codex runtime. Until
 the entire decision chain is integrated and tested, do not call the CCM sandbox
 Codex-equivalent or assume experimental `run_as_admin` is safe.
 
-The staged native Codex CLI launcher has 13 targeted unit tests passing, and
-the isolated branch's full Node suite completed with 321 passes, 0 failures
-and 1 intentionally skipped privileged Windows integration test. On 6v,
+The native Codex CLI adapter has unit tests and opt-in privileged Windows
+integration tests. Its merged implementation is covered by the CCM Node test
+suite; real host-level sandbox testing is tracked separately. On 6v,
 an existing NTFS hardlink from the selected writable root to a disposable
 outside file caused Codex ACL setup to grant its sandbox account write rights
 to the outside file. **The owner explicitly accepts this upstream limitation**:
@@ -355,14 +356,18 @@ the purpose is to prevent accidental modifications of important files, not to
 enforce a malicious-actor-proof or absolute outside-workspace security boundary.
 Do not fork Codex to patch hardlinks or claim guaranteed confinement.
 Continue testing ordinary outside-file write denial and functional compatibility
-before enabling the new backend. The noha-installed Codex CLI was updated to
-0.166.0-alpha.6 while this branch pins 0.166.0-alpha.5.1. All probes used
-disposable files and left running Workers unchanged.
+before enabling the new backend. CCM no longer pins the installed Codex CLI
+to a particular release: it chooses the newest complete installation with
+the native command runner and sandbox setup helper in the same directory.
+Different CLI versions are allowed on different Workers; incompatible command
+or config behavior must be fixed and verified rather than dismissed solely
+because of a version number. Host-level probes used disposable files and left
+running Workers unchanged.
 
 The 6v trusted-host `ProcessManager → NativeEnvironmentExecutor → codex sandbox`
 integration test **passed**, including the staged
 `createWorkerRuntime({codexSandbox:true})` selection and dedicated Codex home.
-The selection checks the pinned native executable and its two helpers, then
+The selection checks the installed CLI and its two adjacent native helpers, then
 provisions the native config before accepting commands. It captured the normal
 exit code and `CodexSandboxOnline` identity, permitted an inside write, and
 denied an accidental outside write. The first run provisioned native sandbox
@@ -372,7 +377,7 @@ native tests are `test/codex-elevated-execution.test.mjs` and
 `test/codex-elevated-containment.test.mjs` (both opt-in on trusted Windows).
 Neither test requires patching upstream Codex.
 The actual Worker Agent has not selected this staged backend yet: the
-interactive/TTY, cancellation and cross-machine version gates remain open.
+interactive/TTY, cancellation and cross-machine functional gates remain open.
 
 ### User-command environment refresh
 

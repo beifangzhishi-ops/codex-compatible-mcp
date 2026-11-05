@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { CodexWindowsSandboxBackend, codexWorkspaceRootsOverride, resolvePinnedCodexRuntime } from '../src/runtime/sandbox/codex-windows-sandbox.mjs';
+import { CodexWindowsSandboxBackend, codexWorkspaceRootsOverride, resolveCodexRuntime } from '../src/runtime/sandbox/codex-windows-sandbox.mjs';
 
 const ROOT = 'C:\\ccm work\\project';
 const HOME = 'C:\\ccm-codex-sandbox\\private';
@@ -93,33 +93,67 @@ test('Codex workspace root escaping remains TOML data, not command text', () => 
   assert.throws(() => codexWorkspaceRootsOverride('..\\relative'), /absolute Windows path/);
 });
 
-test('Pinned Codex resolver requires one version and all matching native helper binaries', () => {
+test('Codex resolver accepts CLI updates and selects the newest complete runtime', () => {
   const root = 'C:\\Programs\\Codex\\bin';
-  const dirs = ['old', 'current'];
+  const dirs = ['old', 'current', 'incomplete'];
   const files = new Set([
     ...['codex.exe', 'codex-command-runner.exe', 'codex-windows-sandbox-setup.exe']
       .map((name) => path.win32.join(root, 'current', name)),
     ...['codex.exe', 'codex-command-runner.exe', 'codex-windows-sandbox-setup.exe']
       .map((name) => path.win32.join(root, 'old', name)),
+    path.win32.join(root, 'incomplete', 'codex.exe'),
   ]);
   const options = {
     binRoot: root,
     readdir: () => dirs.map((name) => ({ name, isDirectory: () => true })),
     isFile: (file) => files.has(file),
     execute: (file) => ({
-      status: 0, stdout: file.includes('\\current\\') ? 'codex-cli 0.166.0-alpha.5.1\n' : 'codex-cli 0.166.0-alpha.6\n',
+      status: 0, stdout: file.includes('\\current\\')
+        ? 'codex-cli 0.166.0-alpha.6\n' : 'codex-cli 0.166.0-alpha.5.1\n',
     }),
   };
-  assert.equal(resolvePinnedCodexRuntime(options), path.win32.join(root, 'current', 'codex.exe'));
-  dirs.splice(0, 2, 'old');
-  assert.throws(() => resolvePinnedCodexRuntime(options), /found 0/);
+  assert.equal(resolveCodexRuntime(options), path.win32.join(root, 'current', 'codex.exe'));
+  dirs.splice(0, 3, 'old');
+  assert.equal(resolveCodexRuntime(options), path.win32.join(root, 'old', 'codex.exe'));
   dirs.splice(0, 1, 'current', 'another');
   files.add(path.win32.join(root, 'another', 'codex.exe'));
   files.add(path.win32.join(root, 'another', 'codex-command-runner.exe'));
   files.add(path.win32.join(root, 'another', 'codex-windows-sandbox-setup.exe'));
   const duplicate = {
     ...options,
-    execute: () => ({ status: 0, stdout: 'codex-cli 0.166.0-alpha.5.1\n' }),
+    execute: () => ({ status: 0, stdout: 'codex-cli 0.166.0-alpha.6\n' }),
   };
-  assert.throws(() => resolvePinnedCodexRuntime(duplicate), /found 2/);
+  assert.throws(() => resolveCodexRuntime(duplicate), /Multiple equally recent/);
+  assert.throws(() => resolveCodexRuntime({ ...options, isFile: () => false }),
+    /requires an installed Codex CLI/);
+});
+
+test('Codex runtime selection follows SemVer for prereleases and stable releases', () => {
+  const root = 'C:\\Codex\\bin';
+  const dirs = ['alpha5', 'alpha6', 'stable', 'older'];
+  const files = new Set(dirs.flatMap((directory) =>
+    ['codex.exe', 'codex-command-runner.exe', 'codex-windows-sandbox-setup.exe']
+      .map((name) => path.win32.join(root, directory, name))));
+  const releases = {
+    alpha5: 'codex-cli 0.166.0-alpha.5.1',
+    alpha6: 'codex-cli 0.166.0-alpha.6',
+    stable: 'codex-cli 0.166.0',
+    older: 'codex-cli 0.165.99',
+  };
+  const options = {
+    binRoot: root,
+    readdir: () => dirs.map((name) => ({ name, isDirectory: () => true })),
+    isFile: (file) => files.has(file),
+    execute: (file) => ({
+      status: 0,
+      stdout: releases[path.win32.basename(path.win32.dirname(file))],
+    }),
+  };
+  assert.equal(resolveCodexRuntime(options), path.win32.join(root, 'stable', 'codex.exe'));
+  dirs.splice(dirs.indexOf('stable'), 1);
+  assert.equal(resolveCodexRuntime(options), path.win32.join(root, 'alpha6', 'codex.exe'));
+  dirs.splice(dirs.indexOf('alpha6'), 1);
+  assert.equal(resolveCodexRuntime(options), path.win32.join(root, 'alpha5', 'codex.exe'));
+  options.execute = () => ({ status: 0, stdout: 'unknown CLI output' });
+  assert.throws(() => resolveCodexRuntime(options), /requires an installed Codex CLI/);
 });

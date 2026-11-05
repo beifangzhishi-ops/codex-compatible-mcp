@@ -4,11 +4,47 @@ import { spawnSync } from 'node:child_process';
 import { directShellInvocation } from './native-sandbox.mjs';
 import { codexRuntimeHome } from './codex-runtime-home.mjs';
 
-// Both values are from upstream openai/codex at f79b26ccbb3116b052544666a181012fb45dc49b.
-// The installed CLI, setup helper and command runner must be from the same release.
-export const PINNED_CODEX_VERSION = 'codex-cli 0.166.0-alpha.5.1';
-export const PINNED_CODEX_COMMIT = 'f79b26ccbb3116b052544666a181012fb45dc49b';
+// The sandbox argv and permissions TOML were verified against upstream Codex
+// at f79b26ccbb3116b052544666a181012fb45dc49b. The installed Codex CLI
+// version is deliberately NOT pinned: select the newest complete installation.
 const HELPERS = ['codex.exe', 'codex-command-runner.exe', 'codex-windows-sandbox-setup.exe'];
+
+function parseCodexCliVersion(output) {
+  const match = /^codex-cli (\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/
+    .exec(String(output).trim());
+  return match ? {
+    numbers: match.slice(1, 4).map(Number),
+    prerelease: match[4]?.split('.') || [],
+  } : null;
+}
+
+function compareCodexCliVersions(left, right) {
+  for (let i = 0; i < 3; i++) {
+    if (left.numbers[i] !== right.numbers[i]) {
+      return left.numbers[i] > right.numbers[i] ? 1 : -1;
+    }
+  }
+  if (!left.prerelease.length) return right.prerelease.length ? 1 : 0;
+  if (!right.prerelease.length) return -1;
+  for (let i = 0; i < Math.max(left.prerelease.length, right.prerelease.length); i++) {
+    const a = left.prerelease[i];
+    const b = right.prerelease[i];
+    if (a === undefined) return -1;
+    if (b === undefined) return 1;
+    if (a === b) continue;
+    const aNumeric = /^\d+$/.test(a);
+    const bNumeric = /^\d+$/.test(b);
+    if (aNumeric && bNumeric) {
+      const aa = BigInt(a), bb = BigInt(b);
+      if (aa !== bb) return aa > bb ? 1 : -1;
+    } else if (aNumeric !== bNumeric) {
+      return aNumeric ? -1 : 1;
+    } else {
+      return a > b ? 1 : -1;
+    }
+  }
+  return 0;
+}
 
 function windowsPath(value, name) {
   if (typeof value !== 'string' || !path.win32.isAbsolute(value)) {
@@ -27,11 +63,12 @@ function isWithinWindowsRoot(root, candidate) {
 }
 
 /**
- * Find one installed copy of the exact upstream Codex version.
- * A version mismatch, missing helper, or ambiguous installation fails closed.
+ * Select the newest installed Codex CLI that has its command runner and setup
+ * helper alongside it. No fixed CLI version is required.
+ * Equal-version duplicates remain ambiguous rather than picking arbitrarily.
  * This is a lookup of the trusted host's installed binary, not a search in PATH.
  */
-export function resolvePinnedCodexRuntime({
+export function resolveCodexRuntime({
   binRoot = path.win32.join(process.env.LOCALAPPDATA || '', 'OpenAI', 'Codex', 'bin'),
   readdir = fs.readdirSync,
   isFile = (candidate) => fs.statSync(candidate).isFile(),
@@ -53,18 +90,25 @@ export function resolvePinnedCodexRuntime({
       windowsHide: true,
       timeout: 10_000,
     });
-    if (!result.error && result.status === 0 &&
-        String(result.stdout).trim() === PINNED_CODEX_VERSION) {
-      matches.push(executables[0]);
+    const version = !result.error && result.status === 0
+      ? parseCodexCliVersion(result.stdout) : null;
+    if (version) {
+      matches.push({ executable: executables[0], version });
     }
   }
-  if (matches.length !== 1) {
+  if (!matches.length) {
     throw new Error(
-      'Codex sandbox requires exactly one verified ' + PINNED_CODEX_VERSION +
-      ' runtime with both native helpers; found ' + matches.length + '. Refusing to substitute another version.',
+      'Codex sandbox requires an installed Codex CLI with its native command runner ' +
+      'and sandbox setup helper in the same directory.',
     );
   }
-  return matches[0];
+  matches.sort((a, b) => compareCodexCliVersions(b.version, a.version));
+  if (matches.length > 1 &&
+      compareCodexCliVersions(matches[0].version, matches[1].version) === 0) {
+    throw new Error('Multiple equally recent Codex CLI installations were found; ' +
+      'unable to choose a unique native sandbox runtime.');
+  }
+  return matches[0].executable;
 }
 
 // Upstream: codex-rs/config/src/permissions_toml.rs, WorkspaceRootsToml.
@@ -80,13 +124,13 @@ export function codexWorkspaceRootsOverride(workspaceRoot) {
 /**
  * Staged transport adapter for Codex's own Windows sandbox CLI.
  * Does not create Windows tokens, ACLs, firewall rules or sandbox users:
- * those belong entirely to the pinned upstream command and setup helpers.
+ * those belong entirely to the installed upstream Codex and its paired helpers.
  *
  * This backend is NOT enabled by default until end-to-end containment tests pass.
  */
 export class CodexWindowsSandboxBackend {
   constructor({
-    resolveRuntime = resolvePinnedCodexRuntime,
+    resolveRuntime = resolveCodexRuntime,
     codexHome = codexRuntimeHome(),
     fileExists = fs.existsSync,
   } = {}) {
@@ -125,9 +169,9 @@ export class CodexWindowsSandboxBackend {
     if (!this.fileExists(path.win32.join(codexHome, 'config.toml'))) {
       throw new Error('Codex runtime home is missing its native config.toml.');
     }
-    // Always resolve and verify the binary and helper versions before spawn.
+    // Resolve a complete Codex installation before spawn. No CLI version pin.
     // There is no unrestricted executable-path override in the production API.
-    const codexExecutable = windowsPath(this.resolveRuntime(), 'Pinned Codex binary');
+    const codexExecutable = windowsPath(this.resolveRuntime(), 'Codex CLI');
     const commandInvocation = directShellInvocation({
       platform: 'windows',
       shell: shell || environment.shell,

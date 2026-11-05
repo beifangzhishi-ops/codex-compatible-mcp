@@ -12,7 +12,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { resolvePinnedCodexRuntime, codexWorkspaceRootsOverride } from '../src/runtime/sandbox/codex-windows-sandbox.mjs';
+import { resolveCodexRuntime, codexWorkspaceRootsOverride } from '../src/runtime/sandbox/codex-windows-sandbox.mjs';
 
 const ENABLED = process.platform === 'win32' &&
   process.env.CCM_RUN_CODEX_ELEVATED_CONTAINMENT === '1';
@@ -21,7 +21,7 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 test('upstream Elevated Sandbox prevents ordinary accidental outside writes and records hardlink behavior', {
   skip: !ENABLED && 'requires explicit trusted Windows integration run',
 }, (t) => {
-  const cli = resolvePinnedCodexRuntime();
+  const cli = resolveCodexRuntime();
   const fixtureRoot = path.join(ROOT, '..', '.cache', 'codex-elevated-integration-' + randomUUID());
   const workspace = path.join(fixtureRoot, 'workspace');
   const cwd = path.join(workspace, 'sub');
