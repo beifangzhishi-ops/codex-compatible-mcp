@@ -12,6 +12,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 from uuid import uuid4
 
+from pause_video import pause_bilibili_tab
+
 
 def run(*args, timeout=900):
     proc = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
@@ -22,19 +24,27 @@ def run(*args, timeout=900):
     return proc.stdout
 
 
+def consume_handoff_and_pause(handoff, tab_id, pause=pause_bilibili_tab):
+    try:
+        data = json.loads(handoff.read_text(encoding="utf-8"))
+    finally:
+        handoff.unlink(missing_ok=True)
+    # Never start downloading if the exact task tab cannot be paused.
+    pause(tab_id)
+    return data
+
+
 def main():
     root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser()
     parser.add_argument("--projectless-handoff", action="store_true")
     parser.add_argument("--output", required=True)
     parser.add_argument("--timeout", type=int, default=900)
+    parser.add_argument("--browser-tab-id", type=int, required=True)
     args = parser.parse_args()
     handoff = (Path.cwd() / ".bilibili-dash-urls.json" if args.projectless_handoff
                else root / ".cache" / "bilibili-download" / "dash_urls.json").resolve()
-    try:
-        data = json.loads(handoff.read_text(encoding="utf-8"))
-    finally:
-        handoff.unlink(missing_ok=True)
+    data = consume_handoff_and_pause(handoff, args.browser_tab_id)
     video_url = data["video_url"]
     audio_url = data["audio_url"]
     expected_height = int(data["expected_height"])

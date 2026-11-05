@@ -433,10 +433,10 @@ test('Bilibili deferred tool consumes only a local bridge handoff on 6v without 
   assert.match(tool.description, /bmgctl\.cmd/);
   assert.match(tool.description, /Do not invoke BMG MCP tools/);
   assert.match(tool.description, /stop rather than silently using anonymous requests/);
-  assert.match(tool.description, /BROWSER CLEANUP IS REQUIRED/);
-  assert.match(tool.description, /including failed calls and tests/);
-  assert.match(tool.description, /chrome_javascript to pause playback/);
-  assert.match(tool.description, /do not close a tab that was already open for the user/);
+  assert.match(tool.description, /BROWSER PLAYBACK SAFETY IS MANDATORY/);
+  assert.match(tool.description, /IMMEDIATELY/);
+  assert.match(tool.description, /fail-closed automatic pause\/verification/);
+  assert.match(tool.description, /NEVER leave autoplay running, close pre-existing user tabs/);
   assert.match(tool.description, /BRIDGE IS REQUIRED/);
   assert.equal(tool.inputSchema.video_url, undefined);
   assert.equal(tool.inputSchema.audio_url, undefined);
@@ -444,12 +444,16 @@ test('Bilibili deferred tool consumes only a local bridge handoff on 6v without 
   assert.equal(tool.inputSchema.output_path.safeParse('video.mp4').success, true);
   assert.equal(tool.inputSchema.output_path.safeParse('C:\\media\\video.mp4').success, false);
   assert.equal(tool.inputSchema.output_path.safeParse('../video.mp4').success, false);
+  assert.equal(tool.inputSchema.browser_tab_id.safeParse(undefined).success, false);
+  assert.equal(tool.inputSchema.browser_tab_id.safeParse(0).success, false);
+  assert.equal(tool.inputSchema.browser_tab_id.safeParse(2042628313).success, true);
   assert.equal(tool.inputSchema.workspace_handle.safeParse(undefined).success, true);
   assert.equal(tool.inputSchema.environment_id.safeParse('noha').success, false);
   const result = await tool
     .handler({
       environment_id: 'DESKTOP-KFL6V1F',
       output_path: 'result.mp4',
+      browser_tab_id: 2042628313,
       timeout_seconds: 90,
     });
 
@@ -464,15 +468,18 @@ test('Bilibili deferred tool consumes only a local bridge handoff on 6v without 
   assert.equal(result.structuredContent.expected_height, undefined);
   assert.match(runtime.calls[0].cmd, /download-dash\.py/);
   assert.match(runtime.calls[0].cmd, /--timeout 90/);
+  assert.match(runtime.calls[0].cmd, /--browser-tab-id 2042628313/);
   assert.doesNotMatch(runtime.calls[0].cmd, /video_url|audio_url|SESSDATA/i);
   assert.equal(runtime.calls[0].workspace_handle, '00000000-0000-4000-8000-000000000001');
-  assert.equal((await tool.handler({ environment_id: 'noha', output_path: 'C:\\media\\bad.mp4' })).isError, true);
+  assert.equal((await tool.handler({ environment_id: 'noha', output_path: 'C:\\media\\bad.mp4', browser_tab_id: 1 })).isError, true);
+  assert.equal((await tool.handler({ output_path: 'missing-tab.mp4' })).isError, true);
   const existingHandle = '00000000-0000-4000-8000-000000000001';
   const reusable = await runtime.workspaceHandleManager.createProjectless('DESKTOP-KFL6V1F');
   assert.equal(reusable.workspace_handle, existingHandle);
   const reusedResult = await tool.handler({
     workspace_handle: existingHandle,
     output_path: 'projectless.mp4',
+    browser_tab_id: 2042628313,
   });
   assert.equal(reusedResult.isError, undefined);
   assert.equal(runtime.calls[1].workspace_handle, existingHandle);
@@ -481,5 +488,6 @@ test('Bilibili deferred tool consumes only a local bridge handoff on 6v without 
   assert.equal((await tool.handler({
     workspace_handle: '00000000-0000-4000-8000-000000000002',
     output_path: 'rejected.mp4',
+    browser_tab_id: 2042628313,
   })).isError, true);
 });
