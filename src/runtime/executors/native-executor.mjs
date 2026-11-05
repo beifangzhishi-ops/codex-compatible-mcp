@@ -7,6 +7,8 @@ import {
 import { fileURLToPath } from 'node:url';
 import { buildProxyEnvironment } from '../proxy-env.mjs';
 import { readCurrentCommandEnvironment } from '../windows-command-env.mjs';
+import { readCodexShellEnvironmentPolicy } from '../shell-environment-config.mjs';
+import { createShellEnvironment } from '../shell-environment.mjs';
 
 const DEFAULT_PTY_PROXY_PATH = fileURLToPath(
   new URL('../../../native/bin/ccm-pty-proxy.exe', import.meta.url),
@@ -103,6 +105,7 @@ export class NativeEnvironmentExecutor {
     workerEnvPath = DEFAULT_WORKER_ENV_PATH,
     baseEnv = process.env,
     commandEnvironment = readCurrentCommandEnvironment,
+    shellEnvironmentPolicy = readCodexShellEnvironmentPolicy(),
     spawnProcess = spawnChild,
     fileExists = fs.existsSync,
   }) {
@@ -112,6 +115,7 @@ export class NativeEnvironmentExecutor {
     this.workerEnvPath = workerEnvPath;
     this.baseEnv = baseEnv;
     this.commandEnvironment = commandEnvironment;
+    this.shellEnvironmentPolicy = shellEnvironmentPolicy;
     this.spawnProcess = spawnProcess;
     this.fileExists = fileExists;
   }
@@ -126,16 +130,20 @@ export class NativeEnvironmentExecutor {
     onData,
     onExit,
   }) {
-    const childEnv = buildProxyEnvironment(this.commandEnvironment(this.baseEnv), {
+    const commandEnv = buildProxyEnvironment(this.commandEnvironment(this.baseEnv), {
       mode: this.childProxyPolicy?.getMode?.() || 'proxy',
     });
-    Object.assign(childEnv, readWorkerChildEnvironment(this.workerEnvPath));
+    Object.assign(commandEnv, readWorkerChildEnvironment(this.workerEnvPath));
+    const childEnv = createShellEnvironment(commandEnv, this.shellEnvironmentPolicy, {
+      platform: environment.platform,
+    });
     const invocation = this.sandboxBackend.buildInvocation({
       environment,
       command,
       cwd,
       shell,
       permissionProfile,
+      useProfile: this.shellEnvironmentPolicy.use_profile === true,
     });
 
     if (tty) {

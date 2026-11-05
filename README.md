@@ -1,6 +1,6 @@
 # CCM — Codex-Compatible MCP
 
-CCM is a Codex-inspired execution harness for MCP clients. It focuses on a small, stable coding/execution surface, persistent process sessions, Remote Workers, native sandboxing, bounded tool output, patching, and image reads.
+CCM is an MCP execution harness targeting source-level behavioral parity with upstream Codex outside GPT Host integration. It provides persistent process sessions, Remote Workers, native sandboxing, bounded tool output, patching, and image reads. Full parity has not yet been verified.
 
 CCM does **not** attempt to reproduce Codex's model loop or own the host application's conversation history. The MCP client remains the orchestrator; CCM owns the execution world.
 
@@ -12,7 +12,19 @@ OpenAI Codex is the normative upstream for every CCM behavior except the ChatGPT
 
 **Audit baseline (2026-11-05):** `openai/codex` commit `ed8eac40832e6a79f30eaeb3c521912f231d43eb`. Relevant upstream entry points verified at this revision include `codex-rs/execpolicy/src/{parser,rule,policy,decision,execpolicycheck}.rs`, `codex-rs/shell-command/src/{powershell,parse_command}.rs`, `codex-rs/core/src/{exec_policy,exec_env}.rs`, and `codex-rs/protocol/src/{approvals,shell_environment,sandbox}.rs`. For future work, pin and inspect the actual upstream revision used rather than assuming this baseline is still current.
 
-**Alignment is not complete.** In particular, CCM currently retains its own JavaScript command parser and policy store, Controller-managed execution approvals and global Allow rules, and a separately implemented Windows native sandbox. These are **not** verified end-to-end equivalents of the upstream decision chain. Environment inheritance, sandbox selection, escalation flow, rule persistence, error handling and process/session semantics still require source-by-source comparison, native-behavior tests and any necessary migration before this project can claim full Codex parity. Prior CCM-specific behavior is not evidence of upstream equivalence; any conflict with the new rule must be raised rather than silently preserved.
+**Alignment is not complete.** CCM still has a separate JavaScript command parser/policy store, Controller approval flow, native Windows sandbox, and independent proxy, CA and registry-environment refresh mechanisms. The current environment-policy port below matches the documented Codex policy transformation but **does not** establish parity for the whole launch pipeline or configuration layering. Sandbox selection, escalation, persistence, error and session semantics still require source-by-source comparison. Do not silently preserve behavior merely because CCM had it before.
+
+### Codex shell environment policy: first integrated subsystem
+
+**Upstream pinned source:** `ed8eac40832e6a79f30eaeb3c521912f231d43eb`: `codex-rs/protocol/src/{shell_environment.rs,config_types.rs}`, `codex-rs/config/src/shell_environment_policy.rs`, `codex-rs/core/src/exec_env.rs`, and upstream `shell_environment_tests.rs`.
+
+The upstream-derived shell environment implementation is attributed to OpenAI Codex (Apache License 2.0); its license is included at `third_party/openai-codex/LICENSE`.
+
+CCM now reads the standard Codex `config.toml` under `CODEX_HOME`, or under the current Worker's `~/.codex` if `CODEX_HOME` is absent, when constructing its Worker executor. This shares the existing Codex `[shell_environment_policy]` configuration on each Worker rather than creating a conflicting CCM-only policy format. Supported TOML keys are `inherit = "all" | "core" | "none"`, `ignore_default_excludes` (Codex defaults to **true**), `exclude`, `include_only`, `set`, `filters` and `experimental_use_profile`. The canonical `filters` table cannot be mixed with legacy `exclude`/`include_only`; filter patterns are case-insensitive and have `*`/`?` wildcards. The policy applies inheritance, default excludes (when enabled), custom excludes, explicit overrides, include-only filtering, runtime thread ID (if provided), and final Codex non-inheritable identity-variable removal in that order. Windows overrides compare keys without case, and missing `PATHEXT` receives the Codex fallback. Pipe, PTY, restricted and Full Access launch paths share this environment calculation; the experimental profile setting reaches the PowerShell launch arguments in both native and direct paths. Restart the relevant Worker after updating Codex config to load a new policy.
+
+To configure a TeX user tree using Codex's actual configuration format, place `TEXMFHOME = "C:\\\\texmf"` under `[shell_environment_policy.set]` in that Worker's `~/.codex/config.toml`; it applies to all new shell commands in that Worker session, **not** just one `xdvipdfmx.exe` invocation. This implementation does not introduce a per-command `env` argument because that is not the Codex tool's contract.
+
+**Known launch-path mismatch still to resolve:** CCM currently refreshes Windows Machine/User registry environment variables for each command and applies its independent Worker child-proxy and local CA settings before the Codex policy; upstream Codex starts from the process environment managed by its own config/session layers. Explicit Codex `set` overrides the CCM command-layer values, so the effective result may differ from CCM's proxy/direct toggle when the same keys are explicitly configured. These retained facilities are **not** claimed Codex-parity features; no migration/removal has been made yet.
 
 ## Status
 
@@ -481,7 +493,7 @@ npm run worker
 
 ### Worker child-process CA configuration
 
-Use each machine's Git-ignored `config/worker.env` for both Worker bootstrap settings (`CCM_*`) and the optional command-only `CURL_CA_BUNDLE=<absolute path to an existing CA bundle>`. The 6v local Worker can use a file containing only `CURL_CA_BUNDLE`; no Remote Worker bootstrap values are required. The Remote Worker supervisor loads only `CCM_*` at startup, while the native executor reads the optional `CURL_CA_BUNDLE` anew for every pipe/PTY command (sandboxed or full-access). Editing the certificate path therefore requires no Worker restart. Other entries are not forwarded by this command-only setting, and Controller/WorkerHub/OAuth secrets are not sourced from it. Missing `config/worker.env` preserves the inherited command environment. Invalid entries or missing CA files fail the new command rather than disabling TLS verification. This remains separate from Codex's `shell_environment_policy.set` and the OAuth `config/ccm.env`.
+Use each machine's Git-ignored `config/worker.env` for Worker bootstrap settings (`CCM_*`) and the optional local child-process `CURL_CA_BUNDLE=<absolute path to an existing CA bundle>`. The Worker supervisor loads `CCM_*` at startup; the native executor reads the optional CA bundle on new pipe/PTY commands. That value feeds the environment **before** Codex `shell_environment_policy` is applied, so `inherit`, `exclude`, `include_only` or `set` can remove or supersede it. This legacy CCM configuration remains a recorded upstream mismatch, not a substitute for Codex `shell_environment_policy.set`. Controller/WorkerHub/OAuth secrets are not sourced from the file. Invalid entries or missing CA files fail the new command.
 
 ### Worker child-process proxy/direct mode
 

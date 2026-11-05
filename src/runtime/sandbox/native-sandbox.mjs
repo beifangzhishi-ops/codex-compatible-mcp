@@ -18,7 +18,7 @@ function detectShellType(shellPath, platform) {
   return platform === 'windows' ? 'powershell' : 'bash';
 }
 
-function directShellInvocation({ platform, shell, command }) {
+function directShellInvocation({ platform, shell, command, useProfile = false }) {
   const selected = shell?.path ||
     (platform === 'windows' ? 'powershell.exe' : '/bin/bash');
   const shellType = shell?.type || detectShellType(selected, platform);
@@ -29,7 +29,8 @@ function directShellInvocation({ platform, shell, command }) {
   if (platform === 'windows') {
     return {
       file: selected,
-      args: ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command],
+      args: ['-NoLogo', ...(!useProfile ? ['-NoProfile'] : []),
+        '-NonInteractive', '-Command', command],
     };
   }
   return { file: selected, args: ['-lc', command] };
@@ -46,6 +47,7 @@ export class NativeSandboxBackend {
     cwd,
     shell,
     permissionProfile,
+    useProfile = false,
   }) {
     if (permissionProfile === 'full-access') {
       return {
@@ -53,6 +55,7 @@ export class NativeSandboxBackend {
           platform: environment.platform,
           shell: shell || environment.shell,
           command,
+          useProfile,
         }),
         sandboxed: false,
         permissionProfile,
@@ -90,6 +93,8 @@ export class NativeSandboxBackend {
         selectedShell,
         '--command',
         command,
+        '--use-profile',
+        useProfile ? 'true' : 'false',
       ],
       sandboxed: true,
       permissionProfile,
