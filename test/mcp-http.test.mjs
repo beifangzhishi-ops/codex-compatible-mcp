@@ -166,6 +166,10 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       client.getInstructions(),
       /retry the same exec -> ccm\.write_stdin route at most twice.*do not fall back to Direct empty polling/i,
     );
+    assert.match(client.getInstructions(), /proactively provide a useful prefix_rule/i);
+    assert.match(client.getInstructions(), /npm run build:native.*prefix_rule=/i);
+    assert.match(client.getInstructions(), /Do not propose a generic shell or interpreter alone/i);
+    assert.match(client.getInstructions(), /global cross-Worker\/cross-workspace rule/i);
     const listed = await client.listTools();
     const names = listed.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, [
@@ -188,6 +192,10 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     ]);
     const execTool = listed.tools.find((tool) => tool.name === 'exec');
     assert.ok(execTool);
+    const commandTool = listed.tools.find((tool) => tool.name === 'exec_command');
+    assert.match(commandTool.description, /proactively supply a practical prefix_rule/i);
+    assert.match(commandTool.description, /Never use a bare general-purpose shell or interpreter/i);
+    assert.match(commandTool.inputSchema.properties.prefix_rule.description, /stable, narrowly useful ordered-token prefix/i);
     assert.deepEqual(execTool._meta?.['openai/fileParams'], ['file']);
     assert.deepEqual(
       execTool.inputSchema.properties.file.required,
