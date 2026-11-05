@@ -176,6 +176,9 @@ test('experimental admin restricted token retains admin SID and refuses external
     assert.equal(result.exit_code, 0, result.output);
     assert.match(result.output, /S-1-5-32-544/);
     assert.match(result.output, /SeDebugPrivilege/, 'expected retained administrator privileges');
+    assert.doesNotMatch(result.output,
+      /SeRestorePrivilege|SeBackupPrivilege|SeTakeOwnershipPrivilege|SeSecurityPrivilege|SeManageVolumePrivilege/,
+      'restricted administrator token must not retain file access-bypass privileges');
     const inside = await settled(runtime,
       "Set-Content -LiteralPath '.state/admin-restricted-test.txt' -Value ok -ErrorAction Stop"
     );
