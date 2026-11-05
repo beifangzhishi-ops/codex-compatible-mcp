@@ -1,11 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { registerSpecializedTools } from '../src/tools/specialized-tools.mjs';
 import { ToolRegistry } from '../src/tools/tool-registry.mjs';
 import { FileTransferStore } from '../src/controller/file-transfer-store.mjs';
 import { PUBLISHED_FILE_UI_URI } from '../src/ui/published-file-app.mjs';
 import { registerArchitectureTools } from '../src/tools/architecture-tools.mjs';
+import { PlanManager } from '../src/controller/plan-manager.mjs';
 
 function fakeRuntime() {
   const calls = [];
@@ -93,11 +96,11 @@ function fakeRuntime() {
   };
 }
 
-test('publish_worker_file is Direct + Code Mode and yields an HTTPS URL through direct and exec', async () => {
+test('publish is Direct + Code Mode and yields an HTTPS URL through direct and exec', async () => {
   const runtime = fakeRuntime();
   const registry = new ToolRegistry();
   registerSpecializedTools(registry, runtime);
-  const publish = registry.get('ccm-extra.publish_worker_file');
+  const publish = registry.get('ccm-extra.publish');
   assert.ok(publish);
   assert.equal(publish.surfaces.direct, true);
   assert.equal(publish.surfaces.codeMode, true);
@@ -110,7 +113,7 @@ test('publish_worker_file is Direct + Code Mode and yields an HTTPS URL through 
   const args = { workspace_handle: '00000000-0000-4000-8000-000000000001', path: 'report.docx' };
   const direct = await publish.handler(args);
   assert.equal(direct.isError, undefined);
-  assert.equal(direct.structuredContent.capability, 'publish_worker_file');
+  assert.equal(direct.structuredContent.capability, 'publish');
   assert.match(direct.structuredContent.download_url, /^https:\/\/example\.test\/ccm\/download\/[0-9a-f-]+$/);
   assert.equal(direct.structuredContent.preview_url, undefined);
   assert.equal(direct.structuredContent.filename, 'report.docx');
@@ -118,21 +121,21 @@ test('publish_worker_file is Direct + Code Mode and yields an HTTPS URL through 
   const token = direct.structuredContent.download_url.split('/').at(-1);
   assert.equal(runtime.fileTransferStore.get(token).byte_length, 4);
   registerArchitectureTools(registry);
-  const nested = await registry.get('exec').handler({ calls: [{ tool: 'ccm-extra.publish_worker_file', arguments: args }] });
+  const nested = await registry.get('exec').handler({ calls: [{ tool: 'ccm-extra.publish', arguments: args }] });
   assert.equal(nested.isError, undefined);
   assert.equal(nested.structuredContent.state, 'completed');
-  assert.equal(nested.structuredContent.calls[0].result.structured_content.capability, 'publish_worker_file');
+  assert.equal(nested.structuredContent.calls[0].result.structured_content.capability, 'publish');
   assert.ok(!nested.content.some((item) => item.type === 'resource_link'));
-  const parallel = await registry.get('exec').handler({ calls: [{ tool: 'ccm-extra.publish_worker_file', arguments: args }], parallel: true });
+  const parallel = await registry.get('exec').handler({ calls: [{ tool: 'ccm-extra.publish', arguments: args }], parallel: true });
   assert.equal(parallel.isError, true);
   runtime.fileTransferStore.close();
 });
 
-test('publish_worker_file uses the same file UI for images and non-images', async () => {
+test('publish uses the same file UI for images and non-images', async () => {
   const runtime = fakeRuntime();
   const registry = new ToolRegistry();
   registerSpecializedTools(registry, runtime);
-  const publish = registry.get('ccm-extra.publish_worker_file');
+  const publish = registry.get('ccm-extra.publish');
   const bytes = Buffer.from('image-test');
   runtime.fileService.sendFile = async () => ({
     environment_id: 'worker-a', filename: 'portrait.png', mime_type: 'image/png',
@@ -149,7 +152,7 @@ test('publish_worker_file uses the same file UI for images and non-images', asyn
   runtime.fileTransferStore.close();
 });
 
-test('publish_worker_file inlines only a bounded UTF-8 text prefix with full-text link', async () => {
+test('publish inlines only a bounded UTF-8 text prefix with full-text link', async () => {
   const runtime = fakeRuntime();
   const registry = new ToolRegistry();
   registerSpecializedTools(registry, runtime);
@@ -159,7 +162,7 @@ test('publish_worker_file inlines only a bounded UTF-8 text prefix with full-tex
     environment_id: 'worker-a', filename: 'readme.md', mime_type: 'text/markdown',
     byte_length: bytes.length, data: bytes.toString('base64'),
   });
-  const result = await registry.get('ccm-extra.publish_worker_file').handler({
+  const result = await registry.get('ccm-extra.publish').handler({
     path: 'readme.md', workspace_handle: '00000000-0000-4000-8000-000000000001',
   });
   const token = result.structuredContent.download_url.split('/').at(-1);
@@ -169,6 +172,72 @@ test('publish_worker_file inlines only a bounded UTF-8 text prefix with full-tex
   assert.match(result.structuredContent.text_preview, /^标题😀/);
   assert.equal(result.structuredContent.preview_url, undefined);
   runtime.fileTransferStore.close();
+});
+
+test('publish accepts exclusive Plan or Worker modes, with a complete immutable Plan snapshot', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-publish-plan-'));
+  const runtime = fakeRuntime();
+  runtime.planManager = new PlanManager({ stateDir: dir });
+  const registry = new ToolRegistry();
+  registerSpecializedTools(registry, runtime);
+  const publish = registry.get('ccm-extra.publish');
+  const lines = ['# Plan 标题', ...Array.from({ length: 900 }, (_, i) => 'line ' + i + ' 😀')];
+  const content = lines.join('\n');
+  try {
+    const { plan_id: planId } = await runtime.planManager.create([
+      '*** Begin Patch', '*** Add File: plan.md',
+      ...lines.map((line) => '+' + line), '*** End Patch',
+    ].join('\n'));
+    const bounded = await runtime.planManager.read(planId);
+    assert.equal(bounded.truncated, true);
+    const result = await publish.handler({ plan_id: planId });
+    assert.equal(result.isError, undefined);
+    assert.equal(result.structuredContent.capability, 'publish');
+    assert.equal(result.structuredContent.plan_id, planId);
+    assert.equal(result.structuredContent.environment_id, undefined);
+    assert.equal(result.structuredContent.filename, 'plan-' + planId + '.md');
+    assert.match(result.structuredContent.mime_type, /^text\/markdown/);
+    const persisted = await runtime.planManager.snapshot(planId);
+    assert.equal(persisted.toString('utf8').trimEnd(), content);
+    assert.equal(result.structuredContent.byte_length, persisted.length);
+    assert.equal(result.structuredContent.text_truncated, true);
+    assert.equal(result.structuredContent.preview_url, undefined);
+    const token = result.structuredContent.download_url.split('/').at(-1);
+    const snapshot = runtime.fileTransferStore.acquire(token);
+    assert.ok(snapshot);
+    const chunks = [];
+    for await (const chunk of snapshot.stream) chunks.push(chunk);
+    snapshot.release();
+    assert.deepEqual(Buffer.concat(chunks), persisted);
+
+    await runtime.planManager.patch(planId, [
+      '*** Begin Patch', '*** Update File: plan.md', '@@',
+      '-# Plan 标题', '+# Updated Plan 标题', '*** End Patch',
+    ].join('\n'));
+    const updated = await publish.handler({ plan_id: planId });
+    assert.notEqual(updated.structuredContent.download_url, result.structuredContent.download_url);
+    assert.equal(updated.structuredContent.text_preview.startsWith('# Updated Plan 标题'), true);
+    const original = runtime.fileTransferStore.acquire(token);
+    const originalChunks = [];
+    for await (const chunk of original.stream) originalChunks.push(chunk);
+    original.release();
+    assert.deepEqual(Buffer.concat(originalChunks), persisted);
+    assert.equal(runtime.calls.filter((call) => call.sendFile).length, 0);
+
+    const workerArgs = { workspace_handle: '00000000-0000-4000-8000-000000000001', path: 'report.docx' };
+    for (const invalid of [{}, { plan_id: planId, ...workerArgs }, { plan_id: planId, path: 'x' }, { path: 'x' }, { workspace_handle: workerArgs.workspace_handle }, { plan_id: 'bad' }]) {
+      assert.throws(() => registry.validateArguments(publish, invalid));
+    }
+    assert.deepEqual(registry.validateArguments(publish, { plan_id: planId }), { plan_id: planId });
+    assert.deepEqual(registry.validateArguments(publish, workerArgs), workerArgs);
+    const missing = await publish.handler({ plan_id: '00000000-0000-4000-8000-000000000099' });
+    assert.equal(missing.isError, true);
+    assert.match(missing.content[0].text, /Unknown plan_id/);
+  } finally {
+    runtime.fileTransferStore.close();
+    await runtime.planManager.close();
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('receive_file is Deferred + Code Mode and preserves native file objects through exec', async () => {

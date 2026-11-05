@@ -220,6 +220,16 @@ export class PlanManager {
     };
   }
 
+  async snapshot(planId) {
+    const id = assertPlanId(planId);
+    try {
+      return await fs.readFile(this.#planPath(id));
+    } catch (error) {
+      if (error?.code === 'ENOENT') throw new Error('Unknown plan_id: ' + id);
+      throw error;
+    }
+  }
+
   async close() {
     await Promise.allSettled([...this.writeChains.values()]);
     this.writeChains.clear();

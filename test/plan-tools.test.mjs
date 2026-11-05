@@ -35,9 +35,10 @@ test('Plan tools stay deferred, carry ids explicitly, and keep reads lifecycle-n
     assert.match(patchTool.description, /Decision-complete Plan/i);
     assert.match(patchTool.description, /without inventing new product or design decisions/i);
     assert.match(patchTool.description, /Final Plan handoff/i);
-    assert.match(patchTool.description, /complete latest text/i);
-    assert.match(patchTool.description, /truncated=true with next_start_line/i);
-    assert.match(patchTool.description, /implementation references remain lifecycle-neutral/i);
+    assert.match(patchTool.description, /ccm-extra\.publish tool with plan_id alone/i);
+    assert.match(patchTool.description, /immutable Markdown snapshot/i);
+    assert.match(patchTool.description, /Do not read the entire Plan solely for this handoff or paste it into the user reply/i);
+    assert.match(patchTool.description, /later plan_read calls during implementation remain lifecycle-neutral/i);
     assert.match(patchTool.description, /Keep the durable Plan current/);
     assert.match(patchTool.description, /Execution gate/);
     assert.match(patchTool.description, /workspace approval/);

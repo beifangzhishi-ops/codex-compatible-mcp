@@ -60,7 +60,7 @@ function mountCard() {
 test('published non-image displays filename and an externally opened download link without an image', () => {
   const card = mountCard();
   card.result({
-    capability: 'publish_worker_file',
+    capability: 'publish',
     download_url: downloadUrl,
     filename: 'results.pptx',
     mime_type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
@@ -82,7 +82,7 @@ test('published non-image displays filename and an externally opened download li
 test('published image shows fitted image and download link in the same card', () => {
   const card = mountCard();
   card.result({
-    capability: 'publish_worker_file',
+    capability: 'publish',
     download_url: downloadUrl,
     preview_url: previewUrl,
     filename: 'portrait.png',
@@ -110,7 +110,7 @@ test('published image shows fitted image and download link in the same card', ()
 test('published text has a scrollable fixed-height snippet, full view and download', () => {
   const card = mountCard();
   card.result({
-    capability: 'publish_worker_file',
+    capability: 'publish',
     download_url: downloadUrl,
     text_url: fullTextUrl,
     text_preview: '<h1>Hello</h1>\nline 2',
@@ -142,7 +142,7 @@ test('image preview link requires matching origin and token', () => {
   for (const url of invalidLinks) {
     const card = mountCard();
     card.result({
-      capability: 'publish_worker_file',
+      capability: 'publish',
       download_url: downloadUrl,
       preview_url: url,
       filename: 'photo.png',
@@ -155,7 +155,7 @@ test('image preview link requires matching origin and token', () => {
 test('image preview link survives thumbnail loading failure', () => {
   const card = mountCard();
   card.result({
-    capability: 'publish_worker_file',
+    capability: 'publish',
     download_url: downloadUrl,
     preview_url: previewUrl,
     preview_kind: 'image',
@@ -169,7 +169,7 @@ test('image preview link survives thumbnail loading failure', () => {
 test('text preview rejects foreign/mismatched full-text links', () => {
   const card = mountCard();
   card.result({
-    capability: 'publish_worker_file',
+    capability: 'publish',
     download_url: downloadUrl,
     text_url: 'https://evil.example/ccm/text/12345678-1234-4234-8234-123456789abc',
     text_preview: 'should not render',
@@ -181,7 +181,7 @@ test('text preview rejects foreign/mismatched full-text links', () => {
 
 test('PDF preview card retains its download link', () => {
   const card = mountCard();
-  card.result({ capability: 'publish_worker_file', download_url: downloadUrl,
+  card.result({ capability: 'publish', download_url: downloadUrl,
     preview_url: previewUrl, preview_kind: 'document', filename: 'report.pdf' });
   assert.equal(card.elements['preview-link'].href, previewUrl);
   assert.equal(card.elements['preview-link'].textContent, 'View PDF');

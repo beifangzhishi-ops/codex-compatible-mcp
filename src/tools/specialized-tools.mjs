@@ -35,7 +35,7 @@ function execResult(value, metadata = {}) {
   };
 }
 
-function fileResourceResult(value, environmentId, runtime) {
+function fileResourceResult(value, environmentId, runtime, metadata = {}) {
   const fileTransferStore = runtime.fileTransferStore;
   if (!fileTransferStore) {
     throw new Error('CCM file-transfer store is unavailable.');
@@ -56,8 +56,9 @@ function fileResourceResult(value, environmentId, runtime) {
       (previewUrl ? '\nPreview: ' + previewUrl : '') +
       '\nExpires: ' + new Date(transfer.expiresAt).toISOString() }],
     structuredContent: {
-      capability: 'publish_worker_file',
-      environment_id: environmentId,
+      capability: 'publish',
+      ...(environmentId ? { environment_id: environmentId } : {}),
+      ...metadata,
       download_url: url,
       ...(previewUrl ? { preview_url: previewUrl } : {}),
       ...(previewKind ? { preview_kind: previewKind } : {}),
@@ -198,7 +199,7 @@ export function registerSpecializedTools(registry, runtime) {
   }
   registry.register({
     namespace: 'ccm-extra',
-    name: 'publish_worker_file',
+    name: 'publish',
     provider: 'ccm-specialized',
     provenance: 'ccm-https-file-publishing',
     surfaces: { direct: true, codeMode: true },
@@ -207,32 +208,37 @@ export function registerSpecializedTools(registry, runtime) {
       ui: { resourceUri: PUBLISHED_FILE_UI_URI },
       'openai/outputTemplate': PUBLISHED_FILE_UI_URI,
     },
-    environmentRequirements: {
-      capabilities: ['sendFile'],
-    },
     supportsParallel: false,
     description: [
-      'Publish one Worker file as a temporary HTTPS download link (up to 72 hours) and one MCP App card. Browser-native images, PDF, audio/video and isolated HTML/SVG have preview links; supported raster images also show inline, UTF-8 text/Markdown/JSON/code show a bounded source snippet and full-text link. Unsupported files download only. No format conversion is performed. This is not a native ChatGPT attachment.',
-      'When a user asks to create a PPT, PDF, image, report or other artifact, you may proactively publish the finished result and useful preview images for the user without a separate request to send it. Stage previews are permitted and further CCM work may continue after publishing. Do not publish files merely for model-side inspection.',
-      'workspace_handle is required and determines the Worker. Relative paths are resolved from that context root; absolute paths remain absolute on the selected Worker.',
-      'Reuse an existing workspace_handle. For projectless work or permitted absolute-path reads without a handle, use create_projectless_handle; never select/register a project merely to publish its files or bypass pending entry approval.',
+      'Publish exactly one resource: either a Controller-hosted durable Plan using only plan_id, or a Worker file using both workspace_handle and path. These input modes are mutually exclusive; never supply plan_id together with path or workspace_handle. The original content is published as a fixed snapshot in a temporary HTTPS download link (up to 72 hours) with one MCP App card. Browser-native images, PDF, audio/video and isolated HTML/SVG have preview links; supported raster images show inline, and UTF-8 text/Markdown/JSON/code show a bounded source snippet with a full-text link. This is not a native ChatGPT attachment.',
+      'When planning reaches a decision-complete stopping point, publish the current Plan with plan_id without copying its full text into the reply. When generating user-facing artifacts, proactively publish finished deliverables and useful previews. Stage previews are permitted; do not publish files merely for model-side inspection.',
+      'For Worker files, workspace_handle is required and selects the Worker; relative paths resolve from its context root, absolute paths remain absolute. Reuse an existing handle; for genuinely projectless work use create_projectless_handle and never enter/register a project merely to publish a file.',
       'view_image is only for model-side image inspection. The card keeps the download link beside any native browser preview. PDF previews use the browser PDF reader; Office files require conversion and therefore remain download-only. Avoid publishing unnecessary intermediate files.',
-      'The original bytes are preserved. Publish one file at a time, sequentially; public links are bearer capabilities and anyone possessing them can download during their lifetime.',
+      'Publishing a Plan reads its entire latest persisted Markdown directly from Controller storage, without plan_read bounds, Worker access, or tracked-file writes. Every publication is an immutable snapshot, not a live Plan link. Publish one resource per call, sequentially; public links are bearer capabilities and anyone possessing them can download during their lifetime.',
     ].join('\n\n'),
-    inputSchema: {
-      path: z.string().min(1).describe(
-        'Exactly one Worker file to publish for the user. Relative paths resolve from the selected context root; absolute paths remain absolute. Publish multiple files sequentially.',
-      ),
-      workspace_handle: z.string().uuid().describe(
-        'Existing workspace handle used to determine the Worker that owns the file.',
-      ),
-    },
+    inputSchema: z.object({
+      plan_id: z.string().uuid().optional().describe('To publish a Controller Plan: supply only this durable Plan UUID.'),
+      path: z.string().min(1).optional().describe('To publish a Worker file: supply its path and workspace_handle, without plan_id.'),
+      workspace_handle: z.string().uuid().optional().describe('Required with path for Worker file publishing; forbidden with plan_id.'),
+    }).strict().superRefine((args, ctx) => {
+      if (args.plan_id != null ? (args.path != null || args.workspace_handle != null) :
+          (args.path == null || args.workspace_handle == null)) {
+        ctx.addIssue({ code: 'custom', message: 'Supply either plan_id alone, or both workspace_handle and path.' });
+      }
+    }),
     handler: async (args) => {
       try {
-        const value = await runtime.fileService.sendFile({
-          workspace_handle: args.workspace_handle,
-          path: args.path,
-        });
+        if (args.plan_id != null) {
+          if (!runtime.planManager) throw new Error('CCM Plan manager is unavailable.');
+          const bytes = await runtime.planManager.snapshot(args.plan_id);
+          return fileResourceResult({
+            filename: 'plan-' + args.plan_id + '.md',
+            mime_type: 'text/markdown; charset=utf-8',
+            byte_length: bytes.length,
+            data: bytes.toString('base64'),
+          }, null, runtime, { plan_id: args.plan_id });
+        }
+        const value = await runtime.fileService.sendFile({ workspace_handle: args.workspace_handle, path: args.path });
         return fileResourceResult(
           value,
           value.environment_id,

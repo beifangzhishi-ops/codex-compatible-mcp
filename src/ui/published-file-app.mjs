@@ -1,4 +1,4 @@
-export const PUBLISHED_FILE_UI_URI = 'ui://ccm/published-file-v7.html';
+export const PUBLISHED_FILE_UI_URI = 'ui://ccm/published-file-v8.html';
 
 // Every publication gets one useful card: images render inline, text shows a
 // bounded scrollable snippet, and other browser-native types show preview links.
@@ -129,7 +129,7 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
       enableExternalLink(previewLink, 'preview');
       function show(result) {
         const value = result?.structuredContent || result;
-        if (value?.capability !== 'publish_worker_file') return;
+        if (value?.capability !== 'publish') return;
         const downloadUrl = value.download_url;
         if (!validUrl(downloadUrl, 'download')) {
           status.textContent = 'Invalid CCM download URL.';

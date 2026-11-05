@@ -77,6 +77,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     execPolicyStateFile: path.join(tempRoot, 'exec-allowlist.json'),
     trustedPackageScriptStateFile: path.join(tempRoot, 'trusted-package-scripts.json'),
     workspaceHandleStateFile: path.join(tempRoot, 'workspace-handles.json'),
+    transferTaskStateFile: path.join(tempRoot, 'transfer-tasks.json'),
     fileTransferStateDir: path.join(tempRoot, 'file-transfers'),
     fileDownloadOrigin: () => 'https://example.test',
     planStateDir: path.join(tempRoot, 'plans'),
@@ -149,9 +150,9 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(client.getInstructions(), /recommended default there when useful/i);
     assert.match(client.getInstructions(), /tracked implementation edits.*remain gated/i);
     assert.match(client.getInstructions(), /decision-complete for another executor/i);
-    assert.match(client.getInstructions(), /complete latest text.*same user-visible reply/i);
-    assert.match(client.getInstructions(), /truncated.*next_start_line.*ordered range reads/i);
-    assert.match(client.getInstructions(), /later plan_read calls used during implementation remain lifecycle-neutral/i);
+    assert.match(client.getInstructions(), /call Direct ccm-extra\.publish with plan_id alone/i);
+    assert.match(client.getInstructions(), /Do not read the entire Plan solely for the handoff/i);
+    assert.match(client.getInstructions(), /later plan_read calls during implementation remain lifecycle-neutral/i);
     assert.match(client.getInstructions(), /does not maintain a Plan-Mode state machine/i);
     assert.match(client.getInstructions(), /discover deferred ccm\.claim_full_access with tool_search and call it through exec/i);
     assert.match(
@@ -179,7 +180,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       'exec_command',
       'get_approval_status',
       'get_verification_input_status',
-      'publish_worker_file',
+      'publish',
       'request_approval',
       'request_verification_input',
       'resolve_pending_action',
@@ -234,7 +235,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       (tool) => tool.name === 'request_approval',
     );
     assert.equal(approvalTool?._meta?.ui?.resourceUri, APPROVAL_UI_URI);
-    const publishedFileUiTool = listed.tools.find((tool) => tool.name === 'publish_worker_file');
+    const publishedFileUiTool = listed.tools.find((tool) => tool.name === 'publish');
     assert.equal(publishedFileUiTool?._meta?.ui?.resourceUri, PUBLISHED_FILE_UI_URI);
     assert.equal(publishedFileUiTool?._meta?.['openai/outputTemplate'], PUBLISHED_FILE_UI_URI);
     for (const name of ['select_workspace', 'register_workspace']) {
@@ -302,9 +303,12 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(receiveFileTool.description, /ordinary conversation attachment.*top-level file/i);
     assert.match(receiveFileTool.description, /Library file.*materialize.*raw_file.*top-level exec\.file/i);
 
-    const publishTool = listed.tools.find((tool) => tool.name === 'publish_worker_file');
+    const publishTool = listed.tools.find((tool) => tool.name === 'publish');
     assert.ok(publishTool);
     assert.match(publishTool.description, /proactively publish/i);
+    assert.ok(publishTool.inputSchema.properties.plan_id);
+    assert.ok(publishTool.inputSchema.properties.workspace_handle);
+    assert.ok(publishTool.inputSchema.properties.path);
     assert.equal(listed.tools.some((tool) => tool.name === 'import_chatgpt_file'), false);
     assert.match(client.getInstructions(), /Publish user-facing deliverables and useful previews/i);
     assert.match(client.getInstructions(), /shared conversations.*ccm-extra\.chatgpt_share_export.*tool_search -> exec/i);
@@ -608,7 +612,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const docBytes = Buffer.alloc(3 * 1024 * 1024, 0x61);
     await fs.writeFile(path.join(workspaceRoot, 'preview.docx'), docBytes);
     const publishResult = await client.callTool({
-      name: 'publish_worker_file',
+      name: 'publish',
       arguments: { workspace_handle: workspaceHandle, path: 'preview.docx' },
     });
     assert.equal(publishResult.isError, undefined);
@@ -620,6 +624,29 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const download = await fetch('http://127.0.0.1:' + controller.address.port + '/ccm/download/' + token);
     assert.equal(download.status, 200);
     assert.deepEqual(Buffer.from(await download.arrayBuffer()), docBytes);
+
+    const planLines = ['# Delivered plan', ...Array.from({ length: 500 }, (_, i) => 'step ' + i)];
+    const createdPlan = await runtime.planManager.create([
+      '*** Begin Patch', '*** Add File: plan.md', ...planLines.map((line) => '+' + line), '*** End Patch',
+    ].join('\n'));
+    assert.equal((await runtime.planManager.read(createdPlan.plan_id)).truncated, true);
+    const planPublish = await client.callTool({
+      name: 'publish',
+      arguments: { plan_id: createdPlan.plan_id },
+    });
+    assert.equal(planPublish.isError, undefined);
+    assert.equal(planPublish.structuredContent.plan_id, createdPlan.plan_id);
+    assert.equal(planPublish.structuredContent.environment_id, undefined);
+    assert.equal(planPublish.structuredContent.text_truncated, false);
+    assert.match(planPublish.structuredContent.text_url, /^https:\/\/example\.test\/ccm\/preview\//);
+    const planToken = planPublish.structuredContent.download_url.split('/').at(-1);
+    const planDownload = await fetch('http://127.0.0.1:' + controller.address.port + '/ccm/download/' + planToken);
+    assert.equal(planDownload.status, 200);
+    assert.deepEqual(Buffer.from(await planDownload.arrayBuffer()), await runtime.planManager.snapshot(createdPlan.plan_id));
+    const planPreview = await fetch('http://127.0.0.1:' + controller.address.port + '/ccm/preview/' + planToken);
+    assert.equal(planPreview.status, 200);
+    assert.match(planPreview.headers.get('content-type'), /^text\/plain/);
+    assert.match(await planPreview.text(), /^# Delivered plan/);
 
     registry.register({
       name: 'late_echo',
