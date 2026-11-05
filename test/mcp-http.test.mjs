@@ -637,16 +637,16 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(planPublish.isError, undefined);
     assert.equal(planPublish.structuredContent.plan_id, createdPlan.plan_id);
     assert.equal(planPublish.structuredContent.environment_id, undefined);
-    assert.equal(planPublish.structuredContent.text_truncated, false);
-    assert.match(planPublish.structuredContent.text_url, /^https:\/\/example\.test\/ccm\/preview\//);
+    assert.equal(planPublish.structuredContent.markdown_truncated, false);
+    assert.match(planPublish.structuredContent.preview_url, /^https:\/\/example\.test\/ccm\/preview\//);
     const planToken = planPublish.structuredContent.download_url.split('/').at(-1);
     const planDownload = await fetch('http://127.0.0.1:' + controller.address.port + '/ccm/download/' + planToken);
     assert.equal(planDownload.status, 200);
     assert.deepEqual(Buffer.from(await planDownload.arrayBuffer()), await runtime.planManager.snapshot(createdPlan.plan_id));
     const planPreview = await fetch('http://127.0.0.1:' + controller.address.port + '/ccm/preview/' + planToken);
     assert.equal(planPreview.status, 200);
-    assert.match(planPreview.headers.get('content-type'), /^text\/plain/);
-    assert.match(await planPreview.text(), /^# Delivered plan/);
+    assert.match(planPreview.headers.get('content-type'), /^text\/html/);
+    assert.match(await planPreview.text(), /<h1>Delivered plan<\/h1>/);
 
     registry.register({
       name: 'late_echo',

@@ -152,7 +152,7 @@ test('publish uses the same file UI for images and non-images', async () => {
   runtime.fileTransferStore.close();
 });
 
-test('publish inlines only a bounded UTF-8 text prefix with full-text link', async () => {
+test('publish renders only a bounded Markdown prefix with full HTML preview link', async () => {
   const runtime = fakeRuntime();
   const registry = new ToolRegistry();
   registerSpecializedTools(registry, runtime);
@@ -166,11 +166,12 @@ test('publish inlines only a bounded UTF-8 text prefix with full-text link', asy
     path: 'readme.md', workspace_handle: '00000000-0000-4000-8000-000000000001',
   });
   const token = result.structuredContent.download_url.split('/').at(-1);
-  assert.equal(result.structuredContent.text_url, 'https://example.test/ccm/preview/' + token);
-  assert.equal(result.structuredContent.text_truncated, true);
-  assert.ok(Buffer.byteLength(result.structuredContent.text_preview) <= 8192);
-  assert.match(result.structuredContent.text_preview, /^标题😀/);
-  assert.equal(result.structuredContent.preview_url, undefined);
+  assert.equal(result.structuredContent.preview_url, 'https://example.test/ccm/preview/' + token);
+  assert.equal(result.structuredContent.preview_kind, 'markdown');
+  assert.equal(result.structuredContent.markdown_truncated, true);
+  assert.match(result.structuredContent.markdown_preview, /^<p>标题😀/);
+  assert.equal(result.structuredContent.text_preview, undefined);
+  assert.equal(result.structuredContent.text_url, undefined);
   runtime.fileTransferStore.close();
 });
 
@@ -200,8 +201,9 @@ test('publish accepts exclusive Plan or Worker modes, with a complete immutable 
     const persisted = await runtime.planManager.snapshot(planId);
     assert.equal(persisted.toString('utf8').trimEnd(), content);
     assert.equal(result.structuredContent.byte_length, persisted.length);
-    assert.equal(result.structuredContent.text_truncated, true);
-    assert.equal(result.structuredContent.preview_url, undefined);
+    assert.equal(result.structuredContent.markdown_truncated, true);
+    assert.match(result.structuredContent.markdown_preview, /^<h1>Plan 标题<\/h1>/);
+    assert.match(result.structuredContent.preview_url, /^https:\/\/example\.test\/ccm\/preview\//);
     const token = result.structuredContent.download_url.split('/').at(-1);
     const snapshot = runtime.fileTransferStore.acquire(token);
     assert.ok(snapshot);
@@ -216,7 +218,7 @@ test('publish accepts exclusive Plan or Worker modes, with a complete immutable 
     ].join('\n'));
     const updated = await publish.handler({ plan_id: planId });
     assert.notEqual(updated.structuredContent.download_url, result.structuredContent.download_url);
-    assert.equal(updated.structuredContent.text_preview.startsWith('# Updated Plan 标题'), true);
+    assert.match(updated.structuredContent.markdown_preview, /^<h1>Updated Plan 标题<\/h1>/);
     const original = runtime.fileTransferStore.acquire(token);
     const originalChunks = [];
     for await (const chunk of original.stream) originalChunks.push(chunk);

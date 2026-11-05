@@ -9,7 +9,7 @@ const fullTextUrl = 'https://example.test/ccm/preview/12345678-1234-4234-8234-12
 
 function mountCard() {
   const elements = Object.fromEntries(
-    ['frame', 'filename', 'picture', 'image', 'image-link', 'preview-link', 'text-preview', 'text-note', 'status', 'details', 'link', 'full-link']
+    ['frame', 'filename', 'picture', 'image', 'image-link', 'preview-link', 'text-preview', 'markdown-preview', 'text-note', 'status', 'details', 'link', 'full-link']
       .map((name) => [name, {
         style: {},
         textContent: '',
@@ -132,6 +132,39 @@ test('published text has a scrollable fixed-height snippet, full view and downlo
   assert.equal(card.opened[0].href, fullTextUrl);
   assert.match(PUBLISHED_FILE_UI_HTML, /height:\s*220px/);
   assert.match(PUBLISHED_FILE_UI_HTML, /overflow:\s*auto/);
+});
+
+test('published Markdown displays formatted snippet, full preview link and original download', () => {
+  const card = mountCard();
+  card.result({
+    capability: 'publish', download_url: downloadUrl, preview_url: previewUrl,
+    preview_kind: 'markdown', markdown_preview: '<h1>计划</h1><table><tr><td>Done</td></tr></table>',
+    markdown_truncated: true, filename: 'plan.md',
+  });
+  assert.match(card.elements['markdown-preview'].innerHTML, /<h1>计划<\/h1>/);
+  assert.equal(card.elements['markdown-preview'].style.display, 'block');
+  assert.equal(card.elements['text-preview'].style.display, 'none');
+  assert.equal(card.elements['full-link'].href, previewUrl);
+  assert.equal(card.elements['full-link'].textContent, 'View full Markdown');
+  assert.equal(card.elements.link.href, downloadUrl);
+  assert.match(card.elements['text-note'].textContent, /beginning/);
+  assert.match(PUBLISHED_FILE_UI_HTML, /height:\s*260px/);
+  let prevented = false;
+  card.elements['full-link'].click({ preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.equal(card.opened[0].href, previewUrl);
+});
+
+test('Markdown card does not accept mismatched preview links', () => {
+  const card = mountCard();
+  card.result({
+    capability: 'publish', download_url: downloadUrl,
+    preview_url: 'https://example.test/ccm/preview/87654321-1234-4234-8234-123456789abc',
+    preview_kind: 'markdown', markdown_preview: '<h1>not trusted</h1>',
+  });
+  assert.equal(card.elements['markdown-preview'].style.display, 'none');
+  assert.equal(card.elements['full-link'].style.display, 'none');
+  assert.equal(card.elements.link.href, downloadUrl);
 });
 
 test('image preview link requires matching origin and token', () => {

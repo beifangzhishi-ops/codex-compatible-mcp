@@ -1,4 +1,4 @@
-export const PUBLISHED_FILE_UI_URI = 'ui://ccm/published-file-v8.html';
+export const PUBLISHED_FILE_UI_URI = 'ui://ccm/published-file-v9.html';
 
 // Every publication gets one useful card: images render inline, text shows a
 // bounded scrollable snippet, and other browser-native types show preview links.
@@ -29,6 +29,25 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
       background: rgba(127, 127, 127, 0.10); border-radius: 6px;
       user-select: text;
     }
+    #markdown-preview {
+      display: none; height: 260px; max-width: 100%; overflow: auto;
+      overflow-wrap: anywhere; margin: 0; padding: 12px;
+      background: rgba(127, 127, 127, 0.07); border-radius: 6px;
+      font: 13px/1.55 system-ui, sans-serif; user-select: text;
+    }
+    #markdown-preview h1, #markdown-preview h2, #markdown-preview h3 { margin: .85em 0 .4em; line-height: 1.3; }
+    #markdown-preview h1 { font-size: 1.45em; }
+    #markdown-preview h2 { font-size: 1.25em; }
+    #markdown-preview h3 { font-size: 1.1em; }
+    #markdown-preview p, #markdown-preview ul, #markdown-preview ol,
+    #markdown-preview pre, #markdown-preview table { margin: .5em 0; }
+    #markdown-preview pre { overflow: auto; padding: 8px; border-radius: 4px;
+      background: rgba(127, 127, 127, 0.12); }
+    #markdown-preview code { font-family: ui-monospace, monospace; }
+    #markdown-preview table { display: block; overflow-x: auto; border-collapse: collapse; }
+    #markdown-preview th, #markdown-preview td { padding: 4px 7px; border: 1px solid #8886; }
+    #markdown-preview blockquote { border-left: 3px solid #888; margin-left: 0; padding-left: 10px; }
+    #markdown-preview a { pointer-events: none; }
     #text-note { display: none; margin-top: 5px; font-size: 11px; opacity: 0.65; }
     #status { opacity: 0.8; }
     #details { display: none; margin-top: 7px; font-size: 12px; opacity: 0.7; }
@@ -42,6 +61,7 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
     <a id="image-link" target="_blank" rel="noopener noreferrer">View image</a>
     <a id="preview-link" target="_blank" rel="noopener noreferrer">Preview file</a>
     <pre id="text-preview"></pre>
+    <div id="markdown-preview"></div>
     <div id="text-note"></div>
     <div id="status">Loading published file…</div>
     <div id="details"></div>
@@ -57,6 +77,7 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
       const imageLink = document.getElementById('image-link');
       const previewLink = document.getElementById('preview-link');
       const textPreview = document.getElementById('text-preview');
+      const markdownPreview = document.getElementById('markdown-preview');
       const textNote = document.getElementById('text-note');
       const status = document.getElementById('status');
       const details = document.getElementById('details');
@@ -148,8 +169,33 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
         previewLink.style.display = 'none';
         details.style.display = 'none';
         textPreview.style.display = 'none';
+        markdownPreview.style.display = 'none';
+        markdownPreview.innerHTML = '';
         textNote.style.display = 'none';
         fullLink.style.display = 'none';
+        const markdownUrl = value.preview_url;
+        if (value.preview_kind === 'markdown' &&
+            validUrl(markdownUrl, 'preview') &&
+            new URL(markdownUrl).origin === new URL(downloadUrl).origin &&
+            markdownUrl.split('/').at(-1) === downloadUrl.split('/').at(-1)) {
+          image.removeAttribute('src');
+          if (typeof value.markdown_preview === 'string' &&
+              value.markdown_preview.length <= 32768) {
+            markdownPreview.innerHTML = value.markdown_preview;
+            markdownPreview.scrollTop = 0;
+            markdownPreview.style.display = 'block';
+            textNote.textContent = value.markdown_truncated
+              ? 'Showing the beginning of the rendered Markdown.'
+              : 'Rendered Markdown preview.';
+            textNote.style.display = 'block';
+          }
+          fullLink.href = markdownUrl;
+          fullLink.textContent = 'View full Markdown';
+          fullLink.style.display = 'block';
+          status.style.display = 'none';
+          sizeChanged();
+          return;
+        }
         const fullTextUrl = value.text_url;
         if (validUrl(fullTextUrl, 'preview') &&
             new URL(fullTextUrl).origin === new URL(downloadUrl).origin &&
@@ -164,6 +210,7 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
             : 'Full text shown in the scrollable preview.';
           textNote.style.display = 'block';
           fullLink.href = fullTextUrl;
+          fullLink.textContent = 'View full text';
           fullLink.style.display = 'block';
           status.style.display = 'none';
           sizeChanged();

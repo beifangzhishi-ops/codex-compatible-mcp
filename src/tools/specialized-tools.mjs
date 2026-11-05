@@ -2,6 +2,7 @@
 import { PUBLISHED_FILE_UI_URI } from '../ui/published-file-app.mjs';
 import { textPreviewFromBase64 } from '../controller/text-file-preview.mjs';
 import { publishedPreviewKind } from '../controller/published-file-preview.mjs';
+import { renderMarkdownFragment } from '../controller/markdown-preview.mjs';
 function toolError(error) {
   return {
     content: [{ type: 'text', text: String(error?.message || error) }],
@@ -47,10 +48,14 @@ function fileResourceResult(value, environmentId, runtime, metadata = {}) {
   const previewKind = publishedPreviewKind(transfer.mime_type);
   const previewUrl = previewKind && previewKind !== 'text'
     ? origin + '/ccm/preview/' + transfer.token : undefined;
-  const textPreview = previewKind === 'text'
+  const textPreview = (previewKind === 'text' || previewKind === 'markdown')
     ? textPreviewFromBase64(value.data, transfer.mime_type) : null;
-  const textUrl = textPreview
+  const textUrl = previewKind === 'text' && textPreview
     ? origin + '/ccm/preview/' + transfer.token : undefined;
+  const candidateMarkdown = previewKind === 'markdown' && textPreview
+    ? renderMarkdownFragment(textPreview.text) : null;
+  const markdownPreview = candidateMarkdown && Buffer.byteLength(candidateMarkdown, 'utf8') <= 32 * 1024
+    ? candidateMarkdown : null;
   return {
     content: [{ type: 'text', text: 'Download ' + transfer.filename + ': ' + url +
       (previewUrl ? '\nPreview: ' + previewUrl : '') +
@@ -66,6 +71,10 @@ function fileResourceResult(value, environmentId, runtime, metadata = {}) {
         text_url: textUrl,
         text_preview: textPreview.text,
         text_truncated: textPreview.truncated,
+      } : {}),
+      ...(markdownPreview != null ? {
+        markdown_preview: markdownPreview,
+        markdown_truncated: textPreview.truncated,
       } : {}),
       filename: transfer.filename,
       mime_type: transfer.mime_type,
@@ -210,7 +219,7 @@ export function registerSpecializedTools(registry, runtime) {
     },
     supportsParallel: false,
     description: [
-      'Publish exactly one resource: either a Controller-hosted durable Plan using only plan_id, or a Worker file using both workspace_handle and path. These input modes are mutually exclusive; never supply plan_id together with path or workspace_handle. The original content is published as a fixed snapshot in a temporary HTTPS download link (up to 72 hours) with one MCP App card. Browser-native images, PDF, audio/video and isolated HTML/SVG have preview links; supported raster images show inline, and UTF-8 text/Markdown/JSON/code show a bounded source snippet with a full-text link. This is not a native ChatGPT attachment.',
+      'Publish exactly one resource: either a Controller-hosted durable Plan using only plan_id, or a Worker file using both workspace_handle and path. These input modes are mutually exclusive; never supply plan_id together with path or workspace_handle. The original content is published as a fixed snapshot in a temporary HTTPS download link (up to 72 hours) with one MCP App card. Markdown is rendered as safe HTML in the card (bounded excerpt) and full browser preview, while the original .md stays downloadable. Other UTF-8 text/JSON/code uses a source snippet and full-text link. Browser-native images, PDF, audio/video and isolated HTML/SVG have preview links. This is not a native ChatGPT attachment.',
       'When planning reaches a decision-complete stopping point, publish the current Plan with plan_id without copying its full text into the reply. When generating user-facing artifacts, proactively publish finished deliverables and useful previews. Stage previews are permitted; do not publish files merely for model-side inspection.',
       'For Worker files, workspace_handle is required and selects the Worker; relative paths resolve from its context root, absolute paths remain absolute. Reuse an existing handle; for genuinely projectless work use create_projectless_handle and never enter/register a project merely to publish a file.',
       'view_image is only for model-side image inspection. The card keeps the download link beside any native browser preview. PDF previews use the browser PDF reader; Office files require conversion and therefore remain download-only. Avoid publishing unnecessary intermediate files.',

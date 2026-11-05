@@ -9,6 +9,7 @@ export const ISOLATED_MARKUP_CSP = "sandbox; default-src 'none'; style-src 'unsa
 
 export function publishedPreviewKind(mime) {
   const type = String(mime || '').split(';', 1)[0].trim().toLowerCase();
+  if (type === 'text/markdown' || type === 'text/x-markdown') return 'markdown';
   if (MARKUP_TYPES.has(type)) return 'markup';
   if (IMAGE_TYPES.has(type)) return 'image';
   if (type === 'application/pdf') return 'document';

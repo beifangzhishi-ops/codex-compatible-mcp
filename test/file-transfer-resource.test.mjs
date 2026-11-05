@@ -116,3 +116,35 @@ test('HTML is isolated by a restrictive CSP sandbox', async () => withController
   assert.match(res.headers.get('content-security-policy'), /^sandbox; default-src 'none'/);
   assert.equal(await res.text(), html.toString());
 }));
+
+test('Markdown full preview renders safe HTML while download preserves exact Markdown bytes', async () => withController(async ({ store, origin }) => {
+  const bytes = Buffer.from('# 计划标题\n\n| A | B |\n|---|---|\n|1|2|\n\n<script>alert(1)</script>\n\n![remote](https://example.test/img.png)');
+  const entry = put(store, bytes, 'text/markdown; charset=utf-8');
+  const preview = await fetch(origin + '/ccm/preview/' + entry.token);
+  assert.equal(preview.status, 200);
+  assert.match(preview.headers.get('content-type'), /^text\/html/);
+  assert.match(preview.headers.get('content-security-policy'), /^sandbox; default-src 'none'/);
+  assert.equal(preview.headers.get('content-disposition'), null);
+  assert.equal(preview.headers.get('cache-control'), 'no-store');
+  const body = await preview.text();
+  assert.match(body, /<h1>计划标题<\/h1>/);
+  assert.match(body, /<table>/);
+  assert.match(body, /&lt;script&gt;/);
+  assert.doesNotMatch(body, /<script|<img |src="https:/i);
+  const ranged = await fetch(origin + '/ccm/preview/' + entry.token, { headers: { Range: 'bytes=0-2' } });
+  assert.equal(ranged.status, 200);
+  assert.match(await ranged.text(), /<h1>计划标题<\/h1>/);
+  const download = await fetch(origin + '/ccm/download/' + entry.token);
+  assert.deepEqual(Buffer.from(await download.arrayBuffer()), bytes);
+  assert.match(download.headers.get('content-disposition'), /^attachment/);
+}));
+
+test('Malformed UTF-8 Markdown cannot render but can still be downloaded', async () => withController(async ({ store, origin }) => {
+  const bytes = Buffer.from([0xff, 0x00, 0xfe]);
+  const entry = put(store, bytes, 'text/markdown');
+  const preview = await fetch(origin + '/ccm/preview/' + entry.token);
+  assert.equal(preview.status, 422);
+  assert.match(preview.headers.get('content-type'), /^text\/plain/);
+  const download = await fetch(origin + '/ccm/download/' + entry.token);
+  assert.deepEqual(Buffer.from(await download.arrayBuffer()), bytes);
+}));

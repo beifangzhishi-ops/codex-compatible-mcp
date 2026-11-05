@@ -9,6 +9,7 @@ import {
   PUBLISHED_FILE_UI_URI,
 } from '../ui/published-file-app.mjs';
 import { publishedPreviewKind, ISOLATED_MARKUP_CSP } from './published-file-preview.mjs';
+import { renderMarkdownDocument } from './markdown-preview.mjs';
 import { FILE_TOKEN_RE } from './file-transfer-store.mjs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -69,7 +70,7 @@ function createProtocolServer(
       'When the user explicitly asks to plan, discuss before implementation, or re-plan and a durable multi-turn Plan is useful, discover ccm.plan_patch / ccm.plan_read through tool_search. Use Codex-style planning discipline: explore discoverable facts first and do not ask for facts that reasonable non-mutating inspection can answer; if a high-impact ambiguity instead depends on a non-discoverable user preference, product/scope/compatibility choice, or meaningful tradeoff, ask rather than guess. When asking such a decision question, explicitly show 2-4 mutually exclusive choices in the user-visible question and identify a recommended default there when useful; the user may still provide another answer. Continue until the Plan is decision-complete for another executor, including implementation, interface/data-flow, failure-mode, validation, migration/cleanup, and acceptance details. While planning, ordinary read-only inspection and tests/builds limited to ignored/cache/temp side effects are allowed, but tracked implementation edits, migrations, rewriting codegen/formatting, dependency/config changes, deploy/release, commit, and push remain gated on explicit execution/implementation authorization. Keep the Plan current by removing or rewriting stale, completed, invalidated, or superseded content. When planning reaches a decision-complete stopping point or awaits execution authorization, call Direct ccm-extra.publish with plan_id alone to publish an immutable snapshot of the entire latest Plan. Do not read the entire Plan solely for the handoff or copy its full text into chat; give a concise summary and refer to the published file card/link. If publishing fails, report it clearly without claiming success or automatically dumping the full Plan. Publishing does not grant execution authorization. This handoff applies only to completing planning; later plan_read calls during implementation remain lifecycle-neutral and do not trigger republishing or re-enter planning. Imperative task wording, Plan updates, completed inspection, workspace approval, registration approval, or sandbox escalation approval is not execution authorization. CCM does not maintain a Plan-Mode state machine or Codex Host proposal/input UI. Once the user explicitly asks to execute/implement, continue implementation; plan_read is a neutral reference lookup and never switches the workflow back to planning.',
       'If no workspace_handle is available, do not infer permission to enter or register a named project. For genuinely projectless tasks or absolute-path reads allowed by sandbox_read_scope, call the Direct create_projectless_handle tool. For registered-project writes, ask for a handle or an explicit entry request. Never use projectless to bypass a pending explicitly requested workspace approval. Pass environment_id when a particular Worker is required; otherwise use the primary Worker.',
       'An environment has no GPT-visible default workspace or project directory. Do not infer project location from Worker bootstrap cwd, CCM_WORKSPACE, Documents, Temp, a drive root, or any other internal path. CCM does not define a Projects Root; new-project placement comes from the user or upper-layer orchestrator.',
-      'Use direct apply_patch and view_image for model-side workspace work. Direct ccm-extra.publish accepts either plan_id alone for Controller Plans or workspace_handle plus path for Worker files, never both modes together. ccm-extra.import_chatgpt_file remains deferred: discover it through tool_search and dispatch through exec with top-level exec.file binding; Library attachments must be materialized as raw_file before binding. It imports one file into the selected Worker context. Publish user-facing deliverables and useful previews using the direct publish tool, one file per call; call it proactively when the user asked to create or see PPT/PDF/images/reports, without waiting for a separate send request, including stage previews when useful. Continue work after publishing when needed. publish returns temporary CCM HTTPS links, not native ChatGPT attachments. Its card shows supported raster images or bounded UTF-8 text directly, and provides browser previews for PDF, audio, video and isolated HTML/SVG; Office formats remain download-only without conversion. Every card retains a download link. The structured download_url remains available for clients without MCP Apps. view_image only serves model-side analysis. Avoid publishing unnecessary intermediate files.',
+      'Use direct apply_patch and view_image for model-side workspace work. Direct ccm-extra.publish accepts either plan_id alone for Controller Plans or workspace_handle plus path for Worker files, never both modes together. ccm-extra.import_chatgpt_file remains deferred: discover it through tool_search and dispatch through exec with top-level exec.file binding; Library attachments must be materialized as raw_file before binding. It imports one file into the selected Worker context. Publish user-facing deliverables and useful previews using the direct publish tool, one file per call; call it proactively when the user asked to create or see PPT/PDF/images/reports, without waiting for a separate send request, including stage previews when useful. Continue work after publishing when needed. publish returns temporary CCM HTTPS links, not native ChatGPT attachments. For Markdown including Plans, the card shows a bounded rendered excerpt and the full preview link opens an isolated formatted HTML page; the original Markdown remains downloadable. Other UTF-8 text shows source excerpts, raster images display inline, and PDF/audio/video/HTML/SVG offer browser previews; Office formats remain download-only without conversion. Every card retains a download link. The structured download_url remains available for clients without MCP Apps. view_image only serves model-side analysis. Avoid publishing unnecessary intermediate files.',
       'For public ChatGPT Share (https://chatgpt.com/share/...) and Codex shared conversations (https://chatgpt.com/s/cx_...), use ccm-extra.chatgpt_share_export through tool_search -> exec when asked to inspect, compare, or export the conversation. Do not use web search, web browsing, BMG, or browser automation to retrieve shared-conversation content. If the CCM export cannot retrieve it, report the failure instead of silently switching to another retrieval method.',
       'Discover quark_upload through tool_search and invoke it through exec when the user asks to upload known local files through the logged-in Quark Cloud Drive desktop client.',
       'For bulk image inspection, view_image is also available through exec; batch independent image calls with parallel=true when useful.',
@@ -287,7 +288,7 @@ export function createHttpController({
   const transports = new Map();
   const protocolServers = new Map();
 
-  const download = (req, res) => {
+  const download = async (req, res) => {
     const match = /^\/ccm\/(download|preview)\/([^/]+)$/.exec(req.path);
     if (!match || !FILE_TOKEN_RE.test(match[2])) {
       res.status(404).end();
@@ -303,6 +304,28 @@ export function createHttpController({
     const preview = match[1] === 'preview';
     const kind = preview ? publishedPreviewKind(entryInfo.mime_type) : null;
     if (preview && !kind) { res.status(404).end(); return; }
+    if (kind === 'markdown') {
+      const acquired = runtime.fileTransferStore?.acquire(match[2]);
+      if (!acquired) { res.status(404).end(); return; }
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Referrer-Policy', 'no-referrer');
+      res.setHeader('Content-Security-Policy', ISOLATED_MARKUP_CSP);
+      try {
+        const parts = [];
+        for await (const chunk of acquired.stream) parts.push(chunk);
+        const source = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(parts));
+        if (source.includes('\0')) throw new Error('Invalid Markdown content');
+        res.status(200).type('html').send(renderMarkdownDocument(source, acquired.entry.filename));
+      } catch {
+        if (!res.headersSent) {
+          res.status(422).type('text/plain').send('Markdown preview unavailable. Download the original file.');
+        } else res.destroy();
+      } finally {
+        acquired.release();
+      }
+      return;
+    }
     const range = resolvePublishRange(req.headers.range, entryInfo.byte_length);
     if (range === false) {
       res.setHeader('Content-Range', `bytes */${entryInfo.byte_length}`);
