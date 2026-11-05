@@ -5,6 +5,7 @@
 - **完整性与验收**：涉及某个 Codex 子系统时，应覆盖该子系统完整的关键决策链及边缘情况（解析→授权→执行→持久化→回执等），而不只是修补当前案例；测试必须以同一固定上游 commit 的行为为准。维护 README 的上游基准、覆盖范围、未对齐项和已获用户批准的差异；不得把未验证的实现称为“已完整对齐 Codex”。本铁则优先于本文件中此前任何相冲突的 CCM 专有实现说明；发现冲突应先报告并按用户决定清理，而非借旧规则自行决定。
 - 完整对齐清单见 `docs/codex-parity.md`；非 GPT Host 行为的每次相关变更必须更新模块状态、上游源码路径、验证证据及未解决差异，不得用某个模块测试通过代替全项目对齐验收。
 - Codex Shell 环境策略已按 `ed8eac40832e6a79f30eaeb3c521912f231d43eb` 源码移植到 `src/runtime/shell-environment*.mjs`，读各 Worker 的 Codex `config.toml`；保持 inherit→默认排除→自定义排除→set→include_only→ID→禁止继承身份变量的顺序，以及 Windows 的无大小写覆盖与 PATHEXT 兜底。运行时还保留独立的 Windows 注册表刷新、Worker 代理与 CA 注入，README 已明确这些未对齐项；不得把此阶段称为 Codex 整条执行链的完整移植。
+- PowerShell 可安全降级的命令必须使用 `native/codex-powershell-parser` 中固定上游提交的原版 Rust Tree-sitter 源码与测试，按 `docs/codex-parity.md` 原始 Git blob hash 验证；不得通过 CCM 自写正则或 PowerShell 命令拼接给动态/赋值/调用操作符语法添加白名单信任。Codex 保存的 prefix_rule 使用严格逐 token 匹配（大小写及可执行文件后缀均不隐式等价）。本次只迁移了 PowerShell 字面量降级及部分匹配语义，`.rules` DSL、完整审批与 CMD 语义尚未对齐。
 - Do not change the directory structure of tools without explicit user permission.
 - When investigation confirms a client, Host, model, or Worker compatibility issue, record the current compatibility constraint, affected surface, and required routing or workaround in README.md as part of the same change. Remove obsolete compatibility wording when the constraint no longer applies.
 - Keep model-facing Plan behavior synchronized across Controller instructions, the Plan tool descriptions, README.md, and their contract tests; remove superseded Plan guidance instead of retaining parallel historical rules.

@@ -66,9 +66,7 @@ export class ExecPolicyStore {
   // working directories, effective shells and PTY settings.
   matchSegment({ environment, tokens, emit = true }) {
     const rule = this.rules.find((candidate) =>
-      tokenPrefixMatches(candidate.prefix_tokens, tokens, {
-        platform: environment?.platform || 'windows',
-      }));
+      tokenPrefixMatches(candidate.prefix_tokens, tokens));
     if (!rule) return null;
     if (emit) this.#emit('matched', {
       rule_id: rule.rule_id,
@@ -81,7 +79,7 @@ export class ExecPolicyStore {
   match({ environment, args, parsed = null }) {
     const shell = effectiveShell(args, environment);
     const command = parsed || parseShellCommand(args.cmd, { shell });
-    if (!command?.segments.length || command.operators.includes('|')) return null;
+    if (!command?.segments.length) return null;
     const matches = [];
     for (const segment of command.segments) {
       const rule = this.matchSegment({

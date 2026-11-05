@@ -66,7 +66,7 @@ test('controller-wide allowlist prefix matches later suffix tokens', () => {
     environment,
     args: {
       ...args,
-      cmd: 'wsl.exe -d PhD-CFD -- bash -lc "rm -f /tmp/x"',
+      cmd: 'wsl.exe --help',
     },
   });
   assert.equal(match?.rule_id, rule.rule_id);

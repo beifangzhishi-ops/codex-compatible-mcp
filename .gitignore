@@ -15,3 +15,4 @@ Thumbs.db
 native/bin/*
 !native/bin/.gitkeep
 native/pty-proxy/target/
+native/codex-powershell-parser/target/

@@ -1,3 +1,5 @@
+import { parseCodexPowerShellScript } from './codex-powershell-parser.mjs';
+
 function normalizeNullable(value) {
   return value == null || value === '' ? null : String(value);
 }
@@ -56,7 +58,10 @@ export function validatePrefixTokens(value) {
   return tokens;
 }
 
-export function tokenPrefixMatches(prefix, tokens, { platform = 'windows' } = {}) {
+// Codex's user-approved prefix_rule uses PrefixPattern::tokens_equal with
+// canonical_matching=false: every token must match exactly. OS-specific
+// executable-name folding is not part of a saved prefix rule.
+export function tokenPrefixMatches(prefix, tokens) {
   const normalized = validatePrefixTokens(prefix);
   if (!normalized || !Array.isArray(tokens) || tokens.length < normalized.length) {
     return false;
@@ -64,16 +69,6 @@ export function tokenPrefixMatches(prefix, tokens, { platform = 'windows' } = {}
   for (let i = 0; i < normalized.length; i += 1) {
     const expected = normalized[i];
     const actual = tokens[i];
-    if (i === 0) {
-      const expectedBare = isBareExecutable(expected);
-      const actualBare = isBareExecutable(actual);
-      if (expectedBare !== actualBare) return false;
-      if (canonicalExecutableToken(expected, { platform }) !==
-          canonicalExecutableToken(actual, { platform })) {
-        return false;
-      }
-      continue;
-    }
     if (expected !== actual) return false;
   }
   return true;
@@ -151,7 +146,7 @@ function unsupportedOutsideQuote(command, index, shellKind) {
 // executable at the beginning of a segment; never accept computed targets.
 const literalCall = /^&\s+(?:'[A-Za-z]:[\\/][^']+'|"[A-Za-z]:[\\/][^"$`]+")(?=\s|$)/;
 
-export function parseShellCommand(command, { shell = 'powershell' } = {}) {
+function parseLocalCommandSources(command, { shell = 'powershell' } = {}) {
   if (typeof command !== 'string' || !command.trim()) return null;
   const shellKind = canonicalShell(shell) || 'powershell';
   if (!['powershell', 'pwsh', 'cmd'].includes(shellKind)) return null;
@@ -257,5 +252,37 @@ export function parseShellCommand(command, { shell = 'powershell' } = {}) {
     segments.push({ ...segment, tokens });
   }
   return { shell: shellKind, segments, operators };
+}
+
+export function parseShellCommand(command, { shell = 'powershell' } = {}) {
+  const shellKind = canonicalShell(shell) || 'powershell';
+  if (shellKind === 'cmd') return parseLocalCommandSources(command, { shell });
+  if (shellKind !== 'powershell' && shellKind !== 'pwsh') return null;
+
+  // The Codex native parser is the sole authority for lowering PowerShell
+  // syntax into commands that may receive an Allow decision.
+  const lowered = parseCodexPowerShellScript(command);
+  if (!lowered) return null;
+
+  // Source slices are only used for CCM's separate built-in command rewrite.
+  // Preserve them when their independently parsed tokens agree exactly with
+  // Codex; otherwise withhold source binding rather than changing behavior.
+  const local = parseLocalCommandSources(command, { shell });
+  const sourceBound = Boolean(local &&
+    local.segments.length === lowered.length &&
+    local.segments.every((segment, i) =>
+      segment.tokens.length === lowered[i].length &&
+      segment.tokens.every((word, j) => word === lowered[i][j])));
+  return {
+    shell: shellKind,
+    segments: lowered.map((tokens, i) => ({
+      source: sourceBound ? local.segments[i].source : '',
+      start: sourceBound ? local.segments[i].start : null,
+      end: sourceBound ? local.segments[i].end : null,
+      tokens,
+    })),
+    operators: sourceBound ? local.operators : [],
+    sourceBound,
+  };
 }
 

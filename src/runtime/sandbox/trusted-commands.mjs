@@ -171,7 +171,8 @@ export function evaluateTrustedCommand(command, shell, environment,
     command.endsWith('"');
   const normalized = cmdOuter ? command.slice(1, -1) : command;
   const parsed = parseShellCommand(normalized, { shell: shellKind });
-  if (!parsed?.segments.length || parsed.operators.includes('|')) {
+  if (!parsed?.segments.length || parsed.sourceBound === false ||
+      parsed.operators.includes('|')) {
     return { matched: false, reason: 'unrecognized shell syntax or pipeline' };
   }
   const matches = [];

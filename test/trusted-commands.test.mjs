@@ -55,19 +55,22 @@ test('tracked trusted-command configuration validates Git, Node, native build an
     { ...environment, platform: 'linux' }), null);
 });
 
-test('PowerShell Tailscale aliases and fixed paths dispatch the same installed executable', () => {
+test('PowerShell Tailscale aliases dispatch the pinned executable; Codex rejects invocation operators', () => {
   for (const cmd of [
     'tailscale status',
     'tailscale.exe status',
-    `& '${pinnedPath}' status`,
-    `& "${pinnedPath}" status`,
-    `"${pinnedPath}" status`,
   ]) {
     assert.deepEqual(evaluate(cmd), {
       matched: true,
       rule_ids: ['tailscale'],
       cmd: `& '${pinnedPath}' status`,
     }, cmd);
+  }
+  for (const cmd of [
+    `& '${pinnedPath}' status`,
+    `& "${pinnedPath}" status`,
+  ]) {
+    assert.equal(evaluate(cmd).matched, false, cmd);
   }
   assert.deepEqual(evaluate('tailscale status', 'pwsh.exe'), {
     matched: true,

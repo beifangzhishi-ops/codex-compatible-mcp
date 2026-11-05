@@ -170,29 +170,29 @@ function buildWindowsTokenOwner() {
   }
 }
 
-function buildPtyProxy() {
+function buildRustHelper(crate, executableName) {
   const cargo = findCargo();
   if (!cargo) throw new Error('Rust cargo was not found.');
 
-  const manifest = path.join(root, 'native', 'pty-proxy', 'Cargo.toml');
+  const manifest = path.join(root, 'native', crate, 'Cargo.toml');
   const target = path.join(
     root,
     'native',
-    'pty-proxy',
+    crate,
     'target',
     'release',
-    process.platform === 'win32' ? 'ccm-pty-proxy.exe' : 'ccm-pty-proxy',
+    process.platform === 'win32' ? executableName + '.exe' : executableName,
   );
 
   if (process.platform === 'win32') {
     const devCmd = findVsDevCmd();
     if (!devCmd) {
       throw new Error(
-        'Visual Studio C++ Build Tools are required to build the CCM Rust PTY proxy.',
+        'Visual Studio C++ Build Tools are required to build CCM Rust helpers.',
       );
     }
 
-    const batchPath = path.join(outputDir, '.build-pty.cmd');
+    const batchPath = path.join(outputDir, '.build-' + crate + '.cmd');
     const batch = [
       '@echo off',
       'call "' + devCmd + '" -no_logo -arch=x64 -host_arch=x64 >nul',
@@ -212,7 +212,7 @@ function buildPtyProxy() {
 
   const output = path.join(
     outputDir,
-    process.platform === 'win32' ? 'ccm-pty-proxy.exe' : 'ccm-pty-proxy',
+    process.platform === 'win32' ? executableName + '.exe' : executableName,
   );
   const tempOutput = output + '.' + process.pid + '.tmp';
   fs.copyFileSync(target, tempOutput);
@@ -225,4 +225,5 @@ if (process.platform === 'win32') {
   buildWindowsSandbox();
   buildWindowsTokenOwner();
 }
-buildPtyProxy();
+buildRustHelper('pty-proxy', 'ccm-pty-proxy');
+buildRustHelper('codex-powershell-parser', 'ccm-codex-powershell-parser');

@@ -225,9 +225,7 @@ export class RemoteProcessManager {
         );
       }
       const matches = command.segments.filter((segment) =>
-        tokenPrefixMatches(prefix, segment.tokens, {
-          platform: environment.platform || 'windows',
-        }));
+        tokenPrefixMatches(prefix, segment.tokens));
       if (matches.length !== 1) {
         throw new Error(
           'prefix_rule must match exactly one executable segment of the frozen command.',
@@ -259,10 +257,10 @@ export class RemoteProcessManager {
   }
 
   #matchAllowlistSegments(args, environment, parsed, snapshot) {
-    if (!parsed?.segments.length || parsed.operators.includes('|')) return null;
+    if (!parsed?.segments.length) return null;
     const genericRules = [];
     for (const segment of parsed.segments) {
-      const builtIn = snapshot && !snapshot.error &&
+      const builtIn = segment.source && snapshot && !snapshot.error &&
         evaluateTrustedCommand(segment.source, args.shell, environment, { snapshot });
       if (builtIn?.matched && builtIn.cmd === segment.source && !builtIn.shell) {
         // Pinned targets must already be literal. Never elevate an alias in a

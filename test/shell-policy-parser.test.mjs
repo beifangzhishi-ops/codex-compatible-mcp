@@ -6,21 +6,12 @@ import {
   tokenPrefixMatches,
 } from '../src/runtime/sandbox/shell-policy-parser.mjs';
 
-test('PowerShell parser keeps quoted WSL bash syntax inside one outer segment', () => {
+test('Codex PowerShell parser keeps complex WSL bash syntax opaque rather than guessing at argv', () => {
   const parsed = parseShellCommand(
     `wsl.exe -d PhD-CFD -- bash -lc 'find /tmp -type f | sort; sed -n "1,2p" /etc/profile'`,
     { shell: 'powershell.exe' },
   );
-  assert.equal(parsed?.segments.length, 1);
-  assert.deepEqual(parsed?.segments[0].tokens.slice(0, 6), [
-    'wsl.exe',
-    '-d',
-    'PhD-CFD',
-    '--',
-    'bash',
-    '-lc',
-  ]);
-  assert.match(parsed?.segments[0].tokens[6], /find .*\| sort; sed/);
+  assert.equal(parsed, null);
 });
 
 test('PowerShell parser preserves doubled single-quote literals', () => {
@@ -63,31 +54,12 @@ test('PowerShell parser fails closed on unsupported execution syntax', () => {
   }
 });
 
-test('PowerShell literal call operator recognizes only the exact absolute executable', () => {
+test('Codex keeps PowerShell invocation operators opaque even with absolute literal paths', () => {
   const fullPath = 'C:\\Program Files\\Tailscale\\tailscale.exe';
-  const parsed = parseShellCommand(
-    `& '${fullPath}' status`, { shell: 'powershell.exe' },
-  );
-  assert.deepEqual(parsed?.segments[0].tokens, [fullPath, 'status']);
-  assert.deepEqual(
-    parseShellCommand(`& "${fullPath}" status`, { shell: 'powershell.exe' })
-      ?.segments[0].tokens,
-    [fullPath, 'status'],
-  );
-  assert.equal(
-    tokenPrefixMatches([fullPath], parsed.segments[0].tokens, { platform: 'windows' }),
-    true,
-  );
-  assert.equal(
-    tokenPrefixMatches(['tailscale.exe'], parsed.segments[0].tokens, { platform: 'windows' }),
-    false,
-  );
-  const compound = parseShellCommand(
-    `Write-Output okay; & '${fullPath}' status`, { shell: 'pwsh.exe' },
-  );
-  assert.deepEqual(compound?.segments.map((segment) => segment.tokens[0]), [
-    'Write-Output', fullPath,
-  ]);
+  assert.equal(parseShellCommand(`& '${fullPath}' status`, { shell: 'powershell.exe' }), null);
+  assert.equal(parseShellCommand(`& "${fullPath}" status`, { shell: 'powershell.exe' }), null);
+  assert.equal(parseShellCommand(`Write-Output okay; & '${fullPath}' status`,
+    { shell: 'pwsh.exe' }), null);
 });
 
 test('cmd parser respects caret-escaped metacharacters', () => {
@@ -107,28 +79,26 @@ test('cmd parser does not treat single quotes as quoting syntax', () => {
   assert.deepEqual(parsed?.segments[1].tokens, ["whoami'"]);
 });
 
-test('token prefix matching is ordered and does not trust lookalike paths', () => {
+test('Codex saved prefix matching compares tokens exactly, including casing and exe suffixes', () => {
   assert.equal(
-    tokenPrefixMatches(['wsl.exe'], ['wsl', '--status'], { platform: 'windows' }),
-    true,
+    tokenPrefixMatches(['wsl.exe'], ['wsl', '--status']),
+    false,
   );
   assert.equal(
-    tokenPrefixMatches(['wsl.exe'], ['.\\wsl.exe', '--status'], { platform: 'windows' }),
+    tokenPrefixMatches(['wsl.exe'], ['.\\wsl.exe', '--status']),
     false,
   );
   assert.equal(
     tokenPrefixMatches(
       ['C:\\Tools\\WSL.EXE'],
       ['c:\\tools\\wsl.exe', '--status'],
-      { platform: 'windows' },
     ),
-    true,
+    false,
   );
   assert.equal(
     tokenPrefixMatches(
       ['git', 'config', '--get'],
       ['git', 'config', '--get', 'user.name'],
-      { platform: 'windows' },
     ),
     true,
   );
@@ -136,7 +106,6 @@ test('token prefix matching is ordered and does not trust lookalike paths', () =
     tokenPrefixMatches(
       ['git', 'config', '--get'],
       ['git', 'config', '--global', '--get', 'user.name'],
-      { platform: 'windows' },
     ),
     false,
   );

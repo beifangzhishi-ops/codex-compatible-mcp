@@ -792,7 +792,7 @@ test('built-in node --test trust does not apply through an explicit cmd shell', 
   }
 });
 
-test('Tailscale runs through the installed path without CCM approval in PowerShell and CMD', async () => {
+test('Codex-literal Tailscale aliases run through the pinned binary without approval', async () => {
   const environmentRegistry = restrictedRegistry();
   const workerHub = new FakeWorkerHub();
   const manager = new RemoteProcessManager({
@@ -809,8 +809,6 @@ test('Tailscale runs through the installed path without CCM approval in PowerShe
   try {
     for (const args of [
       { cmd: 'tailscale version' },
-      { cmd: `& '${path}' status`, sandbox_permissions: 'require_escalated' },
-      { cmd: `& "${path}" version` },
       { cmd: `"${path}" version`, shell: 'cmd.exe' },
       { cmd: 'tailscale.exe version', shell: 'cmd.exe' },
     ]) {
@@ -963,7 +961,7 @@ test('approval persists a global token-prefix allow rule and ordinary calls reus
 
     const automatic = await manager.execCommand({
       workspace_handle: args.workspace_handle,
-      cmd: 'wsl.exe -d PhD-CFD -- bash -lc "rm -f /tmp/example"',
+      cmd: 'wsl.exe --help',
     });
     assert.equal(automatic.policy_auto_approved, true);
     assert.equal(
