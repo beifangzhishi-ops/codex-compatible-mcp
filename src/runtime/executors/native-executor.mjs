@@ -137,6 +137,9 @@ export class NativeEnvironmentExecutor {
       shell,
       permissionProfile,
     });
+    if (invocation.environmentOverrides) {
+      Object.assign(childEnv, invocation.environmentOverrides);
+    }
 
     if (tty) {
       if (!this.fileExists(this.ptyProxyPath)) {
