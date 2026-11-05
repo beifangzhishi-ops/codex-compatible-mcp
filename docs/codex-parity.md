@@ -28,7 +28,7 @@ The shell environment slice is backed by `test/shell-environment.test.mjs`, `tes
 
 For every subsequent slice, collect pinned source paths, map each upstream decision/branch to CCM behavior, add positive and adversarial regression tests, inspect native side effects, update this table, and validate both Workers. Do not mark a domain fully aligned while any listed discrepancy remains.
 
-The original TeX case (`$env:TEXMFHOME='...'; & xdvipdfmx.exe` not matching a previous `xdvipdfmx.exe` Allow) is **not resolved** by the shell environment policy slice; Codex policy-level `set` can set a Worker-session-wide variable but does not transform or auto-authorize the original compound command. That case belongs to the unaligned shell parser and approval domains.
+For TeX, Codex's `shell_environment_policy.set` can set a Worker-session-wide variable without transforming a Shell command or granting extra execution permissions. The exact Codex PowerShell parser is now ported and explicitly leaves `$env:TEXMFHOME='...'; & xdvipdfmx.exe` opaque. The remaining migration work concerns the full Codex policy and approval decision path, not support for splitting this dynamic command into a reusable executable-only Allow.
 
 ### PowerShell native parser port (2026-11-05)
 
