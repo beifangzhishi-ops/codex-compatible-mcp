@@ -16,13 +16,13 @@ function fakeChild() {
 }
 
 function createHarness({ workerEnvPath, commandEnvironment = (env) => ({ ...env }),
-  shellEnvironmentPolicy = {} } = {}) {
+  shellEnvironmentPolicy = {}, invocation } = {}) {
   const spawned = [];
   let mode = 'proxy';
   const executor = new NativeEnvironmentExecutor({
     sandboxBackend: {
       buildInvocation() {
-        return { file: 'pwsh.exe', args: ['-Command', 'echo ok'], sandboxed: true };
+        return invocation?.() || { file: 'pwsh.exe', args: ['-Command', 'echo ok'], sandboxed: true };
       },
     },
     childProxyPolicy: { getMode: () => mode },
@@ -72,6 +72,19 @@ test('native executor applies proxy/direct mode to each newly spawned process', 
   harness.start(true);
   assert.equal(harness.spawned[2].options.env.HTTPS_PROXY, 'http://127.0.0.1:7890');
   assert.equal(harness.spawned[2].file, 'ccm-pty-proxy.exe');
+});
+
+test('native executor forwards native Codex home to both pipe and PTY children', () => {
+  const harness = createHarness({
+    invocation: () => ({
+      file: 'codex.exe', args: ['sandbox'], sandboxed: true,
+      environmentOverrides: { CODEX_HOME: 'C:\\protected-codex-home' },
+    }),
+  });
+  harness.start(false);
+  harness.start(true);
+  assert.equal(harness.spawned[0].options.env.CODEX_HOME, 'C:\\protected-codex-home');
+  assert.equal(harness.spawned[1].options.env.CODEX_HOME, 'C:\\protected-codex-home');
 });
 
 test('native executor reads machine-local CURL_CA_BUNDLE for each pipe and PTY child', (t) => {

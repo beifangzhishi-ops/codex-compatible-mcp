@@ -95,7 +95,7 @@ export class CodexWindowsSandboxBackend {
   }
 
   buildInvocation({
-    environment, command, cwd, shell, permissionProfile, tty,
+    environment, command, cwd, shell, permissionProfile, tty, useProfile = false,
   }) {
     if (environment.platform !== 'windows') {
       throw new Error('Upstream Codex Windows sandbox is Windows-only.');
@@ -122,6 +122,7 @@ export class CodexWindowsSandboxBackend {
       platform: 'windows',
       shell: shell || environment.shell,
       command,
+      useProfile,
     });
     const profile = permissionProfile === 'workspace-write' ? 'workspace-online' : 'read-only';
     const args = ['sandbox', '-P', profile, '-C', workdir];

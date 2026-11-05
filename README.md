@@ -325,6 +325,20 @@ logic. Neither Worker has been switched to the upstream Codex runtime. Until
 the entire decision chain is integrated and tested, do not call the CCM sandbox
 Codex-equivalent or assume experimental `run_as_admin` is safe.
 
+The staged native Codex CLI launcher has 13 targeted unit tests passing, and
+the isolated branch's full Node suite completed with 321 passes, 0 failures
+and 1 intentionally skipped native containment integration test, but
+there is an actual **containment failure** in the pinned upstream Elevated
+Sandbox. On 6v, a pre-existing NTFS hardlink from a selected writable root to a
+disposable outside file caused Codex's ACL setup to grant `CodexSandboxUsers`
+modify rights to that outside file; writes through either path succeeded. A
+separate ACL-only probe confirmed the ACL changed during setup, before any
+attempted file write. Do **not** enable this backend until this release-blocking
+outside-workspace write escape is addressed and verified with the permanent
+opt-in test `test/codex-elevated-containment.test.mjs`. The noha CLI also moved
+to 0.166.0-alpha.6, different from the pinned 0.166.0-alpha.5.1. All tests used
+disposable files; no persistent CCM Worker or Codex configuration was changed.
+
 ### User-command environment refresh
 
 CCM keeps Supervisor, Controller, and Worker runtime environments stable. On Windows,

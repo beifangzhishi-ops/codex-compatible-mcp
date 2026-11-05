@@ -1,7 +1,7 @@
 # Codex Windows Elevated Sandbox: upstream parity baseline
 
-> **Status: research and compatibility baseline only, NOT implemented or deployed.**
-> Do not enable a partial CCM sandbox substitution on either Worker.
+> **Status: isolated native CLI adapter and native-host probes only; NOT deployed.**
+> Do not enable the CCM sandbox substitution until the hardlink write-escape gate is resolved.
 
 ## Pinned upstream
 
@@ -37,11 +37,20 @@ Only GPT Host/MCP transport adaptation is exempted from matching Codex. A matchi
 - A separate **native Codex** `config.toml` using `default_permissions`, `[permissions]` and `[windows] sandbox = "elevated"` passed parsing, but launching the nested sandbox from inside CCM's existing restricted-token process failed to open the privileged setup mutex. This is not an upstream sandbox failure in a properly privileged orchestrator.
 - Do not copy personal Codex credentials, model-provider tokens or unrelated application settings into CCM's repository. A CCM-specific Codex configuration must use Codex's actual schema and dedicated protected runtime state.
 
+## Staged native CLI adapter and real-host evidence (2026-11-05)
+
+- `src/runtime/sandbox/codex-windows-sandbox.mjs` uses the **unmodified** pinned `codex sandbox` CLI with a native named permissions profile and the upstream `permissions.<profile>.workspace_roots` TOML mechanism. The complete CLI, command runner, ACL setup and privilege model are owned by Codex; CCM does not duplicate them. The Worker launcher can propagate a dedicated `CODEX_HOME`, but this backend is **not yet selected** in production and a protected home has not been provisioned.
+- The adapter fails closed if it cannot find exactly one CLI with version `0.166.0-alpha.5.1` and its paired setup/command runner. On noha, the installed desktop CLI has already advanced to `0.166.0-alpha.6`, so the pinned adapter is **not deployable there** without a dedicated pinned runtime.
+- Verified via trusted admin-host execution on 6v: native `CodexSandboxOnline` process can write inside an isolated disposable workspace, including a sibling of its cwd, and rejects an ordinary write to a disposable outside file. `whoami /priv` listed only `SeChangeNotifyPrivilege`. These tests are not evidence about all filesystem aliases.
+- **Hardlink escape, reproduced twice:** create a disposable file outside the chosen workspace, then an NTFS hardlink to that file inside the writable root before Codex initialization. The native Codex Elevated setup adds `CodexSandboxUsers:(I)(M)` to the outside file's ACL; a sandbox command can then overwrite the file using **either** the outside path or the inside hardlink. A before/after `icacls` probe confirmed the ACE change even when the command itself only queried `whoami`. Both paths and content were disposable and cleaned afterward.
+- Relevant upstream: `codex-rs/windows-sandbox-rs/src/acl.rs` grants the write ACE and `src/setup.rs` provisions workspace ACLs. `src/file_write_tests.rs` tests atomic writes protecting the setup's own state files, but that does **not** protect arbitrary shell writes or ACL changes to linked workspace files. No general hardlink check was identified in the pinned ACL path; the next alpha tag's corresponding ACL files likewise show no obvious hardlink check (not proof of an exhaustive later-version fix).
+- Permanent manual regression: `test/codex-elevated-containment.test.mjs`, opt-in only for trusted Windows host testing. It must **fail** on the current release until the upstream-compatible containment issue is resolved. Ordinary CI skips it to avoid provisioning Windows accounts and changing ACLs.
+
 ## Required integrated acceptance (not yet passed)
 
 1. Both Workers use the **same** pinned Codex source/runtime and validate their executable and setup-helper versions, with no fallback to a different revision.
 2. Trusted elevated provisioning creates or validates dedicated Online/Offline sandbox users, DPAPI credentials, read/write/deny ACLs, offline firewall rules and their versions. Ordinary commands never inherit the Worker administrator token.
-3. The active workspace handle determines precisely the approved write roots even if the shell working directory is a subdirectory; outside-workspace writes, hard-link/reparse escapes, ACL modifications and SeRestorePrivilege-based writes fail.
+3. The active workspace handle determines precisely the approved write roots even if the shell working directory is a subdirectory; outside-workspace writes, hard-link/reparse escapes, ACL modifications and SeRestorePrivilege-based writes fail. **FAILED on 6v due to NTFS hardlinks; release blocker.**
 4. Reads, Python/venv, shell execution, Git, interactive stdin/PTY, output streaming, cancellation, process exit codes, service/IPC isolation, and network access match pinned upstream behavior.
 5. Codex's config precedence, permissions profiles, failure semantics, approval/allowlist lifecycle and trust-boundaries are checked end-to-end. No legacy CCM-only semantics are silently retained.
 6. Tests pass on both machines **before** replacing default CCM sandbox. Restart and health/reconnect verification follow a clean version-synchronized release; stop on any failure.

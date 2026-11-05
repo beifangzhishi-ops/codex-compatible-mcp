@@ -46,6 +46,12 @@ test('Codex adapter uses upstream read-only profile without any writable roots o
   assert.equal(result.args.some((arg) => arg.includes('workspace_roots')), false);
 });
 
+test('Codex adapter preserves upstream Shell Environment Policy login profile choice', () => {
+  const withProfile = invocation({ useProfile: true });
+  assert.equal(withProfile.args.includes('-NoProfile'), false);
+  assert.equal(withProfile.args.includes('-NonInteractive'), true);
+});
+
 test('Codex adapter preserves commands with semicolons and shell metacharacters as one argument', () => {
   const command = "$env:TEST='a; b'; & 'C:\\Program Files\\x.exe' '<script>'";
   const result = invocation({ command });

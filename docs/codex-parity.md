@@ -17,6 +17,19 @@
 | Policy evaluation and rules | `codex-rs/execpolicy/src/{parser,rule,policy,decision,execpolicycheck}.rs`; `codex-rs/core/src/exec_policy.rs` | `src/controller/exec-policy-store.mjs`, `src/runtime/remote-process-manager.mjs` | **Not aligned**; saved global prefix matching and executable assessment remain CCM implementations. |
 | Approval and escalation state machine | `codex-rs/protocol/src/approvals.rs`; `codex-rs/core/src/exec_policy.rs` | `src/controller/approval-manager.mjs`, `src/runtime/remote-process-manager.mjs` | **Not aligned**; approval card is Host adaptation, but the decision model and escalation must be checked upstream. |
 | Windows sandbox / administrator profiles | `codex-rs/windows-sandbox-rs`, `codex-rs/windows-sandbox-service`; `codex-rs/protocol/src/sandbox.rs` | `native/windows-sandbox/CcmSandboxRunner.cs`, `src/runtime/sandbox/native-sandbox.mjs` | **Not aligned**; CCM-specific restricted administrator token behavior is not proof of Codex equivalence. |
+
+**Staged upstream native Windows execution (separate integration branch):**
+`feat/codex-elevated-parity` pins `openai/codex` at
+`f79b26ccbb3116b052544666a181012fb45dc49b` and adds
+`src/runtime/sandbox/codex-windows-sandbox.mjs` with native CLI/runtime
+version lookup, native named permission profiles, and trusted `CODEX_HOME`
+handoff. It is not the production default. The 6v real-host probe confirmed
+native `CodexSandboxOnline` execution and ordinary workspace isolation, but
+**failed the outside-file hardlink boundary**; Codex ACL setup grants write
+rights to an outside file linked inside the workspace. See
+`docs/codex-upstream-windows-parity.md` for the upstream source locations,
+before/after ACL evidence and release blocker. noha's currently installed
+runtime is alpha.6, not the alpha.5.1 pinned by this branch.
 | Process, terminal, PTY and session lifecycle | `codex-rs/core/src/exec.rs`; `codex-rs/exec` | `src/runtime/process-manager.mjs`, `src/runtime/executors/native-executor.mjs` | **Not aligned**; stream/yield/exit/cancellation behavior requires comparison. |
 | Patch and filesystem semantics | `codex-rs/apply-patch`; `codex-rs/core/src/apply_patch.rs` | `src/runtime/filesystem`, `apply_patch` tools | **Not aligned**; existing CCM tests are not an upstream-differential suite. |
 | Configuration loading, inheritance and policy | `codex-rs/config`, `codex-rs/protocol/src/config_types.rs` | Worker bootstrap and `config/` | **Not aligned overall**; only the shell environment policy TOML subset has been ported. |
