@@ -75,7 +75,7 @@ export function createControllerRuntime(options = {}) {
   });
   const execPolicyStore = options.execPolicyStore || new ExecPolicyStore({
     stateFile: options.execPolicyStateFile ||
-      defaultControllerStateFile('exec-policy.json'),
+      defaultControllerStateFile('exec-allowlist.json'),
     audit,
   });
   const trustedPackageScriptStore = options.trustedPackageScriptStore ||

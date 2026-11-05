@@ -511,21 +511,21 @@ test('approval app keeps its capability in result _meta and resolves only the fr
     assert.match(resource.contents[0].text, /ui\/update-model-context/);
     assert.match(resource.contents[0].text, /ui\/message/);
     assert.match(resource.contents[0].text, /sendFollowUpMessage/);
-    assert.match(resource.contents[0].text, /Always allow in workspace/);
-    assert.match(resource.contents[0].text, /approve_workspace/);
+    assert.match(resource.contents[0].text, /Always allow/);
+    assert.match(resource.contents[0].text, /approve_always/);
     assert.match(
       resource.contents[0].text,
       /retryDecision \|\| "approve"/,
     );
     assert.match(
       resource.contents[0].text,
-      /retryDecision === "approve_workspace"/,
+      /retryDecision === "approve_always"/,
     );
     assert.match(
       resource.contents[0].text,
       /approveAlways\.hidden = !policyPersistable/,
     );
-    assert.match(resource.contents[0].text, /Token prefix:/);
+    assert.match(resource.contents[0].text, /Global token prefix \(all Workers and workspaces\):/);
     assert.match(resource.contents[0].text, /policy_save_failed/);
     assert.match(
       resource.contents[0].text,

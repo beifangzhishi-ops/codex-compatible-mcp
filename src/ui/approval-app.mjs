@@ -120,7 +120,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
     <div id="actions">
       <button id="deny" type="button" disabled>Deny</button>
       <button id="approve" type="button" disabled>Approve once</button>
-      <button id="approveAlways" type="button">Always allow in workspace</button>
+      <button id="approveAlways" type="button">Always allow</button>
     </div>
   </div>
   <script>
@@ -228,9 +228,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
           const prefix = Array.isArray(structured.prefix_rule)
             ? structured.prefix_rule.join(" ")
             : "";
-          policyScope.textContent = structured.policy_kind === "package_script"
-            ? "Hash-bound package script: " + prefix
-            : "Token prefix: " + prefix;
+          policyScope.textContent = "Global token prefix (all Workers and workspaces): " + prefix;
         } else {
           policyScope.textContent = "";
         }
@@ -248,7 +246,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         approveAlways.disabled = !policyPersistable;
         if (structured.policy_auto_approved) {
           setStatus(
-            "Automatically allowed by workspace policy" +
+            "Automatically allowed by a saved command rule" +
             (structured.policy_rule_id ? " (" + structured.policy_rule_id + ")." : ".")
           );
           approve.disabled = true;
@@ -503,7 +501,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
                 : "The user approved the frozen CCM workspace action. CCM completed it and returned the workspace handle; do not recreate or retry the workspace action.")
           : (decision === "deny"
               ? "The user denied the frozen CCM full-access action."
-              : decision === "approve_workspace"
+              : decision === "approve_always"
                 ? (structured?.policy_save_failed
                     ? "The user approved the frozen CCM action. The command already executed, but saving the persistent policy failed; do not rerun the command to retry persistence."
                     : "The user approved the frozen CCM action and asked CCM to allow future matching executions in this workspace.")
@@ -527,8 +525,8 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
           ? "Continue from the CCM workspace approval result already placed in model context. Do not recreate or rerun the workspace action."
           : decision === "deny"
             ? "Continue after my CCM approval-card decision. I denied the frozen action; do not run it."
-            : decision === "approve_workspace"
-              ? "Continue from the CCM approval result already placed in model context. CCM handled the action and saved the workspace policy; do not recreate or rerun that command."
+            : decision === "approve_always"
+              ? "Continue from the CCM approval result already placed in model context. CCM handled the action and saved a global command allow rule; do not recreate or rerun that command."
               : "Continue from the CCM approval result already placed in model context. CCM already handled the frozen approved action; do not recreate or rerun that command.";
         const supportsTextMessage = Boolean(hostCapabilities?.message?.text);
         if (supportsTextMessage) {
@@ -564,11 +562,11 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         if (busy || !verified || finalOutcome || !approval || !approvalNonce) return;
         verified = false;
         queryGeneration++;
-        if (approval.kind === "workspace" && decision === "approve_workspace") {
+        if (approval.kind === "workspace" && decision === "approve_always") {
           return;
         }
         if (approval.kind !== "workspace" &&
-            (decision === "approve" || decision === "approve_workspace")) {
+            (decision === "approve" || decision === "approve_always")) {
           retryDecision = decision;
         }
         setBusy(true);
@@ -576,8 +574,8 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         setStatus(
           decision === "deny"
             ? "Denying request…"
-            : decision === "approve_workspace"
-              ? "Executing and saving workspace policy…"
+            : decision === "approve_always"
+              ? "Executing and saving a global command rule…"
               : workspaceAction
                 ? "Applying approved workspace action…"
                 : "Executing approved action…"
@@ -597,8 +595,8 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
             approve.textContent = "Retry approved action";
             setStatus(
               structured.output ||
-                (retryDecision === "approve_workspace"
-                  ? "The action was not dispatched. Retry will keep the workspace policy approval."
+                (retryDecision === "approve_always"
+                  ? "The action was not dispatched. Retry will preserve the global Allow decision."
                   : "The action was not dispatched. You can retry the same frozen action."),
               true
             );
@@ -625,9 +623,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
             );
           } else if (structured.policy_saved) {
             setStatus(
-              structured.trusted_package_script
-                ? "Approved, executed, and saved as a hash-bound package-script rule."
-                : "Approved, executed, and saved with the displayed token-prefix scope."
+              "Approved, executed, and saved with the displayed global command prefix."
             );
           } else if (structured.session_id != null) {
             setStatus("Approved and started. Session ID: " + structured.session_id);
@@ -671,7 +667,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
       });
       approveAlways.addEventListener("click", () => {
         if (approval?.policy_persistable === true) {
-          void resolve("approve_workspace");
+          void resolve("approve_always");
         }
       });
       deny.addEventListener("click", () => { void resolve("deny"); });

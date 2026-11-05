@@ -290,7 +290,7 @@ test('full-access Controller enters registered workspaces without approval', asy
   const controller = createControllerRuntime({
     workerPort: 0,
     auditLogFile: path.join(tempRoot, 'audit.jsonl'),
-    execPolicyStateFile: path.join(tempRoot, 'exec-policy.json'),
+    execPolicyStateFile: path.join(tempRoot, 'exec-allowlist.json'),
     trustedPackageScriptStateFile: path.join(tempRoot, 'trusted-package-scripts.json'),
     workspaceHandleStateFile: path.join(tempRoot, 'workspace-handles.json'),
     fileTransferStateDir: path.join(tempRoot, 'file-transfers'),

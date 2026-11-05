@@ -48,7 +48,7 @@ const UNIFIED_EXEC_OUTPUT_SCHEMA = {
     z.array(z.array(z.string())),
   ]).optional(),
   policy_persistable: z.boolean().optional(),
-  policy_kind: z.enum(['prefix', 'package_script']).nullable().optional(),
+  policy_kind: z.enum(['prefix']).nullable().optional(),
   prefix_rule: z.array(z.string()).nullable().optional(),
   policy_save_failed: z.boolean().optional(),
   policy_save_error: z.string().optional(),
@@ -118,7 +118,7 @@ function approvalCardResult(prepared) {
         text: [
           trustedPackageScript
             ? 'CCM executed this command through a trusted package-script rule.'
-            : 'CCM executed this full-access command under an existing workspace policy.',
+            : 'CCM executed this full-access command under a saved global Allow rule.',
           'Environment: ' + value.environment_id,
           'Workspace: ' + value.workspace_id,
           'Command: ' + value.command,
@@ -288,9 +288,9 @@ async function resolvePendingWorkspaceAction(
   { approval_id: approvalId, approval_nonce: approvalNonce, decision },
   { hostSession = null } = {},
 ) {
-  if (decision === 'approve_workspace') {
+  if (decision === 'approve_always') {
     throw new Error(
-      'Always allow in workspace is only available for execution approvals.',
+      'Always allow is only available for execution approvals.',
     );
   }
   if (decision === 'deny') {
@@ -849,8 +849,8 @@ export function registerCoreTools(registry, runtime) {
       'Reuse a supplied workspace_handle directly. Without one, create_projectless_handle may support projectless work and permitted absolute-path reads; do not select/register merely to inspect a project. For registered-project writes without a handle, ask the user for a handle or explicit entry instruction. Never bypass a pending explicit workspace approval.',
       'Built-in command trust comes from config/trusted-commands.json and is reloaded for every exec_command. Supported compound commands are matched one segment at a time; only fully trusted commands execute without approval. Unrecognized syntax falls back to the normal sandbox or escalation path.',
       'Controller-trusted package scripts such as a specifically trusted workspace npm test are also handled automatically through exec_command. Trust is bound to the workspace and current package.json script hash; if the script changes it stops matching and must not be treated as trusted.',
-      'For a command that genuinely requires full-access outside a workspace-write sandbox, set sandbox_permissions=require_escalated and include an optional user-facing justification. You may also provide prefix_rule as ordered command tokens to propose the reusable scope shown by Always allow in workspace. CCM freezes the exact command and the validated persistent scope before returning approval_required=true; then call request_approval with the returned approval_id.',
-      'Persistent execution rules are ordered-token prefixes. A saved prefix can authorize additional suffix arguments on later matching escalations. For WSL, prefix_rule=["wsl.exe"] intentionally authorizes arbitrary later WSL suffix operations in the same workspace/shell context.',
+      'For a command that genuinely requires full-access outside a workspace-write sandbox without a matching saved rule, set sandbox_permissions=require_escalated and include an optional justification. You may also provide prefix_rule as ordered command tokens to propose a reusable global Allow rule. CCM freezes the exact command and the validated rule before returning approval_required=true; then call request_approval with the returned approval_id.',
+      'A user-saved Always allow token prefix auto-authorizes matching ordinary exec_command calls on any Worker or workspace without require_escalated. Additional suffix arguments are authorized. For WSL, prefix_rule=["wsl.exe"] intentionally authorizes arbitrary later WSL suffix operations. Each safely parsed segment of a compound command must qualify.',
       'A CCM-originated result is identifiable by its structured CCM fields. If a host reports a Script error or safety/policy/tool-call failure without this tool returning a structured result, do not attribute that failure to CCM or claim CCM blocked the command.',
       'On Windows, keep destructive filesystem operations in one shell and verify resolved targets before recursive deletes or moves.',
     ].join('\n\n'),
@@ -863,7 +863,7 @@ export function registerCoreTools(registry, runtime) {
       max_output_tokens: z.number().int().positive().optional().describe('Output token budget. Defaults to 10000 tokens.'),
       shell: z.string().optional().describe("Shell binary to launch. Defaults to the environment's default shell."),
       sandbox_permissions: z.enum(['use_default', 'require_escalated']).optional().describe('Set require_escalated when this command genuinely needs full-access outside the normal sandbox.'),
-      prefix_rule: z.array(z.string().min(1).max(4096)).min(1).max(64).optional().describe('Optional reusable ordered-token prefix proposed for Always allow in workspace. Valid only with require_escalated and must match exactly one executable segment of this command.'),
+      prefix_rule: z.array(z.string().min(1).max(4096)).min(1).max(64).optional().describe('Optional reusable ordered-token prefix proposed for Always allow. Valid only with require_escalated and must match exactly one executable segment of this command.'),
       justification: z.string().optional().describe('User-facing explanation for a require_escalated approval request.'),
       full_access_grant_id: z.string().uuid().optional().describe('Claimed CCM global web Full Access grant. If supplied and active, the command runs with Full Access without individual approval across any Worker.'),
     },
@@ -973,12 +973,12 @@ export function registerCoreTools(registry, runtime) {
     environmentRequirements: { capabilities: ['exec'] },
     description: [
       'App-only resolver for a frozen CCM approval request. It is invoked by the CCM approval card, not by the model.',
-      'On approve, CCM resumes only the previously frozen execution or workspace action. approve_workspace stores a constrained policy only for execution approvals. This tool accepts no command, workspace target, workdir, or shell override.',
+      'On approve, CCM resumes only the previously frozen execution or workspace action. approve_always saves a global token-prefix Allow rule only for execution approvals. This tool accepts no command, workspace target, workdir, or shell override.',
     ].join('\n\n'),
     inputSchema: {
       approval_id: z.string().uuid().describe('Frozen CCM approval identifier.'),
       approval_nonce: z.string().min(20).describe('One-time card secret delivered only through tool-result _meta.'),
-      decision: z.enum(['approve', 'approve_workspace', 'deny']).describe('User decision from the CCM approval card.'),
+      decision: z.enum(['approve', 'approve_always', 'deny']).describe('User decision from the CCM approval card.'),
     },
     outputSchema: UNIFIED_EXEC_OUTPUT_SCHEMA,
     handler: async (args, context) => {

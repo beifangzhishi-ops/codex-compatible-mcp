@@ -47,7 +47,7 @@ test('package script commands recognize only explicit script forms and npm test'
   );
 });
 
-test('workspace prefix rule matches later suffix tokens', () => {
+test('controller-wide allowlist prefix matches later suffix tokens', () => {
   const store = new ExecPolicyStore();
   const args = {
     cmd: 'wsl.exe --status',
@@ -73,7 +73,7 @@ test('workspace prefix rule matches later suffix tokens', () => {
   assert.deepEqual(match?.prefix_tokens, ['wsl.exe']);
 });
 
-test('prefix matching is token-based and bound to workspace execution context', () => {
+test('token prefix rules match across Workers, workspaces, workdirs and TTY modes', () => {
   const store = new ExecPolicyStore();
   const args = {
     cmd: 'git config --get user.name',
@@ -97,16 +97,21 @@ test('prefix matching is token-based and bound to workspace execution context', 
     environment,
     args: { ...args, cmd: 'git config --global --get user.name' },
   }), null);
-  assert.equal(store.match({
+  assert.ok(store.match({
     workspaceHandle: { ...workspaceHandle, workspace_id: 'workspace-b' },
     environment,
     args,
-  }), null);
-  assert.equal(store.match({
+  }));
+  assert.ok(store.match({
     workspaceHandle,
     environment,
     args: { ...args, tty: true },
-  }), null);
+  }));
+  assert.ok(store.match({
+    workspaceHandle: { ...workspaceHandle, environment_id: 'worker-b' },
+    environment: { ...environment, id: 'worker-b' },
+    args: { ...args, workdir: 'another-project' },
+  }));
 });
 
 test('compound commands require every executable segment to match a rule', () => {
@@ -125,7 +130,7 @@ test('compound commands require every executable segment to match a rule', () =>
   }), null);
 });
 
-test('rules bind the effective shell, including environment defaults', () => {
+test('rules apply across effective shells, including environment defaults', () => {
   const store = new ExecPolicyStore();
   const args = { cmd: 'wsl.exe --status', shell: null };
   store.allow({
@@ -135,21 +140,49 @@ test('rules bind the effective shell, including environment defaults', () => {
     prefixTokens: ['wsl.exe'],
   });
   assert.ok(store.match({ workspaceHandle, environment, args }));
-  assert.equal(store.match({
+  assert.ok(store.match({
     workspaceHandle,
     environment: {
       ...environment,
       shell: { path: 'cmd.exe', type: 'cmd' },
     },
     args,
-  }), null);
+  }));
+});
+
+test('saved global Allow rules persist without Worker or workspace identity', async () => {
+  const base = path.join(process.cwd(), '.cache', 'test-tmp');
+  await fs.promises.mkdir(base, { recursive: true });
+  const root = await fs.promises.mkdtemp(path.join(base, 'ccm-allowlist-'));
+  const stateFile = path.join(root, 'exec-allowlist.json');
+  try {
+    const store = new ExecPolicyStore({ stateFile });
+    store.allow({ prefixTokens: ['wsl.exe', '-d', 'Ubuntu'] });
+    store.close();
+    const saved = JSON.parse(await fs.promises.readFile(stateFile, 'utf8'));
+    assert.equal(saved.version, 3);
+    assert.deepEqual(Object.keys(saved.rules[0]).sort(), [
+      'created_at', 'decision', 'prefix_tokens', 'rule_id',
+    ]);
+    const reopened = new ExecPolicyStore({ stateFile });
+    assert.ok(reopened.match({
+      environment: { ...environment, id: 'any-worker' },
+      args: { cmd: 'wsl.exe -d Ubuntu --status', shell: 'cmd.exe', tty: true },
+    }));
+    assert.equal(reopened.match({
+      environment,
+      args: { cmd: 'wsl.exe -d Debian --status' },
+    }), null);
+  } finally {
+    await fs.promises.rm(root, { recursive: true, force: true });
+  }
 });
 
 test('unsupported exec-policy state versions fail closed without migration', async () => {
   const tempBase = path.join(process.cwd(), '.cache', 'test-tmp');
   await fs.promises.mkdir(tempBase, { recursive: true });
   const root = await fs.promises.mkdtemp(path.join(tempBase, 'ccm-exec-policy-'));
-  const stateFile = path.join(root, 'exec-policy.json');
+  const stateFile = path.join(root, 'exec-allowlist.json');
   try {
     await fs.promises.writeFile(stateFile, JSON.stringify({
       version: 999,

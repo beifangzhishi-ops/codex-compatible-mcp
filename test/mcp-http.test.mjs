@@ -74,7 +74,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
   const runtime = createControllerRuntime({
     workerPort: 0,
     auditLogFile: path.join(tempRoot, 'audit.jsonl'),
-    execPolicyStateFile: path.join(tempRoot, 'exec-policy.json'),
+    execPolicyStateFile: path.join(tempRoot, 'exec-allowlist.json'),
     trustedPackageScriptStateFile: path.join(tempRoot, 'trusted-package-scripts.json'),
     workspaceHandleStateFile: path.join(tempRoot, 'workspace-handles.json'),
     fileTransferStateDir: path.join(tempRoot, 'file-transfers'),
@@ -431,7 +431,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       arguments: {
         approval_id: workspacePending.approval_id,
         approval_nonce: workspaceApproval._meta.approval_nonce,
-        decision: 'approve_workspace',
+        decision: 'approve_always',
       },
     });
     assert.equal(workspacePersistentBypass.isError, true);
