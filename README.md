@@ -6,6 +6,14 @@ CCM does **not** attempt to reproduce Codex's model loop or own the host applica
 
 Before modifying this repository, read and follow [AGENTS.md](AGENTS.md) for repository-specific agent instructions.
 
+## Codex upstream conformance
+
+OpenAI Codex is the normative upstream for every CCM behavior except the ChatGPT/GPT Host integration layer (MCP transport, OAuth, host-specific cards and UI). The architecture rule in `AGENTS.md` requires an exact upstream commit and source-level behavior mapping **before** changing execution, approval, rules, sandboxing, environment, configuration or tool semantics. CCM-specific transport between Controller and Workers may adapt implementation language and process boundaries, but may not silently change upstream behavior. Any unsupported behavior or intentional departure requires the user's prior decision.
+
+**Audit baseline (2026-11-05):** `openai/codex` commit `ed8eac40832e6a79f30eaeb3c521912f231d43eb`. Relevant upstream entry points verified at this revision include `codex-rs/execpolicy/src/{parser,rule,policy,decision,execpolicycheck}.rs`, `codex-rs/shell-command/src/{powershell,parse_command}.rs`, `codex-rs/core/src/{exec_policy,exec_env}.rs`, and `codex-rs/protocol/src/{approvals,shell_environment,sandbox}.rs`. For future work, pin and inspect the actual upstream revision used rather than assuming this baseline is still current.
+
+**Alignment is not complete.** In particular, CCM currently retains its own JavaScript command parser and policy store, Controller-managed execution approvals and global Allow rules, and a separately implemented Windows native sandbox. These are **not** verified end-to-end equivalents of the upstream decision chain. Environment inheritance, sandbox selection, escalation flow, rule persistence, error handling and process/session semantics still require source-by-source comparison, native-behavior tests and any necessary migration before this project can claim full Codex parity. Prior CCM-specific behavior is not evidence of upstream equivalence; any conflict with the new rule must be raised rather than silently preserved.
+
 ## Status
 
 CCM is currently targeting **v0.1** as its first public release.

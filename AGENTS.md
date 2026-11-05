@@ -1,5 +1,8 @@
 # Repository Instructions
 
+- **Codex 上游优先（项目铁则，最高架构优先级）**：除 ChatGPT/GPT Host 专属的接入、MCP App/UI、OAuth/插件传输适配外，CCM 的所有对外执行语义、命令及 Shell 解析、审批决策、持久授权、规则格式、沙箱与权限、子进程环境、配置行为、错误语义、会话生命周期和工具行为，均必须直接以 OpenAI Codex 上游真实代码为规范。不得凭记忆、推测或自行设计“类似 Codex”方案，也不得只借鉴部分设计后加入未经用户批准的差异。
+- **先查上游、后改 CCM**：每次改动上述非 Host 行为前，必须查看并记录 Codex 上游对应实现、准确 commit SHA、具体源码位置及适用平台，并建立逐项行为对应和测试。优先移植上游真实实现；CCM 使用不同语言/Controller–Worker 架构时，只允许保持同等语义的必要适配。上游没有的功能、无法移植的行为、对原有 CCM 功能的取舍、任何拟议差异或历史兼容需求，必须事先明确询问用户；不允许擅自创造替代规则或悄悄保留旧方案。
+- **完整性与验收**：涉及某个 Codex 子系统时，应覆盖该子系统完整的关键决策链及边缘情况（解析→授权→执行→持久化→回执等），而不只是修补当前案例；测试必须以同一固定上游 commit 的行为为准。维护 README 的上游基准、覆盖范围、未对齐项和已获用户批准的差异；不得把未验证的实现称为“已完整对齐 Codex”。本铁则优先于本文件中此前任何相冲突的 CCM 专有实现说明；发现冲突应先报告并按用户决定清理，而非借旧规则自行决定。
 - Do not change the directory structure of tools without explicit user permission.
 - When investigation confirms a client, Host, model, or Worker compatibility issue, record the current compatibility constraint, affected surface, and required routing or workaround in README.md as part of the same change. Remove obsolete compatibility wording when the constraint no longer applies.
 - Keep model-facing Plan behavior synchronized across Controller instructions, the Plan tool descriptions, README.md, and their contract tests; remove superseded Plan guidance instead of retaining parallel historical rules.
