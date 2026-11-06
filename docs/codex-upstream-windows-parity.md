@@ -88,11 +88,11 @@ On 6v, the focused non-privileged suite returned **16 pass / 0 fail / 3
 intentionally skipped** using Node's `--test-isolation=none`. A regular
 `npm test` attempt was blocked before any test-file body executed because the
 Worker sandbox denied spawning Node's test-file subprocesses (`spawn EPERM`);
-those framework errors are not functional failures of Codex PTY. The attempted
-process-internal *full* suite did not yield a usable completion result from
-this Worker environment. Neither attempt counts as a complete regression
-pass. The previously verified full-suite results from an earlier commit do
-not cover these newly added tests.
+those framework errors are not functional failures of Codex PTY. The
+process-internal **full suite completed successfully** with **345 total,
+340 pass, 0 fail, 5 intentionally skipped** on 2026-11-06. The five skips
+include the three new privileged terminal scenarios; none of the real
+Codex Elevated PTY cases has been claimed as passed.
 
 ## Explicitly unresolved
 

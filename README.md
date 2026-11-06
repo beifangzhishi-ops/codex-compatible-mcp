@@ -387,6 +387,10 @@ full process tree. Ordinary runs deliberately skip these three privileged
 cases; mock transport tests verify argv and stdin forwarding but do not
 replace native acceptance. See `docs/codex-upstream-windows-parity.md` for
 the remaining two-machine acceptance requirements.
+At the 2026-11-06 staging checkpoint, the 6v full Node suite completed
+using `node --test --test-isolation=none` with **340 passed, 0 failed,
+5 intentionally skipped**. Plain `npm test` could not spawn isolated test
+files inside that Worker's current sandbox (`spawn EPERM`).
 
 ### User-command environment refresh
 
