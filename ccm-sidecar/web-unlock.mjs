@@ -6,16 +6,15 @@ import { CcmTotpManager } from './totp.mjs';
 export const WEB_UNLOCK_PATH = '/ccm/unlock';
 const PAIR_COOKIE = '__Secure-ccm-web-pair';
 const CSRF_COOKIE = '__Secure-ccm-web-csrf';
-const CLAIM_MESSAGE = 'ccm已解锁 允许领取并使用全权限ccm';
 const COPY_SCRIPT = `
-const copyButton = document.getElementById('copy-claim');
+const copyButton = document.getElementById('copy-grant');
 if (copyButton) {
   copyButton.addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(copyButton.dataset.copy);
-      copyButton.textContent = '已复制，请返回 ChatGPT 粘贴发送';
+      copyButton.textContent = '已复制，请返回 ChatGPT 粘贴';
     } catch {
-      copyButton.textContent = '复制失败，请手动选择上方文字复制';
+      copyButton.textContent = '复制失败，请手动选择上方句柄复制';
     }
   });
 }
@@ -73,16 +72,21 @@ function redirect(response, query, setCookies = []) {
   response.end();
 }
 
-function renderPage({ paired, csrf, pending, expires, message = '', error = false, configured = true }) {
-  const remaining = expires ? Math.max(0, Math.ceil((Date.parse(expires) - Date.now()) / 1000)) : 0;
-  const pendingContent = pending
-    ? `<p class="notice" role="status">已创建待认领授权，剩余约 ${remaining} 秒。请将下面的消息发给 ChatGPT 认领。</p>
-       <p class="copy-text" id="claim-message">${CLAIM_MESSAGE}</p>
-       <button type="button" id="copy-claim" data-copy="${escape(CLAIM_MESSAGE)}">一键复制认领消息</button>`
+function renderPage({ paired, csrf, grant, message = '', error = false, configured = true }) {
+  const active = paired && grant?.active;
+  const grantId = active ? grant.full_access_grant_id : null;
+  const grantMessage = grantId
+    ? `CCM 全权限句柄 full_access_grant_id：${grantId}。请在需要全权限的 CCM 工具调用中直接使用此参数，无需领取。`
+    : '';
+  const grantContent = active
+    ? `<p class="notice" role="status">全权限已解锁，有效期至 ${escape(grant.expires_at)}。</p>
+       <p class="copy-text" id="grant-id">${escape(grantId)}</p>
+       <button type="button" id="copy-grant" data-copy="${escape(grantMessage)}">一键复制全权限句柄</button>
+       ${grant.claim_available ? '<p class="muted">如句柄消息被拦截，可告诉 ChatGPT「CCM 已解锁，请调用领取工具」，在解锁后的 5 分钟内使用备用领取方式。</p>' : ''}`
     : '';
   const form = !configured
     ? '<p>CCM 手机验证器尚未在本机初始化并确认。请先按照 README 的步骤在 6v 本机终端完成配对。</p>'
-    : paired && pending
+    : active
       ? ''
     : paired
       ? `<form method="post" action="${WEB_UNLOCK_PATH}">
@@ -115,10 +119,10 @@ function renderPage({ paired, csrf, pending, expires, message = '', error = fals
     .notice{padding:10px 12px;border-radius:8px;background:#568a7a22}.error{background:#d65b5b26}
     .copy-text{padding:12px;border:1px solid #8886;border-radius:8px;user-select:all;overflow-wrap:anywhere}
     </style></head><body><main class="panel"><h1>CCM 临时解锁</h1>
-    <p class="muted">全局授权 · 适用于所有 CCM Worker · 单次模型认领</p>
+    <p class="muted">全局授权 · 适用于所有 CCM Worker · 网页直接签发</p>
     ${message ? `<p class="notice${error ? ' error' : ''}" role="status">${escape(message)}</p>` : ''}
-    ${pendingContent}${form}
-    ${!pending ? '<p class="muted">网页解锁后需回 ChatGPT 认领，5 分钟内未认领则失效；已认领授权持续到期。</p>' : ''}
+    ${grantContent}${form}
+    ${!active ? '<p class="muted">解锁后复制句柄发给 ChatGPT，授权自解锁时起计时，到期自动失效。</p>' : ''}
     </main><script>${COPY_SCRIPT}</script></body></html>`;
 }
 
@@ -190,13 +194,12 @@ export class CcmWebUnlock {
     const configured = this.isConfigured();
     if (request.method === 'GET') {
       const csrf = token();
-      const info = configured ? await this.bridge('status') : { pending: false };
+      const info = configured && paired ? await this.bridge('status') : { active: false };
       const query = new URL(request.url, 'http://localhost').searchParams;
-      const message = paired && !info.pending && query.has('paired')
+      const message = paired && !info.active && query.has('paired')
         ? '浏览器配对成功。现在可以点击临时解锁。' : '';
       responseHtml(response, 200, renderPage({
-        paired, csrf, configured, pending: paired && info.pending,
-        expires: info.claim_expires_at, message,
+        paired, csrf, configured, grant: info, message,
       }), [cookie(CSRF_COOKIE, csrf, 3600)]);
       return;
     }

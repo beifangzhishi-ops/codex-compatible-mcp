@@ -400,13 +400,13 @@ export function registerCoreTools(registry, runtime) {
     provider: 'ccm-core',
     surfaces: { deferred: true, codeMode: true },
     tags: ['approval', 'full-access', 'unlock'],
-    description: 'Claim the one pending owner-issued CCM web unlock exactly once. No arguments. The returned full_access_grant_id must be supplied explicitly with subsequent exec_command, apply_patch, or workspace entry/registration calls; it works across all connected and future Workers until expiry. Claiming does not extend the unlock or change permanent Worker configuration.',
+    description: 'Fallback only when the owner has unlocked CCM on the webpage but has not provided a full_access_grant_id (for example, the message carrying the ID was blocked). Within five minutes of web unlock, retrieve the SAME already-active grant exactly once, with no arguments. Do not call if the user supplied the grant ID. Use the returned full_access_grant_id explicitly on subsequent exec_command, apply_patch, or workspace entry/registration calls; claiming never extends expiry or changes Worker configuration.',
     inputSchema: {},
     handler: async () => {
       const claim = runtime.webFullAccess?.claim();
       return jsonResult(claim || {
         claimed: false,
-        message: 'No unclaimed web unlock. Ask the owner to use the CCM unlock webpage.',
+        message: 'No unused fallback claim is available. The owner can copy the active grant ID from the CCM unlock webpage or unlock again after expiry.',
       });
     },
   });
@@ -622,7 +622,7 @@ export function registerCoreTools(registry, runtime) {
     tags: ['workspace', 'project', 'approval'],
     description: [
       'Enter one registered workspace. Full-access environments return the workspace_handle directly; restricted environments return a frozen approval request.',
-      'A valid previously claimed full_access_grant_id also enables Full Access entry for this operation without changing the Worker baseline.',
+      'An active webpage-issued full_access_grant_id (or the same ID obtained through fallback claim_full_access) enables Full Access entry without changing the Worker baseline.',
       'Requires an explicit user request to enter/switch workspaces AND no usable workspace_handle. Reading, inspecting, editing, or working on a project is not an entry request.',
       'On full-access success, call show_workspace_handle with the returned workspace_handle to display the copyable handle card. On restricted Workers, call request_approval when approval_required=true; the completed approval card displays the handle. Never show a handle for pending/failed actions, retry pending entry, or bypass its approval with projectless execution.',
       'Full-access skips user approval but keeps workspace identity validation, Worker routing, and workspace-handle boundaries.',
@@ -630,7 +630,7 @@ export function registerCoreTools(registry, runtime) {
     inputSchema: {
       environment_id: z.string().describe('Environment whose Worker owns the workspace.'),
       workspace_id: z.string().min(1).describe('Registered workspace id on that Worker.'),
-      full_access_grant_id: z.string().uuid().optional().describe('Optional claimed CCM web Full Access grant, valid for any Worker until expiry.'),
+      full_access_grant_id: z.string().uuid().optional().describe('Optional active CCM web Full Access grant ID, valid for any Worker until expiry.'),
     },
     handler: async (args) => {
       try {
@@ -689,7 +689,7 @@ export function registerCoreTools(registry, runtime) {
     tags: ['workspace', 'project', 'approval', 'register'],
     description: [
       'Register and enter one exact project directory. Full-access environments return the workspace_handle directly; restricted environments return a frozen approval request.',
-      'A valid previously claimed full_access_grant_id also enables Full Access registration for this operation without changing the Worker baseline.',
+      'An active webpage-issued full_access_grant_id (or the same ID obtained through fallback claim_full_access) enables Full Access registration without changing the Worker baseline.',
       'Requires an explicit user request to register a workspace AND no usable workspace_handle for that project. Reading, inspecting, editing, or working on a project is not a registration request.',
       'On full-access success, call show_workspace_handle with the returned workspace_handle to display the copyable handle card. On restricted Workers, call request_approval when approval_required=true; the completed approval card displays the handle. Never show a handle for pending/failed actions, retry pending registration, or bypass its approval with projectless execution.',
       'With create_if_missing=true, registration may create the exact missing directory before entry. Full-access skips user approval but keeps target revalidation and workspace-handle boundaries.',
@@ -699,7 +699,7 @@ export function registerCoreTools(registry, runtime) {
       path: z.string().min(1).describe('Absolute project directory path on the selected Worker.'),
       workspace_id: z.string().min(1).optional().describe('Optional Worker-local workspace id. Defaults to a safe form of the directory name.'),
       create_if_missing: z.boolean().optional().describe('Create the target directory during registration if it is missing. Defaults to false.'),
-      full_access_grant_id: z.string().uuid().optional().describe('Optional claimed CCM web Full Access grant.'),
+      full_access_grant_id: z.string().uuid().optional().describe('Optional active CCM web Full Access grant ID.'),
     },
     handler: async (args) => {
       try {
@@ -846,7 +846,7 @@ export function registerCoreTools(registry, runtime) {
     supportsParallel: true,
     description: [
       'Runs a command using plain pipes by default; set tty=true to allocate a PTY. Returns output or a session ID for ongoing interaction.',
-      'When the owner has unlocked CCM through the web page and you have claimed it once through deferred ccm.claim_full_access using tool_search -> exec, include full_access_grant_id in each command that should run with timed Full Access. This bypasses the sandbox for that dispatch on any Worker until expiration, without persistent shell rules or changes to Worker configuration. Missing grants continue with existing sandbox/approval behavior; unknown or expired grants fail closed.',
+      'When the owner has unlocked CCM through the web page, use the provided full_access_grant_id directly for timed Full Access. If no ID was provided (for example the message was blocked), use deferred ccm.claim_full_access through tool_search -> exec as a one-shot fallback within five minutes of web unlock. The fallback returns the same grant and never extends its expiry. Include full_access_grant_id in each privileged command. This bypasses the sandbox for that dispatch on any Worker until expiration, without permanent shell rules or Worker configuration changes. Missing grants follow existing sandbox/approval behavior; unknown or expired grants fail closed.',
       'workspace_handle is required and determines the Worker, cwd/session ownership, and restricted-write root. It does not narrow filesystem reads below the environment\'s sandbox_read_scope. Do not pass or infer a separate environment for this command.',
       'Reuse a supplied workspace_handle directly. Without one, create_projectless_handle may support projectless work and permitted absolute-path reads; do not select/register merely to inspect a project. For registered-project writes without a handle, ask the user for a handle or explicit entry instruction. Never bypass a pending explicit workspace approval.',
       'Built-in command trust comes from config/trusted-commands.json and is reloaded for every exec_command. Supported compound commands are matched one segment at a time; only fully trusted commands execute without approval. Unrecognized syntax falls back to the normal sandbox or escalation path.',
@@ -870,7 +870,7 @@ export function registerCoreTools(registry, runtime) {
       run_as_admin: z.boolean().optional().describe('EXPERIMENTAL: for an elevated Windows workspace-write Worker, use an administrator restricted token without individual approval. Not unrestricted Full Access. Incompatible with escalation/grant/prefix_rule.'),
       prefix_rule: z.array(z.string().min(1).max(4096)).min(1).max(64).optional().describe('For a repeatable command requiring Full Access, proactively propose a stable, narrowly useful ordered-token prefix for global Always allow; e.g. ["npm","run","build:native"]. Include stable script paths/options, omit variable suffixes, and never propose a bare generic shell/interpreter. Valid only with require_escalated and must match exactly one executable segment.'),
       justification: z.string().optional().describe('User-facing explanation for a require_escalated approval request.'),
-      full_access_grant_id: z.string().uuid().optional().describe('Claimed CCM global web Full Access grant. If supplied and active, the command runs with Full Access without individual approval across any Worker.'),
+      full_access_grant_id: z.string().uuid().optional().describe('Active CCM global web Full Access grant. If supplied and valid, this command runs with Full Access without individual approval across any Worker.'),
     },
     outputSchema: UNIFIED_EXEC_OUTPUT_SCHEMA,
     handler: async (args) => {
@@ -1067,14 +1067,14 @@ export function registerCoreTools(registry, runtime) {
     environmentRequirements: { capabilities: ['applyPatch'] },
     description: [
       'Apply a Codex-style Begin/End Patch inside an existing workspace_handle.',
-      'For timed Full Access, pass the full_access_grant_id obtained from deferred ccm.claim_full_access. Otherwise the original Worker write boundary remains in force.',
+      'For timed Full Access, pass the full_access_grant_id supplied by the owner from the CCM unlock webpage, or returned by the fallback deferred ccm.claim_full_access. Otherwise the original Worker write boundary remains in force.',
       'Reuse the existing workspace_handle. For genuinely projectless edits, use create_projectless_handle; for registered-project edits without a handle, request the handle or an explicit workspace-entry instruction. Never select/register implicitly or bypass pending approval.',
     ].join('\n\n'),
     inputSchema: {
       patch: z.string().min(1).describe('Codex-style patch text beginning with *** Begin Patch.'),
       workspace_handle: z.string().uuid().describe('Existing workspace handle.'),
       workdir: z.string().optional().describe('Relative subdirectory inside the selected context root.'),
-      full_access_grant_id: z.string().uuid().optional().describe('Claimed CCM global web Full Access grant for patch permission.'),
+      full_access_grant_id: z.string().uuid().optional().describe('Active CCM global web Full Access grant for patch permission.'),
     },
     handler: async (args) => {
       try {
