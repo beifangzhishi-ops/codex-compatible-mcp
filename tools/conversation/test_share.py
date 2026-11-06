@@ -38,6 +38,19 @@ class ParserTests(unittest.TestCase):
   self.assertTrue(request.get_header('User-agent').startswith('Mozilla/5.0'))
   self.assertIn('text/html',request.get_header('Accept'))
   self.assertIn('en-US',request.get_header('Accept-language'))
+ def test_direct_mode_explicitly_ignores_windows_system_proxy(self):
+  response=unittest.mock.MagicMock()
+  response.__enter__.return_value=response
+  response.read.return_value=b'<html>direct fetch</html>'
+  response.headers.get_content_charset.return_value='utf-8'
+  opener=unittest.mock.MagicMock()
+  opener.open.return_value=response
+  with patch.dict(os.environ,{'CCM_CONVERSATION_PROXY_MODE':'direct'}), \
+       patch.object(e,'ProxyHandler') as proxy_handler, \
+       patch.object(e,'build_opener',return_value=opener), \
+       patch.object(e,'ssl_context'):
+   self.assertEqual(e.fetch('https://chatgpt.com/share/example'),'<html>direct fetch</html>')
+  proxy_handler.assert_called_once_with({})
  def test_codex_url_routes_to_public_snapshot_without_html(self):
   url='https://chatgpt.com/s/cx_'+'a'*32+'?来源=测试'
   response=unittest.mock.MagicMock()

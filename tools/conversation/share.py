@@ -3,7 +3,7 @@ import importlib, json, os, re, ssl, time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
-from urllib.request import HTTPSHandler, Request, build_opener
+from urllib.request import HTTPSHandler, ProxyHandler, Request, build_opener
 
 def ca_bundle_path():
     for name in ('SSL_CERT_FILE','REQUESTS_CA_BUNDLE','CURL_CA_BUNDLE'):
@@ -36,7 +36,12 @@ def fetch(url):
     if source=='codex':
         share_id=urlparse(url).path.rstrip('/').split('/')[-1]
         url='https://chatgpt.com/backend-api/wham/shared_threads/'+share_id
-    opener=build_opener(HTTPSHandler(context=ssl_context()))
+    # Unlike Node, urllib may read the Windows system proxy when environment
+    # proxy variables are absent. Direct mode must explicitly disable that.
+    if os.environ.get('CCM_CONVERSATION_PROXY_MODE') == 'direct':
+        opener=build_opener(ProxyHandler({}), HTTPSHandler(context=ssl_context()))
+    else:
+        opener=build_opener(HTTPSHandler(context=ssl_context()))
     if source=='chatgpt':
         # The Share route serves metadata-only HTML to non-browser clients, even with HTTP 200.
         headers={

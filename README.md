@@ -259,6 +259,8 @@ Use the single Deferred + Code Mode tool `ccm-extra.conversation` via `tool_sear
 
 Reads of imported shares are offline; only a new import refreshes the snapshot. Failed refresh keeps the previous complete version and old cursors become invalid after successful refresh. ChatGPT message branches and Codex item order are retained. Missing content in public shares, including any withheld tool activity, cannot be reconstructed. Local Codex UUID reads use the configured Worker-local `codex.home` (default the user's `~/.codex`) and do not resume or modify Codex sessions.
 
+**Network behavior:** Share imports inherit the selected Worker's hot-reloaded child proxy mode and CA bundle, just like shell commands. In direct mode the Python reader explicitly disables Windows system proxy fallback. An optional per-import `proxy` can override the Worker mode. Without this inheritance the isolated Python subprocess can time out even when regular web requests succeed.
+
 **Version-skew guard:** each Worker advertises `capabilities.conversation`. The Controller rejects calls to Workers that do not advertise the method without sending an unknown RPC that would trigger `unknown_method` quarantine. Matching Git commit IDs alone do not prove running code matches if either checkout has uncommitted changes or a Worker was not restarted.
 
 Full contracts and examples: `tools/conversation/README.md`.

@@ -279,7 +279,9 @@ export class RemoteWorkerClient {
       case 'create_projectless_workspace':
         return this.runtime.workspaceRegistry.createProjectless();
       case 'conversation':
-        return runConversationAction(params);
+        return runConversationAction(params, {
+          proxyMode: this.runtime.childProxyPolicy?.getMode?.() || 'proxy',
+        });
       case 'terminate_session':
         return {
           terminated: this.runtime.processManager.terminateSession(
