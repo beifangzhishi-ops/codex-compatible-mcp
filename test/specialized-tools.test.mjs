@@ -354,30 +354,50 @@ test('receive_file is Deferred + Code Mode and preserves native file objects thr
 });
 
 
-test('ChatGPT Share export routes through CCM rather than web or BMG', async () => {
+test('conversation tool advertises unified import and read actions', async () => {
   const runtime = fakeRuntime();
-  runtime.environmentRegistry.resolve = (environmentId) => ({
-    id: environmentId || 'windows-worker', platform: 'windows', capabilities: { exec: true },
+  runtime.environmentRegistry.resolve = id => ({
+    id: id || 'worker-a', platform: 'windows', capabilities: { conversation: true },
   });
+  runtime.workerHub = { async call(id, method, args) {
+    runtime.calls.push({ id, method, args });
+    return { status: 'ok', conversation_id: 'share:' + id + ':opaque', total_items: 3 };
+  } };
   const registry = new ToolRegistry();
   registerSpecializedTools(registry, runtime);
-  const shareExport = registry.get('ccm-extra.chatgpt_share_export');
-  assert.equal(shareExport.surfaces.direct, false);
-  assert.equal(shareExport.surfaces.deferred, true);
-  assert.equal(shareExport.surfaces.codeMode, true);
-  assert.match(shareExport.description, /tool_search -> exec/i);
-  assert.match(shareExport.description, /Do not use web search, web browsing, BMG, or browser automation/i);
-  const result = await registry.get('ccm-extra.chatgpt_share_export').handler({
-    environment_id: 'worker-a',
-    share_url: 'https://chatgpt.com/share/test-id',
-    output_path: 'C:\\tmp\\share.md',
-    format: 'md', branch: 'active', mode: 'full', proxy: 'http://127.0.0.1:7890',
+  const tool = registry.get('ccm-extra.conversation');
+  assert.ok(tool);
+  assert.equal(tool.surfaces.direct, false);
+  assert.equal(tool.surfaces.deferred, true);
+  assert.equal(tool.surfaces.codeMode, true);
+  assert.match(tool.description, /Do not use web search/);
+  const result = await tool.handler({
+    action: 'import', share_url: 'https://chatgpt.com/share/test-id', environment_id: 'worker-a',
   });
   assert.equal(result.isError, undefined);
-  assert.equal(result.structuredContent.capability, 'chatgpt_share_export');
-  assert.match(runtime.calls[0].cmd, /chatgpt-share-export/);
-  assert.match(runtime.calls[0].cmd, /127\.0\.0\.1:7890/);
-  assert.equal(runtime.calls[0].cmd.includes('bmgctl'), false);
+  assert.equal(result.structuredContent.capability, 'conversation');
+  assert.deepEqual(runtime.calls[0].method, 'conversation');
+  assert.equal(runtime.calls[0].args.action, 'import');
+  assert.equal(runtime.calls[0].args.environment_id, 'worker-a');
+  const next = await tool.handler({ action: 'thread/turns/list', conversation_id: 'share:worker-a:opaque' });
+  assert.equal(next.isError, undefined);
+  assert.equal(runtime.calls[1].args.action, 'thread/turns/list');
+  const local = await tool.handler({ action: 'thread/read', thread_id: '01a1ad26-84a2-7b91-87bc-32b31a875889' });
+  assert.equal(local.isError, undefined);
+  assert.equal(runtime.calls[2].args.thread_id, '01a1ad26-84a2-7b91-87bc-32b31a875889');
+});
+
+test('conversation capability guard does not invoke an old Worker or trigger quarantine', async () => {
+  const runtime = fakeRuntime();
+  runtime.environmentRegistry.resolve = id => ({ id: id || 'noha', capabilities: { exec: true } });
+  runtime.workerHub = { async call() { throw new Error('Worker should not be called.'); } };
+  const registry = new ToolRegistry();
+  registerSpecializedTools(registry, runtime);
+  const result = await registry.get('ccm-extra.conversation').handler({
+    action: 'thread/read', thread_id: '01a1ad26-84a2-7b91-87bc-32b31a875889', environment_id: 'noha',
+  });
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /does not support conversation/);
 });
 
 test('quark_upload is Deferred + Code Mode and advertises deferred routing', () => {
@@ -391,36 +411,23 @@ test('quark_upload is Deferred + Code Mode and advertises deferred routing', () 
   assert.match(quarkUpload.description, /discover this capability through tool_search and invoke it through exec/i);
 });
 
-test('Codex share URL is discovered and dispatched by the export tool', async () => {
+test('conversation handles Codex Share and local UUID without workspace registration', async () => {
   const runtime = fakeRuntime();
-  runtime.environmentRegistry.resolve = () => ({ id: 'worker-a', capabilities: { exec: true } });
+  runtime.environmentRegistry.resolve = () => ({ id: 'worker-a', capabilities: { conversation: true } });
+  runtime.workerHub = { async call(id, method, args) {
+    runtime.calls.push({ id, method, args });
+    return { status: 'ok', conversation_id: 'share:worker-a:sample' };
+  } };
   const registry = new ToolRegistry();
   registerSpecializedTools(registry, runtime);
-  const tool = registry.get('ccm-extra.chatgpt_share_export');
+  const tool = registry.get('ccm-extra.conversation');
   assert.ok(tool.tags.includes('codex'));
   assert.match(tool.description, /https:\/\/chatgpt\.com\/s\/cx_/);
-  assert.match(tool.inputSchema.share_url.description, /Codex/);
   const url = 'https://chatgpt.com/s/cx_' + 'a'.repeat(32);
-  const result = await tool.handler({ share_url: url, mode: 'full', format: 'json' });
+  const result = await tool.handler({ action: 'import', share_url: url });
   assert.equal(result.isError, undefined);
-  assert.ok(runtime.calls[0].cmd.includes(url));
-  assert.match(runtime.calls[0].cmd, /--mode 'full'/);
-  assert.equal(runtime.calls[0].cmd.includes('bmgctl'), false);
-});
-
-test('ChatGPT Share export can use the default Git-ignored cache output', async () => {
-  const runtime = fakeRuntime();
-  runtime.environmentRegistry.resolve = (environmentId) => ({
-    id: environmentId || 'windows-worker', platform: 'windows', capabilities: { exec: true },
-  });
-  const registry = new ToolRegistry();
-  registerSpecializedTools(registry, runtime);
-  const result = await registry.get('ccm-extra.chatgpt_share_export').handler({
-    environment_id: 'worker-a',
-    share_url: 'https://chatgpt.com/share/test-id',
-  });
-  assert.equal(result.isError, undefined);
-  assert.equal(runtime.calls[0].cmd.includes(' --output '), false);
+  assert.equal(runtime.calls[0].args.share_url, url);
+  assert.equal(runtime.calls[0].method, 'conversation');
 });
 
 test('Bilibili deferred tool consumes only a local bridge handoff on 6v without exposing signed URLs', async () => {

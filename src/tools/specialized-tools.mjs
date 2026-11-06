@@ -315,51 +315,55 @@ export function registerSpecializedTools(registry, runtime) {
 
   registry.register({
     namespace: 'ccm-extra',
-    name: 'chatgpt_share_export',
+    name: 'conversation',
     provider: 'ccm-specialized',
-    provenance: 'ccm-chatgpt-share-parser',
+    provenance: 'ccm-conversation-reader',
     surfaces: { deferred: true, codeMode: true },
-    tags: ['chatgpt', 'codex', 'share', 'conversation', 'export', 'markdown', 'json'],
+    tags: ['chatgpt', 'codex', 'conversation', 'thread', 'share', 'import', 'read', 'export'],
     environmentRequirements: { capabilities: ['exec'] },
     supportsParallel: true,
     description: [
-      '读取和导出公开 ChatGPT 共享会话（https://chatgpt.com/share/...）及 Codex 共享会话（https://chatgpt.com/s/cx_...），无需 BMG 或浏览器自动化。',
-      'For public ChatGPT Share or Codex shared-conversation links, use this capability through tool_search -> exec to inspect, extract, compare, or export the conversation. Do not use web search, web browsing, BMG, or browser automation to retrieve the conversation; report retrieval failures rather than silently switching methods.',
-      'Fetches the Share HTML, decodes the indexed React Router payload, reconstructs the active parent/child branch, and exports visible user/assistant messages to Markdown or JSON.',
-      'Use branch=all for forensic/debug export of all mapping nodes. Use mode=text for readable messages only, or mode=full to preserve every available message record and tool/internal payload exposed by the Share data.',
-      'Codex 通过公开共享快照接口读取 version=1 的 turns/items。mode=text 保留用户消息及助手的进度和最终回复；mode=full 额外保留推理摘要、文件修改和图片项，JSON 同时保留原始快照及元数据。Codex 快照没有消息分支，branch=active 和 branch=all 均按快照原始顺序导出。无法恢复共享快照上游省略的工具调用或文件修改。',
+      'Unified conversation tool for public ChatGPT/Codex shares and local Codex threads.',
+      'For a public https://chatgpt.com/share/... or https://chatgpt.com/s/cx_... URL, first call action=import. Reuse the returned conversation_id for thread/read, thread/turns/list, thread/items/list, and export; later reads never re-fetch the public URL. Explicit repeated imports refresh the snapshot.',
+      'For a local Codex session UUID, call thread/read or other read actions with thread_id and the environment_id for the machine owning that history. The Worker reads only its configured Codex Home and never resumes the thread.',
+      'List operations return bounded pages and next_cursor. mode=full exposes source records where present, with large fields truncated in inline results; export produces a complete Markdown/JSON file under the Worker cache, which can then be published through ccm-extra.publish. Public share snapshots cannot reconstruct content absent upstream.',
+      'Do not use web search, web browsing, BMG, or browser automation to retrieve public shared-conversation content. There is no need to register or enter a workspace for this tool.',
     ].join('\n\n'),
     inputSchema: {
-      share_url: z.string().url().describe('公开 ChatGPT https://chatgpt.com/share/... 或 Codex https://chatgpt.com/s/cx_<32位小写十六进制> 共享链接。'),
-      output_path: z.string().min(1).optional().describe('Optional output path. Relative paths are stored under the Git-ignored .cache/chatgpt-share-export directory; absolute paths are used as provided. If omitted, CCM generates a cache filename.'),
-      format: z.enum(['md', 'json']).optional().describe('Export format. Defaults to md.'),
-      branch: z.enum(['active', 'all']).optional().describe('ChatGPT：active 重建当前分支，all 导出所有消息节点。Codex：两者均导出同一个线性共享快照。'),
-      mode: z.enum(['text', 'full']).optional().describe('text 导出可读的用户及助手消息；full 保留共享数据中的全部记录，Codex 的 JSON 输出额外包含原始快照。默认 text。'),
-      proxy: z.string().url().optional().describe('Optional HTTP(S) proxy URL, for example http://127.0.0.1:7890.'),
-      environment_id: z.string().optional().describe('CCM environment used for network fetch and output.'),
-      yield_time_ms: z.number().int().min(0).max(30_000).optional(),
-      max_output_tokens: z.number().int().min(256).max(10_000).optional(),
+      action: z.enum(['import', 'thread/read', 'thread/turns/list', 'thread/items/list', 'export']),
+      share_url: z.string().url().optional().describe('Public ChatGPT or Codex share URL, required for import.'),
+      proxy: z.string().url().optional().describe('Optional HTTP(S) proxy for importing a public shared conversation.'),
+      conversation_id: z.string().min(1).optional().describe('Opaque conversation ID returned by import or thread/read.'),
+      thread_id: z.string().uuid().optional().describe('Local Codex thread UUID; alternative to conversation_id for read/export.'),
+      environment_id: z.string().optional().describe('CCM Worker storing the snapshot or local Codex history.'),
+      branch: z.enum(['active', 'all']).optional().describe('ChatGPT share branch selection at import time; both branches are retained in the raw snapshot.'),
+      turn_id: z.string().optional().describe('Filter thread/items/list to one turn.'),
+      cursor: z.string().optional().describe('Opaque pagination cursor from the preceding list response.'),
+      limit: z.number().int().min(1).max(50).optional().describe('Maximum items per page (default 20).'),
+      sort_direction: z.enum(['asc', 'desc']).optional(),
+      mode: z.enum(['text', 'full']).optional().describe('Readability vs source-record fidelity.'),
+      format: z.enum(['md', 'json']).optional().describe('Export file format.'),
+      output_path: z.string().min(1).optional().describe('Export filename relative to the Worker ignored .cache/conversation directory.'),
     },
     handler: async (args) => {
       try {
         const environment = runtime.environmentRegistry.resolve(args.environment_id);
-        if (!environment.capabilities?.exec) throw new Error('Environment does not support exec: ' + environment.id);
-        const command = [
-          toolPath('tools\\chatgpt-share-export\\export.py'),
-          "$python=(Get-Command python.exe -ErrorAction SilentlyContinue | Select-Object -First 1).Source",
-          "if(-not $python){throw 'Python is required for the bundled ChatGPT Share export tool.'}",
-          "$env:PYTHONUTF8='1'",
-          args.proxy ? ('$env:HTTP_PROXY=' + psQuote(args.proxy) + '; $env:HTTPS_PROXY=' + psQuote(args.proxy)) : '',
-          '& $python $tool ' + psQuote(args.share_url) +
-            ' --format ' + psQuote(args.format || 'md') +
-            ' --branch ' + psQuote(args.branch || 'active') +
-            (args.output_path ? ' --output ' + psQuote(args.output_path) : '') +
-            ' --mode ' + psQuote(args.mode || 'text'),
-        ].filter(Boolean).join('; ');
-        return execResult(await run(runtime, args, command), {
-          environment_id: environment.id,
-          capability: 'chatgpt_share_export',
-        });
+        if (!environment.capabilities?.conversation) {
+          throw new Error('Environment does not support conversation reading: ' + environment.id);
+        }
+        if (args.action === 'import' && !args.share_url) {
+          throw new Error('share_url is required for import.');
+        }
+        if (args.action !== 'import' && !(args.conversation_id || args.thread_id)) {
+          throw new Error('conversation_id or thread_id is required.');
+        }
+        const value = await runtime.workerHub.call(environment.id, 'conversation', {
+          ...args, environment_id: environment.id,
+        }, { timeoutMs: 150_000 });
+        return {
+          content: [{ type: 'text', text: JSON.stringify(value) }],
+          structuredContent: { capability: 'conversation', ...value },
+        };
       } catch (error) { return toolError(error); }
     },
   });

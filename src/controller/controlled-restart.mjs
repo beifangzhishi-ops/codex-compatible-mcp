@@ -1,12 +1,8 @@
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { DEFAULT_CCM_CONFIG_FILE } from '../runtime/ccm-config.mjs';
 
-const defaultPolicyFile = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '..', '..', 'config', 'restart-allowlist.json',
-);
+const defaultPolicyFile = DEFAULT_CCM_CONFIG_FILE;
 
 function readAllowedIdentities(value, name) {
   if (!Array.isArray(value) || value.some((id) =>
@@ -20,7 +16,7 @@ function readAllowedIdentities(value, name) {
 
 export function readRestartAllowlist(file = defaultPolicyFile) {
   // Reload on every request. Missing or malformed configuration fails closed.
-  const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const value = JSON.parse(fs.readFileSync(file, 'utf8')).restart_allowlist;
   if (!value || Array.isArray(value) || typeof value !== 'object' ||
       Object.keys(value).sort().join(',') !== 'controller_service_groups,workers') {
     throw new Error('Invalid restart allowlist: only controller_service_groups and workers are allowed.');

@@ -18,7 +18,7 @@
 
 | Concern | Exact upstream sources at pinned commit | Existing CCM implementation to replace/align |
 | --- | --- | --- |
-| Configuration schema, layer precedence, profile resolution | `codex-rs/config/src/config_toml.rs`; `codex-rs/core/src/config/mod.rs`; `codex-rs/protocol/src/models.rs` | `config/worker.env`; `src/runtime/environment-registry.mjs`; `src/runtime/sandbox/sandbox-policy.mjs` |
+| Configuration schema, layer precedence, profile resolution | `codex-rs/config/src/config_toml.rs`; `codex-rs/core/src/config/mod.rs`; `codex-rs/protocol/src/models.rs` | `ccm.config.json` (`worker.env`); `src/runtime/environment-registry.mjs`; `src/runtime/sandbox/sandbox-policy.mjs` |
 | Permission and sandbox selection | `codex-rs/sandboxing/src/manager.rs`; `codex-rs/sandboxing/src/windows.rs`; `codex-rs/core/src/windows_sandbox.rs` | `src/runtime/remote-process-manager.mjs`; `src/runtime/process-manager.mjs` |
 | Provisioning, elevation and sandbox users | `codex-rs/windows-sandbox-rs/src/setup.rs`; `src/identity.rs`; `src/dpapi.rs`; `src/setup_provisioning.rs` | `native/windows-sandbox/CcmSandboxRunner.cs`; CCM Supervisor/Worker startup |
 | Filesystem permissions and protected roots | `codex-rs/windows-sandbox-rs/src/workspace_acl.rs`; `src/acl.rs`; `src/deny_read_acl.rs`; `src/resolved_permissions.rs` | CCM synthetic capability SID and `EnsureWorkspaceWriteAce` |

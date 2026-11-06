@@ -1,10 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const CODEX_CONFIG_TEMPLATE = fileURLToPath(
-  new URL('../../../config/codex/config.toml', import.meta.url),
-);
+import { readCcmSection } from '../ccm-config.mjs';
 
 // The Codex CLI owns its native config, credentials, ACL setup and sandbox
 // accounts. CCM only supplies a separate, machine-local Codex home to avoid
@@ -25,13 +21,18 @@ export function codexRuntimeHome({
  */
 export function provisionCodexRuntimeHome({
   home = codexRuntimeHome(),
-  template = CODEX_CONFIG_TEMPLATE,
+  template = null,
   filesystem = fs,
 } = {}) {
   if (!path.win32.isAbsolute(home)) {
     throw new Error('Codex runtime home must be an absolute Windows path.');
   }
-  const content = filesystem.readFileSync(template, 'utf8');
+  const content = template
+    ? filesystem.readFileSync(template, 'utf8')
+    : readCcmSection('codex').native_sandbox_toml;
+  if (typeof content !== 'string' || !content.includes('[windows]')) {
+    throw new Error('Invalid codex.native_sandbox_toml configuration.');
+  }
   const configPath = path.win32.join(home, 'config.toml');
   filesystem.mkdirSync(home, { recursive: true });
   if (filesystem.existsSync(configPath)) {

@@ -9,45 +9,15 @@ import { buildProxyEnvironment } from '../proxy-env.mjs';
 import { readCurrentCommandEnvironment } from '../windows-command-env.mjs';
 import { readCodexShellEnvironmentPolicy } from '../shell-environment-config.mjs';
 import { createShellEnvironment } from '../shell-environment.mjs';
+import { DEFAULT_CCM_CONFIG_FILE, readWorkerCaBundle } from '../ccm-config.mjs';
 
 const DEFAULT_PTY_PROXY_PATH = fileURLToPath(
   new URL('../../../native/bin/ccm-pty-proxy.exe', import.meta.url),
 );
-const DEFAULT_WORKER_ENV_PATH = fileURLToPath(
-  new URL('../../../config/worker.env', import.meta.url),
-);
+const DEFAULT_WORKER_ENV_PATH = DEFAULT_CCM_CONFIG_FILE;
 
 function readWorkerChildEnvironment(file) {
-  let text;
-  try {
-    text = fs.readFileSync(file, 'utf8');
-  } catch (error) {
-    if (error.code === 'ENOENT') return {};
-    throw error;
-  }
-  const env = {};
-  for (const [index, raw] of text.split(/\r?\n/).entries()) {
-    const line = raw.trim();
-    if (!line || line.startsWith('#')) continue;
-    const match = /^([A-Za-z_][A-Za-z_0-9]*)\s*=\s*(.*)$/.exec(line);
-    if (!match || (match[1] !== 'CURL_CA_BUNDLE' && !/^CCM_[A-Z0-9_]+$/.test(match[1]))) {
-      throw new Error(`Invalid config/worker.env entry on line ${index + 1}: only CCM_* and CURL_CA_BUNDLE are supported.`);
-    }
-    if (match[1] !== 'CURL_CA_BUNDLE') continue;
-    let value = match[2].trim();
-    if ((value.startsWith('"') && value.endsWith('"')) ||
-        (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
-    if (!value || !(path.isAbsolute(value) || path.win32.isAbsolute(value))) {
-      throw new Error('CURL_CA_BUNDLE in config/worker.env must be an absolute path.');
-    }
-    if (!fs.existsSync(value)) {
-      throw new Error(`CURL_CA_BUNDLE file not found: ${value}`);
-    }
-    env.CURL_CA_BUNDLE = value;
-  }
-  return env;
+  return readWorkerCaBundle(file);
 }
 
 export function killChildProcessTree(

@@ -8,11 +8,13 @@ import { createHttpController } from './controller/mcp-http-server.mjs';
 import { LocalWorkerSupervisor } from './controller/local-worker-supervisor.mjs';
 import { createToolRegistry } from './tools/index.mjs';
 import { supervisorOwnsProcess } from './worker/supervisor-ownership.mjs';
+import { applyCcmBootstrapEnv } from './runtime/ccm-config.mjs';
 
 const installRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '..',
 );
+applyCcmBootstrapEnv('controller');
 const localEnvironmentId = process.env.CCM_ENVIRONMENT_ID || os.hostname();
 const localWorkerTakeoverToken = randomUUID();
 let restartQueued = false;

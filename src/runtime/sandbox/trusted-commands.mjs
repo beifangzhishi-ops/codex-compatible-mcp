@@ -1,14 +1,12 @@
 import fs from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { DEFAULT_CCM_CONFIG_FILE } from '../ccm-config.mjs';
 import {
   canonicalExecutableToken,
   effectiveShell,
   parseShellCommand,
 } from './shell-policy-parser.mjs';
 
-export const DEFAULT_TRUSTED_COMMANDS_FILE = fileURLToPath(
-  new URL('../../../config/trusted-commands.json', import.meta.url),
-);
+export const DEFAULT_TRUSTED_COMMANDS_FILE = DEFAULT_CCM_CONFIG_FILE;
 
 const SHELLS = new Set(['powershell', 'pwsh', 'cmd']);
 const ARGUMENT_TYPES = new Set(['any', 'prefix', 'subcommand']);
@@ -92,7 +90,7 @@ export function validateTrustedCommands(config) {
 // An invalid file disables only the built-in trust class for that request.
 export function loadTrustedCommands(file = DEFAULT_TRUSTED_COMMANDS_FILE) {
   try {
-    return { rules: validateTrustedCommands(JSON.parse(fs.readFileSync(file, 'utf8'))) };
+    return { rules: validateTrustedCommands(JSON.parse(fs.readFileSync(file, 'utf8')).trusted_commands) };
   } catch (error) {
     return { rules: [], error: 'Trusted-command configuration unavailable: ' +
       String(error?.message || error) };
@@ -214,6 +212,6 @@ export function trustedCommandDenialHint({ command, output, environment, trusted
       !/\btailscale(?:\.exe)?\b/i.test(command || '') ||
       !TAILSCALE_PIPE_DENIED.test(output || '')) return null;
   return '[CCM command trust hint] Tailscale service access was denied in a restricted command. ' +
-    'Review config/trusted-commands.json and use an invocation whose every command segment ' +
+    'Review ccm.config.json trusted_commands and use an invocation whose every command segment ' +
     'matches a trusted rule; unsupported syntax remains sandboxed.';
 }

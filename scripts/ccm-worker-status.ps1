@@ -6,7 +6,7 @@ param(
 $ErrorActionPreference='SilentlyContinue'
 $repoRoot=Split-Path -Parent $PSScriptRoot
 if(-not $ConfigPath){
-    $ConfigPath=Join-Path $repoRoot 'config\worker.env'
+    $ConfigPath=Join-Path $repoRoot 'ccm.config.json'
 }
 if(-not [IO.Path]::IsPathRooted($ConfigPath)){
     $ConfigPath=Join-Path $repoRoot $ConfigPath
@@ -14,21 +14,9 @@ if(-not [IO.Path]::IsPathRooted($ConfigPath)){
 
 $values=@{}
 if(Test-Path -LiteralPath $ConfigPath){
-    foreach($rawLine in Get-Content -LiteralPath $ConfigPath){
-        $line=[string]$rawLine
-        $trimmed=$line.Trim()
-        if(-not $trimmed -or $trimmed.StartsWith('#')){ continue }
-        $equals=$line.IndexOf('=')
-        if($equals -lt 1){ continue }
-        $name=$line.Substring(0,$equals).Trim()
-        $value=$line.Substring($equals+1).Trim()
-        if($value.Length -ge 2){
-            if(($value.StartsWith('"') -and $value.EndsWith('"')) -or
-               ($value.StartsWith("'") -and $value.EndsWith("'"))){
-                $value=$value.Substring(1,$value.Length-2)
-            }
-        }
-        $values[$name]=$value
+    $data=Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    foreach($setting in $data.worker.env.PSObject.Properties){
+        $values[$setting.Name]=[string]$setting.Value
     }
 }
 

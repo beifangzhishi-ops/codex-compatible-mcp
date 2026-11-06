@@ -8,7 +8,8 @@ import { WorkerHub } from './worker-hub.mjs';
 import { ApprovalManager } from './approval-manager.mjs';
 import { WorkspaceHandleManager } from './workspace-handle-manager.mjs';
 import { FileTransferStore } from './file-transfer-store.mjs';
-import { parseEnvFile, requireHttpsIdentity } from '../../ccm-sidecar/config.mjs';
+import { requireHttpsIdentity } from '../../ccm-sidecar/config.mjs';
+import { DEFAULT_CCM_CONFIG_FILE, readCcmSection } from '../runtime/ccm-config.mjs';
 import fs from 'node:fs';
 import { PlanManager } from './plan-manager.mjs';
 import { createAuditLogger } from './audit-log.mjs';
@@ -40,7 +41,7 @@ export function createControllerRuntime(options = {}) {
   const workerQuarantinePolicy = options.workerQuarantinePolicy ||
     new WorkerQuarantinePolicy({
       file: options.workerQuarantinePolicyFile ||
-        path.join(installRoot, 'config', 'worker-quarantine-errors.json'),
+        DEFAULT_CCM_CONFIG_FILE,
       pollIntervalMs: options.workerQuarantinePolicyPollIntervalMs,
       log: options.workerQuarantinePolicyLog,
     });
@@ -120,8 +121,7 @@ export function createControllerRuntime(options = {}) {
       path.join(installRoot, '.state', 'file-transfers'),
   });
   const fileDownloadOrigin = options.fileDownloadOrigin || (() => {
-    const configFile = path.join(installRoot, 'config', 'ccm.env');
-    const values = parseEnvFile(fs.readFileSync(configFile, 'utf8'));
+    const values = readCcmSection('controller').env;
     return new URL(requireHttpsIdentity('CCM_RESOURCE', values.CCM_RESOURCE, '/ccm/mcp')).origin;
   });
   const planManager = options.planManager || new PlanManager({

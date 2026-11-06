@@ -5,6 +5,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { NativeEnvironmentExecutor } from '../src/runtime/executors/native-executor.mjs';
+import { fileURLToPath } from 'node:url';
+
+const exampleConfig = fileURLToPath(new URL('../ccm.config.example.json', import.meta.url));
+function writeWorkerConfig(file, child_env = {}) {
+  const content = JSON.parse(fs.readFileSync(exampleConfig, 'utf8'));
+  content.worker.child_env = child_env;
+  fs.writeFileSync(file, JSON.stringify(content));
+}
 
 function fakeChild() {
   const child = new EventEmitter();
@@ -16,7 +24,7 @@ function fakeChild() {
   return child;
 }
 
-function createHarness({ workerEnvPath, commandEnvironment = (env) => ({ ...env }),
+function createHarness({ workerEnvPath = exampleConfig, commandEnvironment = (env) => ({ ...env }),
   shellEnvironmentPolicy = {}, invocation } = {}) {
   const spawned = [];
   let mode = 'proxy';
@@ -118,29 +126,29 @@ test('Codex sandbox PTY uses ConPTY wrapper without altering the upstream CLI ar
 test('native executor reads machine-local CURL_CA_BUNDLE for each pipe and PTY child', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-child-env-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const config = path.join(dir, 'worker.env');
+  const config = path.join(dir, 'ccm.config.json');
   const bundle = path.join(dir, 'ca-bundle.crt');
   fs.writeFileSync(bundle, 'test certificate');
   const harness = createHarness({ workerEnvPath: config });
 
+  writeWorkerConfig(config);
   harness.start();
   assert.equal('CURL_CA_BUNDLE' in harness.spawned[0].options.env, false);
 
-  fs.writeFileSync(config, `# local CA\nCCM_ENVIRONMENT_ID=local-worker\nCURL_CA_BUNDLE=${bundle}\n`);
+  writeWorkerConfig(config, { CURL_CA_BUNDLE: bundle });
   harness.start();
   harness.start(true);
   assert.equal(harness.spawned[1].options.env.CURL_CA_BUNDLE, bundle);
   assert.equal(harness.spawned[2].options.env.CURL_CA_BUNDLE, bundle);
 
   assert.equal('CCM_ENVIRONMENT_ID' in harness.spawned[1].options.env, false);
-  fs.writeFileSync(config, 'SSL_CERT_FILE=C:/invalid.pem\n');
-  assert.throws(() => harness.start(), /only CCM_\* and CURL_CA_BUNDLE/);
-  fs.writeFileSync(config, 'CURL_CA_BUNDLE=C:/missing-bundle.crt\n');
+  writeWorkerConfig(config, { SSL_CERT_FILE: 'C:/invalid.pem' });
+  assert.throws(() => harness.start(), /Only CURL_CA_BUNDLE/);
+  writeWorkerConfig(config, { CURL_CA_BUNDLE: 'C:/missing-bundle.crt' });
   assert.throws(() => harness.start(), /file not found/);
 
   fs.rmSync(config);
-  harness.start();
-  assert.equal('CURL_CA_BUNDLE' in harness.spawned[3].options.env, false);
+  assert.throws(() => harness.start(), /ENOENT/);
 });
 
 test('native executor refreshes command environment for both pipe and PTY', () => {
@@ -177,10 +185,10 @@ test('Codex shell policy controls inherited and overridden environment for pipe 
 test('Codex shell policy set wins over inherited, proxied and Worker CA values', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-codex-env-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const config = path.join(dir, 'worker.env');
+  const config = path.join(dir, 'ccm.config.json');
   const bundle = path.join(dir, 'ca-bundle.crt');
   fs.writeFileSync(bundle, 'test certificate');
-  fs.writeFileSync(config, 'CURL_CA_BUNDLE=' + bundle + '\n');
+  writeWorkerConfig(config, { CURL_CA_BUNDLE: bundle });
   const harness = createHarness({
     workerEnvPath: config,
     shellEnvironmentPolicy: {

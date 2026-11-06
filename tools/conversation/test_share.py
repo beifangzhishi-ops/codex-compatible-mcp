@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
-P=Path(__file__).with_name('export.py')
+P=Path(__file__).with_name('share.py')
 spec=importlib.util.spec_from_file_location('share_export',P)
 e=importlib.util.module_from_spec(spec); spec.loader.exec_module(e)
 
@@ -88,52 +88,6 @@ class ParserTests(unittest.TestCase):
  def test_codex_rejects_unsupported_and_malformed_snapshots(self):
   for snapshot in ({'version':2,'turns':[]},{'version':True,'turns':[]},{'version':1,'turns':[{}]},{'version':1,'turns':[{'items':[None]}]}, {'version':1,'turns':[{'items':[{'type':'userMessage','content':'错误'}]}]}):
    with self.subTest(snapshot=snapshot),self.assertRaises(ValueError):e.codex_records(snapshot)
- def test_codex_cli_text_and_full_modes_with_both_branch_options(self):
-  snapshot=self.codex_snapshot()
-  for branch in ('active','all'):
-   for mode in ('text','full'):
-    with self.subTest(branch=branch,mode=mode),temporary_output('-共享会话.json') as out:
-     args=['export.py','https://chatgpt.com/s/cx_'+'a'*32,'--format','json','--output',str(out),'--branch',branch,'--mode',mode]
-     with patch.object(sys,'argv',args),patch.object(e,'fetch',return_value=json.dumps(snapshot)),patch('sys.stdout',new_callable=io.StringIO) as stdout:
-      e.main()
-     result=json.loads(out.read_text(encoding='utf-8')); summary=json.loads(stdout.getvalue())
-     self.assertEqual(summary['snapshot_turns'],2)
-     self.assertEqual(summary['user_turns'],2)
-     self.assertEqual(result['source'],'codex')
-     if mode=='full':
-      self.assertEqual(result['snapshot'],snapshot)
-      self.assertEqual(len(result['messages']),9)
-     else:
-      self.assertNotIn('snapshot',result)
-      self.assertEqual([r['role'] for r in result['messages']],['user','assistant','assistant','user'])
-      self.assertIn('图片',result['messages'][-1]['text'])
- def test_codex_cli_markdown_and_invalid_json(self):
-  with temporary_output('-共享会话.md') as out:
-   args=['export.py','https://chatgpt.com/s/cx_'+'a'*32,'--output',str(out),'--mode','full']
-   with patch.object(sys,'argv',args),patch.object(e,'fetch',return_value=json.dumps(self.codex_snapshot())),patch('sys.stdout',new_callable=io.StringIO):e.main()
-   content=out.read_text(encoding='utf-8')
-   for text in ('## 用户','## 助手','## 工具','公开推理摘要','+新内容','codex:shared-image-unavailable'):self.assertIn(text,content)
-   with patch.object(sys,'argv',args),patch.object(e,'fetch',return_value='<html>错误页</html>'):
-    with self.assertRaisesRegex(ValueError,'JSON'):e.main()
- def test_chatgpt_cli_still_decodes_html_mapping(self):
-  data=['mapping',{'n1':2},{'message':{'author':{'role':'user'},'content':{'parts':['你好']}}},'title','示例标题','current_node','n1',{'_3':4,'_5':6}]
-  html='streamController.enqueue('+json.dumps(json.dumps(data))+')'
-  with temporary_output('-共享会话.json') as out:
-   args=['export.py','https://chatgpt.com/share/example','--output',str(out),'--format','json']
-   with patch.object(sys,'argv',args),patch.object(e,'fetch',return_value=html),patch('sys.stdout',new_callable=io.StringIO):e.main()
-   result=json.loads(out.read_text(encoding='utf-8'))
-   self.assertEqual(result['title'],'示例标题')
-   self.assertEqual(result['messages'][0]['text'],'你好')
-   self.assertNotIn('snapshot',result)
- def test_default_output_uses_gitignored_cache(self):
-  out=e.resolve_output_path('https://chatgpt.com/share/abc',None,'md','active','text',Path('C:/repo'))
-  self.assertEqual(out,Path('C:/repo/.cache/chatgpt-share-export/abc.active.text.md').resolve())
- def test_relative_output_uses_gitignored_cache(self):
-  out=e.resolve_output_path('https://chatgpt.com/share/abc','nested/session.json','json','active','full',Path('C:/repo'))
-  self.assertEqual(out,Path('C:/repo/.cache/chatgpt-share-export/nested/session.json').resolve())
- def test_relative_output_cannot_escape_cache(self):
-  with self.assertRaises(ValueError):
-   e.resolve_output_path('https://chatgpt.com/share/abc','../../outside.md','md','active','text',Path('C:/repo'))
  def test_deleted_share_loader_error_is_reported_clearly(self):
   D=[
    {'_1':2},
@@ -183,15 +137,5 @@ class ParserTests(unittest.TestCase):
    return {'parent':parent,'children':children,'message':{'author':{'role':role},'create_time':t,'content':{'parts':['x']}}}
   nodes={'root':n(None,['a','b'],1),'a':n('root',[],2),'b':n('root',[],3)}
   self.assertEqual(e.active_branch(nodes),['root','b'])
- def test_markdown_preserves_speaker_roles(self):
-  out=e.render_markdown([
-   {'role':'user','text':'hello','visible_text':'hello'},
-   {'role':'assistant','text':'hi','visible_text':'hi'},
-   {'role':'tool','text':'result','visible_text':'result'},
-  ])
-  self.assertIn('## 用户\n\nhello',out)
-  self.assertIn('## 助手\n\nhi',out)
-  self.assertIn('## 工具\n\nresult',out)
-  self.assertNotIn('## message',out)
 
 if __name__=='__main__': unittest.main()

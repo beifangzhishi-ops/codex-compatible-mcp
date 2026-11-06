@@ -33,7 +33,7 @@ export function parseWorkerQuarantinePolicy(content) {
       String(error?.message || error),
     );
   }
-  return normalizeErrorCodes(parsed);
+  return normalizeErrorCodes(parsed.worker_quarantine_errors);
 }
 
 export class WorkerQuarantinePolicy {

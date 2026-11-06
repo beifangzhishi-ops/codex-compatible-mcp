@@ -63,3 +63,18 @@ For TeX, Codex's `shell_environment_policy.set` can set a Worker-session-wide va
 - Upstream `tests/basic.rs` is retained at `native/codex-execpolicy/tests/basic.rs`. The Node tests `test/codex-execpolicy-native.test.mjs` and `test/codex-execpolicy-bridge.test.mjs` exercise the built Rust engine and its upstream persistence method. Their pass results must not be mistaken for the upstream Rust test suite until the suite itself is executed.
 - 6v: normal native release build passed, the 9 native evaluator/bridge tests passed, and `npm test` passed 327/327. The direct Rust `cargo test --release` was attempted but failed before compilation of test code because the workspace-write sandbox's Schannel TLS context could not download a dev dependency (`SEC_E_NO_CREDENTIALS`). The separate native build attempt with extra test arguments did not match the existing trusted build rule and failed to write a C# test build artifact under the sandbox. No exemption was introduced; **the upstream Rust test suite has not yet passed**. Do not erase this blocker from the record until it has been verified on an appropriate build environment.
 - **No production policy switch yet**: no existing saved Controller rules were reinterpreted, replaced, deleted or automatically imported. To finish the migration, map the full upstream `codex-rs/core/src/exec_policy.rs` decision chain and `~/.codex/rules` loading into the Controller/Worker adaptation, retain Host-only approval-card transport, test prompt/forbidden precedence and sandbox fallback end-to-end, and then explicitly replace obsolete storage/documentation. No old compatibility scheme should be invented without user authorization.
+
+## Host conversation reader (not upstream execution parity)
+
+The CCM-specialized `ccm-extra.conversation` tool is an explicitly owner-requested
+Host workflow. It provides a public ChatGPT/Codex Share snapshot import and a
+Worker-local read-only Codex JSONL reader with `thread/read`,
+`thread/turns/list`, and `thread/items/list`-style interfaces. Codex App Server
+protocol names and turn/item semantics are audited against the pinned upstream
+source baseline `f79b26ccbb3116b052544666a181012fb45dc49b` in
+`third_party/openai-codex/codex-rs/app-server` and Codex rollout code.
+This is an adapter, **not** an assertion that our read API is byte-for-byte
+identical to the upstream App Server. Public Share imports have their own
+source limitations. Local reads do not resume sessions, and capability
+negotiation prevents a Controller from issuing an unknown method to an older
+Worker. Upstream execution/sandbox parity status is unchanged.

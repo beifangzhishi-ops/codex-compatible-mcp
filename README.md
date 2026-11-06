@@ -111,7 +111,7 @@ Every execution environment uses the same Remote Worker protocol. The machine ho
 
 Worker feature churn does not require monotonically bumping the transport protocol version. A Worker that proves incompatible with the running Controller at RPC time is quarantined in memory rather than disconnected: all environments owned by that Worker remain visible as `state=abnormal`, later RPC dispatch to them fails fast, and healthy Workers continue normally. A fresh connection using the same `worker_id` may replace an already-quarantined connection without a takeover token and clears the quarantine. When a normal connection still occupies that identity, the Controller first gives it a short `ping` probe: a responsive Worker remains authoritative and the duplicate is rejected, while an unresponsive stale connection is replaced by the fresh Worker. Ordinary command/tool failures do not quarantine a Worker.
 
-The contract-error codes that trigger quarantine are configured in the tracked, non-secret `config/worker-quarantine-errors.json` file. CCM hot-reloads valid edits to this file with no Controller restart. Invalid live edits are logged and ignored while the last known-good policy remains active; invalid configuration at Controller startup is fatal.
+Worker quarantine error codes are configured in the `worker_quarantine_errors` section of the root `ccm.config.json` file. CCM hot-reloads valid edits to this file with no Controller restart. Invalid live edits are logged and ignored while the last known-good policy remains active; invalid configuration at Controller startup is fatal.
 
 Registered workspaces are owned by each Worker, not by the Controller. **Workspace handle** (`workspace_handle`) is a reusable UUID-shaped reference to one workspace on one Worker; it is not an `environment_id`, `workspace_id`, conversation context, or MCP session. A registered workspace may have multiple valid handles. If the user, project instructions, or CCM already supplies a handle for the intended project, pass it directly to operational tools; do not call `select_workspace`, `register_workspace`, or `create_projectless_handle` and do not request entry approval merely to obtain a new handle. Only call deferred `select_workspace` when no usable handle exists **and** the user explicitly requests workspace entry/switching. Only call deferred `register_workspace` when the user explicitly requests registration and no usable handle exists. Discover them through `tool_search` and invoke them through `exec`. Reading, inspecting, editing, or working on a project (including saying "read the workspace") never authorizes entry, registration, or an entry approval; a missing or rejected handle does not authorize automatic entry. Deferred + Code Mode `select_workspace` / `register_workspace` calls always validate the exact workspace identity or registration target. In a `full-access` environment, entry returns the real `workspace_handle` without binding a UI; the model then calls the separate read-only Direct `show_workspace_handle` tool with that exact handle to display a copyable card. Restricted environments freeze the exact workspace action and return an opaque `approval_id`; the top-level Direct `request_approval` tool renders that frozen action in the CCM approval app, and on successful approval the same card displays the workspace handle. Restricted entry tools do not create a handle-card iframe while approval is pending. Approval resumes the same validated action without a model-generated retry. `register_workspace` combines registration and entry; with `create_if_missing=true`, the action may also create the exact missing project directory before registration. Denied/failed/pending actions do not show a new handle, and `create_projectless_handle` never shows one. Normal development tools carry only the resulting handle. Workspace handles are persisted by the Controller and remain valid across Controller or Worker restarts; entering a project again generates a new valid handle without invalidating the old one. Worker-local projectless mappings are persisted as well, so a surviving projectless directory can be resumed after a Worker restart.
 
@@ -247,31 +247,21 @@ CCM treats confirmed client/Host/model/Worker compatibility findings as reposito
 
 CCM deliberately does not embed a second JavaScript interpreter for Code Mode. The host application remains responsible for loops, branching, and data processing. CCM's `exec/wait` pair is a bounded structured dispatcher over ToolRegistry capabilities. `state=completed` is terminal. If nested dispatch has finished but an `exec_command` leaves a live process session, CCM returns `state=awaiting_io` with `next_operation=write_stdin`; empty polling must continue through `exec -> ccm.write_stdin`. Top-level `write_stdin` remains available for real non-empty interactive stdin writes and client compatibility, but empty Direct calls are rejected without touching the session.
 
-### ChatGPT Share conversation export
+### Unified conversation import and reading
 
-**Model routing:** For public ChatGPT Share (`https://chatgpt.com/share/...`) and Codex shared-conversation (`https://chatgpt.com/s/cx_...`) links, inspect, compare, or export the conversation with `ccm-extra.chatgpt_share_export` via `tool_search` -> `exec`. Do not substitute web search, web browsing, BMG, or browser automation to retrieve shared-conversation content; report CCM retrieval failures. This rule is provided to models in the MCP Server instructions and the deferred tool description, rather than requiring a global user instruction.
+Use the single Deferred + Code Mode tool `ccm-extra.conversation` via `tool_search` and `exec` for public ChatGPT (`https://chatgpt.com/share/...`) and Codex (`https://chatgpt.com/s/cx_...`) shares, or for local Codex thread UUIDs. One tool handles import, reading, and export. No BMG or browser automation is involved.
 
-ChatGPT Share HTML is fetched directly with desktop browser-like `User-Agent`, `Accept`, and `Accept-Language` headers. A generic non-browser client receives an HTTP 200 metadata-only page, not the serialized conversation; the desktop request exposes the indexed payload for the built-in parser. Both ordinary `/share/...` links and URLs with `?ogimg=plain` work without browser automation. Codex shared-thread snapshots continue to use the JSON endpoint.
+- `action=import`: provide `share_url`, optional `environment_id` and ChatGPT `branch=active|all`. The selected Worker fetches the public payload using desktop headers (ChatGPT) or the Codex JSON snapshot API, then atomically saves its complete normalized and raw snapshot in ignored `.state/conversations/`. The response gives a stable `conversation_id` and revision.
+- `action=thread/read`: read metadata from a saved snapshot using `conversation_id` and the same `environment_id`, or from a local Codex UUID using `thread_id` and its Worker.
+- `action=thread/turns/list`: paginate human-readable turns with `cursor`, `limit` (default 20, maximum 50), and `sort_direction`. ChatGPT turns follow the active branch, even when other branch nodes are retained.
+- `action=thread/items/list`: paginate individual items, optionally with `turn_id` and `mode=text|full`. Full mode retains original records where available, bounded in inline output.
+- `action=export`: save Markdown or JSON under ignored `.cache/conversation/` with `mode=text|full`, optionally publish the file using `ccm-extra.publish`.
 
-`ccm-extra.chatgpt_share_export` 使用 Deferred + Code Mode，可读取并导出公开 ChatGPT 与 Codex 共享会话，无需 BMG 或浏览器自动化。通过 `tool_search` 发现工具，再通过 `exec` 调用。
+Reads of imported shares are offline; only a new import refreshes the snapshot. Failed refresh keeps the previous complete version and old cursors become invalid after successful refresh. ChatGPT message branches and Codex item order are retained. Missing content in public shares, including any withheld tool activity, cannot be reconstructed. Local Codex UUID reads use the configured Worker-local `codex.home` (default the user's `~/.codex`) and do not resume or modify Codex sessions.
 
-Supported features:
+**Version-skew guard:** each Worker advertises `capabilities.conversation`. The Controller rejects calls to Workers that do not advertise the method without sending an unknown RPC that would trigger `unknown_method` quarantine. Matching Git commit IDs alone do not prove running code matches if either checkout has uncommitted changes or a Worker was not restarted.
 
-- `mode=text`: readable user/assistant conversation export.
-- `mode=full`: preserves all message records exposed by the Share payload, including system/tool records and message metadata.
-- ranch=active: follows the current Share branch when available.
-- ranch=all: exports all mapping nodes for debugging or archival.
-- Markdown and JSON output formats.
-- `output_path` is optional. Omitted or relative paths are written under the Git-ignored `.cache/chatgpt-share-export/` directory; absolute paths are honored directly.
-- Non-text messages such as image-only messages are retained rather than silently dropped.
-
-The exporter only recovers information present in the public Share payload. Information removed upstream by ChatGPT is not recoverable.
-
-Codex 共享兼容（2026-10-08）：接受 `https://chatgpt.com/s/cx_<32位小写十六进制>`，直接读取公开接口 `/backend-api/wham/shared_threads/<共享ID>` 的 `version=1` JSON 快照，不改写成 ChatGPT `/share/` 链接，也不依赖页面 JavaScript。`mode=text` 保留用户消息、助手进度及最终回复，纯图片用户消息以图片地址占位；`mode=full` 额外保留推理摘要、文件修改、图片查看与生成项，JSON 输出中的 `snapshot` 保留全部原始轮次、消息项、耗时、资源元数据及上游省略计数。快照是线性 `turns/items`，`branch=active` 和 `branch=all` 均按原始顺序导出。Codex 的 `total_nodes` 表示快照消息项总数；`snapshot_turns` 是快照轮次数，`user_turns` 仍表示用户消息数。未知消息项仅在 full 模式保留；不支持的快照版本或错误结构明确报错。
-
-兼容边界：只能读取公开共享快照实际提供的数据，不能恢复上游未公开的完整推理、工具调用或被省略的文件修改，也不自动下载图片。快照接口属于查看器当前使用的接口，可能随上游版本变化；403/404/410 表示当前请求无法访问，工具会明确报错。运行环境需要 Python、有效 TLS 证书链及能访问 ChatGPT 的网络；必要时使用 `proxy` 参数或 Worker 的代理模式。该工具在 Codex 和 ChatGPT Host 中均通过 `tool_search` → `exec` 使用。
-
-部署与验证：Controller 重启后更新工具发现说明；各 Worker 执行自己 `CCM_INSTALL_ROOT` 下的 `tools/chatgpt-share-export/export.py`，远程 Worker 需同步该脚本，单独重启 Controller 不会更新另一台机器的工具文件。本次已通过本机 `DESKTOP-KFL6V1F` 的 CCM 实际调用验证，共享快照的 8 个轮次、41 个消息项成功完整导出，且逐项顺序及原始数据一致。
+Full contracts and examples: `tools/conversation/README.md`.
 
 ### Bundled specialized capabilities
 
@@ -336,8 +326,9 @@ The merged sandbox implementation records the **entire** reviewed upstream
 Codex CLI runtime version**. See
 `docs/codex-upstream-windows-parity.md` for the exact native source,
 configuration decision chain, host findings, and required acceptance matrix.
-The Codex-schema `config/codex/config.toml` is a *non-secret staged
-configuration*: the trusted runtime helper copies its exact bytes to
+The Codex-native TOML is declared under `codex.native_sandbox_toml` in the
+root `ccm.config.json`, with a non-secret template in `ccm.config.example.json`.
+The trusted runtime helper writes those exact bytes to
 `%LOCALAPPDATA%\\CCM\\CodexSandbox\\config.toml`, without modifying the
 interactive user's `%USERPROFILE%\\.codex\\config.toml`. This native config
 is exercised by the isolated execution tests; it is not yet the production
@@ -404,7 +395,7 @@ the Supervisor or Worker. Existing running commands are unaffected.
 
 Worker-specific `CCM_*` settings remain owned by the Worker and cannot be overwritten
 by registry values. Existing command proxy-mode selection and the validated
-`CURL_CA_BUNDLE` override from `config/worker.env` are applied afterward. Other
+`CURL_CA_BUNDLE` override from `ccm.config.json` (`worker.env` / `worker.child_env`) are applied afterward. Other
 platforms continue using the Worker's inherited environment. The Windows registry
 must be readable when starting a new command; errors are reported rather than
 silently executing with an outdated environment.
@@ -419,9 +410,9 @@ Keep `CCM_PERMISSION_PROFILE=workspace-write` when using an elevated Supervisor 
 
 **Full-privilege follow-up (2026-11-05):** Temporarily retaining all administrator privileges in the experimental token did **not** preserve the outside-workspace write boundary. Ordinary `Set-Content` and `icacls /grant` against a standalone temporary file outside the workspace were denied, but a Win32 test program enabled `SeRestorePrivilege`, opened the same file with `FILE_FLAG_BACKUP_SEMANTICS`, and successfully overwrote it. `OpenSCManager(SC_MANAGER_CREATE_SERVICE)` was still denied by the restricting SID, while even an in-workspace `icacls /grant` failed because the capability SID currently lacks `WRITE_DAC`. The test changed only temporary test files. This full-privilege variant was rolled back and the 6v native helper rebuilt; the original privilege-limited experimental mode remains. `WRITE_RESTRICTED` alone cannot guarantee both unrestricted administrator actions and strict outside-workspace write confinement. Achieving that combination requires enforcement independent of the administrator token, not merely changing CreateRestrictedToken flags.
 
-At Windows Worker startup, `ccm-worker-token-owner.exe` sets the Worker's **default file owner** (`TokenOwner`) to the actual user SID from its Windows token, instead of the Administrators group that an elevated token can use as its default owner. This leaves the Worker elevated and keeps the restricted-token sandbox unchanged, but newly created folders and child-process Git clones normally belong to the signed-in user (avoiding Git `dubious ownership` on later restricted commands). The helper only changes the immediate parent Worker's token and verifies the same token user; no Windows username or SID is hardcoded. Both launchers build this native helper with `npm run build:native` before Worker startup; when deploying only a Worker restart, build it on each updated host **before** requesting `ccm.restart`. A missing or failing helper stops that Worker from starting, rather than silently recreating Administrators-owned project folders. Existing folder owners are not modified; repair those separately if needed. This change does not fix Git Bash/MSYS `sh.exe` signal-pipe failures inside the Windows restricted sandbox; a Git invocation matched by `config/trusted-commands.json` uses the Controller-authorized unsandboxed route.
+At Windows Worker startup, `ccm-worker-token-owner.exe` sets the Worker's **default file owner** (`TokenOwner`) to the actual user SID from its Windows token, instead of the Administrators group that an elevated token can use as its default owner. This leaves the Worker elevated and keeps the restricted-token sandbox unchanged, but newly created folders and child-process Git clones normally belong to the signed-in user (avoiding Git `dubious ownership` on later restricted commands). The helper only changes the immediate parent Worker's token and verifies the same token user; no Windows username or SID is hardcoded. Both launchers build this native helper with `npm run build:native` before Worker startup; when deploying only a Worker restart, build it on each updated host **before** requesting `ccm.restart`. A missing or failing helper stops that Worker from starting, rather than silently recreating Administrators-owned project folders. Existing folder owners are not modified; repair those separately if needed. This change does not fix Git Bash/MSYS `sh.exe` signal-pipe failures inside the Windows restricted sandbox; a Git invocation matched by `ccm.config.json` (`trusted_commands`) uses the Controller-authorized unsandboxed route.
 
-For an assistant-operated restart use the Deferred `ccm.restart` capability rather than `exec_command`/`taskkill` or any command-prefix authorization. Its input is restricted to `{ "component": "controller_service_group" | "worker", "environment_id": "<registered id>" }`. The Controller checks `config/restart-allowlist.json` on **every request**, requiring exact environment IDs in `controller_service_groups` or `workers` (no wildcard). The Controller group may only target the locally supervised Controller identity; a Worker request may only target an actively connected, healthy registered Worker. Neither action accepts an executable, shell, script, PID, path, nor arbitrary arguments; no `exec_command` or approval-policy permissions are created. Add new Worker identities by updating the allowlist, without changing code or restarting the Controller. Invalid/missing configuration fails closed.
+For an assistant-operated restart use the Deferred `ccm.restart` capability rather than `exec_command`/`taskkill` or any command-prefix authorization. Its input is restricted to `{ "component": "controller_service_group" | "worker", "environment_id": "<registered id>" }`. The Controller checks `ccm.config.json` (`restart_allowlist`) on **every request**, requiring exact environment IDs in `controller_service_groups` or `workers` (no wildcard). The Controller group may only target the locally supervised Controller identity; a Worker request may only target an actively connected, healthy registered Worker. Neither action accepts an executable, shell, script, PID, path, nor arbitrary arguments; no `exec_command` or approval-policy permissions are created. Add new Worker identities by updating the allowlist, without changing code or restarting the Controller. Invalid/missing configuration fails closed.
 
 The dedicated restart RPC makes the supervised target exit after acknowledging the request. `ccm-supervisor.ps1` restarts the Controller, local Worker and OAuth sidecar as a group; `ccm-worker-supervisor.ps1` or `LocalWorkerSupervisor` restores an individual Worker. Controller service-group restart checks the existing Supervisor-owned gateway parent PID; remote-Worker restart checks the Supervisor-owned Worker PID; the local Worker uses its Supervisor launch marker. Processes without verified supervision reject restart. An accepted response means **requested, not recovered**: after the relevant reconnect, independently verify Controller health, Worker normal state, and OAuth sidecar health. The Controller connection will be interrupted when restarting its service group. The installer scripts manage startup, not routine restart; do not alter Task Scheduler configuration just to issue a restart.
 
@@ -442,12 +433,10 @@ Remove it with:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\uninstall-ccm-autostart.ps1
 ```
 
-For a standalone Windows Remote Worker, first create its ignored runtime config:
-
-```powershell
-Copy-Item .\config\worker.env.example .\config\worker.env
-notepad .\config\worker.env
-```
+For a standalone Windows Remote Worker, create its machine-local root
+`ccm.config.json` from the tracked `ccm.config.example.json` and customize
+`worker.env`, `worker.child_env` and `codex.home`. The root JSON is the only
+CCM runtime configuration; each machine keeps its own ignored file.
 
 Set at least `CCM_WORKER_HUB_CONNECT_HOST`; normally also give the Worker a stable `CCM_ENVIRONMENT_ID`. `CCM_WORKSPACE` is a Worker bootstrap workspace seed and is not a GPT-visible default project. Then install and inspect the Worker task:
 
@@ -462,7 +451,7 @@ Remove it with:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\uninstall-ccm-worker-autostart.ps1
 ```
 
-The Remote Worker supervisor reads `config/worker.env` itself, builds the native helpers on startup, and launches `src/worker/agent.mjs`. The Worker agent owns connection retry/reconnect behavior, so temporary Controller/network loss does not cause a process restart. `config/worker.env`, PID files, and supervisor logs are local runtime state and are not committed.
+The Remote Worker supervisor reads root `ccm.config.json` itself, builds the native helpers on startup, and launches `src/worker/agent.mjs`. The Worker agent owns connection retry/reconnect behavior, so temporary Controller/network loss does not cause a process restart. `ccm.config.json`, PID files, and supervisor logs are local runtime state and are not committed.
 
 `list_projects` performs per-environment discovery. When called without `environment_id`, a stale or failing Worker cannot make healthy Worker results fail: the affected environment is returned as abnormal with its discovery error while healthy environments still return their projects. When `environment_id` explicitly targets a failing environment, the call remains strict and returns an error.
 
@@ -503,7 +492,7 @@ For Tailscale Funnel, apply the path routes after the sidecar is healthy:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\configure-ccm-funnel.ps1 -Apply
 ```
 
-The public MCP resource is `https://<host>/ccm/mcp`. Runtime OAuth configuration is stored in ignored `config/ccm.env`; OAuth tokens/state and the local approval secret remain under ignored `.state/`.
+The public MCP resource is `https://<host>/ccm/mcp`. Runtime OAuth configuration is stored under `controller.env` in ignored root `ccm.config.json`; OAuth tokens/state and the local approval secret remain under ignored `.state/`.
 
 Funnel is CCM's public **ingress/control path** only. It lets a remote MCP client continue reaching the OAuth sidecar and Controller even when a Worker's ordinary outbound proxy is unhealthy, but it is not a SOCKS proxy, HTTP CONNECT proxy, NAT gateway, or general egress service. A Worker child process such as `git`, `curl`, `npm`, or `pip` creates its own outbound connection and cannot route that new connection "back through" Funnel. Child-process egress is controlled independently by the proxy/direct mode described below.
 
@@ -578,7 +567,38 @@ npm run worker
 
 ### Worker child-process CA configuration
 
-Use each machine's Git-ignored `config/worker.env` for Worker bootstrap settings (`CCM_*`) and the optional local child-process `CURL_CA_BUNDLE=<absolute path to an existing CA bundle>`. The Worker supervisor loads `CCM_*` at startup; the native executor reads the optional CA bundle on new pipe/PTY commands. That value feeds the environment **before** Codex `shell_environment_policy` is applied, so `inherit`, `exclude`, `include_only` or `set` can remove or supersede it. This legacy CCM configuration remains a recorded upstream mismatch, not a substitute for Codex `shell_environment_policy.set`. Controller/WorkerHub/OAuth secrets are not sourced from the file. Invalid entries or missing CA files fail the new command.
+### Worker child-process CA configuration
+
+Each machine uses one Git-ignored root `ccm.config.json`. Worker bootstrap variables
+(`CCM_*`) reside in the `worker.env` object, and a machine-local absolute
+`CURL_CA_BUNDLE` path may be provided in `worker.child_env`. The Worker supervisor
+reads bootstrap variables at startup. The native executor re-reads
+`worker.child_env` for every new pipe or PTY command. The CA override is
+applied **before** Codex `shell_environment_policy`, so that policy may
+exclude or override it. Invalid entries and absent CA files fail the command;
+neither OAuth nor Controller credentials are injected into shell children.
+
+### Single CCM configuration file
+
+`ccm.config.json` in the CCM repository root is the only active CCM
+configuration file. It is ignored by Git and intentionally differs between 6v
+and noha. `ccm.config.example.json` is the version-controlled template, not
+an additional runtime config. The schema groups `controller.env`, `worker.env`,
+`worker.child_env`, `trusted_commands`, `restart_allowlist`,
+`worker_quarantine_errors`, `codex.home` and
+`codex.native_sandbox_toml` under `version: 1`. Credential and session data
+remain separate in private state/secrets files and are not embedded in the
+version-controlled template.
+
+The trusted-command and restart-allowlist sections are re-read for each
+authorization or restart request, respectively. The quarantine error section is
+hot-reloaded; on an invalid live edit it retains the last valid selection.
+An invalid configuration at startup fails closed. For the native Codex
+sandbox staging, the trusted Worker bootstrap materializes
+`codex.native_sandbox_toml` inside the isolated Codex runtime Home and
+rejects mismatched pre-existing bytes; the interactive user's Codex configuration
+remains untouched. The `codex.home` setting is **only** the historical Codex
+sessions directory for the conversation reader (default user `~/.codex`).
 
 ### Worker child-process proxy/direct mode
 
@@ -607,7 +627,7 @@ Windows is the current fully supported restricted-execution platform.
 
 Restricted command execution on Linux/macOS is not implemented yet and **fails closed** rather than silently running unsandboxed. A Linux/macOS Worker therefore currently needs `CCM_PERMISSION_PROFILE=full-access` for shell execution.
 
-`apply_patch` enforces its own workspace-write boundary on the Worker, including real-path checks that reject symlink/junction escapes. Ordinary `exec_command` remains inside the selected environment's normal sandbox except for built-in command rules in `config/trusted-commands.json`, Controller-managed trusted package scripts, or saved prefix policies. The Controller reads and validates the built-in file **on every new exec request**, including calls routed to remote Workers. Adding or removing built-in rules in the Controller's working tree takes effect on the next request without restarting CCM. The model may edit this file directly. Missing or invalid configuration disables built-in trust for the request, returns a configuration diagnostic and leaves the normal sandbox/approval route available.
+`apply_patch` enforces its own workspace-write boundary on the Worker, including real-path checks that reject symlink/junction escapes. Ordinary `exec_command` remains inside the selected environment's normal sandbox except for built-in command rules in `ccm.config.json` (`trusted_commands`), Controller-managed trusted package scripts, or saved prefix policies. The Controller reads and validates the built-in file **on every new exec request**, including calls routed to remote Workers. Adding or removing built-in rules in the Controller's working tree takes effect on the next request without restarting CCM. The model may edit this file directly. Missing or invalid configuration disables built-in trust for the request, returns a configuration diagnostic and leaves the normal sandbox/approval route available.
 
 Matched command rules grant **unsandboxed execution**, not merely network/filesystem exceptions. Git hooks/helpers/configured transports and test modules run with the Worker's normal host permissions, not within its workspace-write sandbox.
 
@@ -681,7 +701,7 @@ There is no model-driven approval retry path and no public text-decision approva
 
 This approval mechanism controls CCM's sandbox boundary; it does **not** grant Windows Administrator/UAC privileges. The approval app is the interaction mechanism, while the server-side frozen action, approval capability, state machine, and workspace revalidation remain the security boundary. If ChatGPT supplies its anonymous `openai/session` metadata on both calls, CCM also binds the request and app resolver to that host session as defense in depth.
 
-When an untrusted, restricted Tailscale command reports local-service pipe denial (`failed to connect to local tailscaled ... Access is denied`), CCM points to `config/trusted-commands.json` and the requirement that every command segment match a rule. This diagnostic appears in both initial results and `write_stdin` polls, even if a compound script exits with code 0. Success, DNS health warnings, unrelated errors and escalated calls do not receive it.
+When an untrusted, restricted Tailscale command reports local-service pipe denial (`failed to connect to local tailscaled ... Access is denied`), CCM points to `ccm.config.json` (`trusted_commands`) and the requirement that every command segment match a rule. This diagnostic appears in both initial results and `write_stdin` polls, even if a compound script exits with code 0. Success, DNS health warnings, unrelated errors and escalated calls do not receive it.
 
 ## Output and transport protection
 

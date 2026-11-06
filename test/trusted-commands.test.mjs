@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { EventEmitter } from 'node:events';
 import { EnvironmentRegistry } from '../src/runtime/environment-registry.mjs';
 import { RemoteProcessManager } from '../src/runtime/remote-process-manager.mjs';
@@ -20,8 +21,9 @@ const environment = {
   shell: { path: 'powershell.exe' },
 };
 const pinnedPath = 'C:\\Program Files\\Tailscale\\tailscale.exe';
-const original = JSON.parse(fs.readFileSync(DEFAULT_TRUSTED_COMMANDS_FILE, 'utf8'));
-const evaluate = (cmd, shell = 'powershell.exe', file = DEFAULT_TRUSTED_COMMANDS_FILE) =>
+const testConfig = fileURLToPath(new URL('../ccm.config.example.json', import.meta.url));
+const original = JSON.parse(fs.readFileSync(testConfig, 'utf8')).trusted_commands;
+const evaluate = (cmd, shell = 'powershell.exe', file = testConfig) =>
   evaluateTrustedCommand(cmd, shell, environment, { file });
 
 test('tracked trusted-command configuration validates Git, Node, native build and Tailscale rules', () => {
@@ -132,14 +134,14 @@ test('CMD only auto-trusts compound unpinned programs; unsupported pinned combin
 test('trusted-command rules hot-reload from the chosen JSON file on every evaluation', (t) => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-trusted-commands-'));
   t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
-  const file = path.join(temp, 'trusted-commands.json');
-  fs.writeFileSync(file, JSON.stringify(original));
+  const file = path.join(temp, 'ccm.config.json');
+  fs.writeFileSync(file, JSON.stringify({ trusted_commands: original }));
   assert.equal(evaluate('git status', undefined, file).matched, false);
   const changed = structuredClone(original);
   changed.rules[0].arguments.values.push('status');
-  fs.writeFileSync(file, JSON.stringify(changed));
+  fs.writeFileSync(file, JSON.stringify({ trusted_commands: changed }));
   assert.deepEqual(evaluate('git status', undefined, file).rule_ids, ['git-remote']);
-  fs.writeFileSync(file, JSON.stringify(original));
+  fs.writeFileSync(file, JSON.stringify({ trusted_commands: original }));
   assert.equal(evaluate('git status', undefined, file).matched, false);
   fs.writeFileSync(file, '{invalid');
   assert.match(loadTrustedCommands(file).error, /configuration unavailable/i);
@@ -151,8 +153,8 @@ test('trusted-command rules hot-reload from the chosen JSON file on every evalua
 test('one Controller configuration snapshot is shared by both Worker routes and changes without restart', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-worker-trust-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const file = path.join(dir, 'trusted-commands.json');
-  fs.writeFileSync(file, JSON.stringify(original));
+  const file = path.join(dir, 'ccm.config.json');
+  fs.writeFileSync(file, JSON.stringify({ trusted_commands: original }));
 
   const registry = new EnvironmentRegistry({ resolvePaths: false });
   for (const id of ['six', 'noha']) {
@@ -196,7 +198,7 @@ test('one Controller configuration snapshot is shared by both Worker routes and 
 
   const added = structuredClone(original);
   added.rules[0].arguments.values.push('status');
-  fs.writeFileSync(file, JSON.stringify(added));
+  fs.writeFileSync(file, JSON.stringify({ trusted_commands: added }));
   assert.deepEqual((await run('six-handle', 'git status')).trusted_command_rule_ids, ['git-remote']);
   assert.deepEqual((await run('noha-handle', 'git status')).trusted_command_rule_ids, ['git-remote']);
   assert.equal(calls.at(-1).id, 'noha');
@@ -206,7 +208,7 @@ test('one Controller configuration snapshot is shared by both Worker routes and 
   assert.deepEqual(compound.trusted_command_rule_ids, ['tailscale', 'git-remote']);
   assert.match(calls.at(-1).params.cmd, /^& 'C:\\Program Files\\Tailscale\\tailscale\.exe' status; git fetch origin$/);
 
-  fs.writeFileSync(file, JSON.stringify(original));
+  fs.writeFileSync(file, JSON.stringify({ trusted_commands: original }));
   const removed = await run('noha-handle', 'git status');
   assert.equal(removed.trusted_command_rule_ids, undefined);
   assert.equal(calls.at(-1).params.sandbox_permissions, undefined);
@@ -238,7 +240,7 @@ test('restricted Tailscale pipe failure reports the centralized rule file, not a
     output: 'failed to connect to local tailscaled: Access is denied.',
     environment: env,
   });
-  assert.match(result, /config\/trusted-commands\.json/);
+  assert.match(result, /ccm\.config\.json/);
   assert.doesNotMatch(result, /standalone|separate calls/);
   assert.equal(trustedCommandDenialHint({
     command: 'tailscale status', output: '# DNS health warning: Access is denied',

@@ -19,8 +19,8 @@ test('HTTPS file sidecar streams 12 MiB without OAuth and redacts URL tokens', a
   });
   await new Promise((resolve) => upstream.listen(0, '127.0.0.1', resolve));
   const config = createConfig({
-    rootDir: root, readEnvFile: false, port: 0, allowEphemeral: true, approvalSecret: 'A'.repeat(32),
-    envValues: { CCM_ISSUER: 'https://example.test/ccm', CCM_RESOURCE: 'https://example.test/ccm/mcp' },
+    rootDir: root, readConfigFile: false, port: 0, allowEphemeral: true, approvalSecret: 'A'.repeat(32),
+    configValues: { CCM_ISSUER: 'https://example.test/ccm', CCM_RESOURCE: 'https://example.test/ccm/mcp' },
   });
   const server = createCcmOAuthServer({ config, downloadUpstreamPort: upstream.address().port });
   try {
@@ -56,9 +56,9 @@ test('File sidecar blocks oversized upstream Content-Length and redirects', asyn
     else { res.writeHead(200, { 'content-length': 13 * 1024 * 1024 }); res.end(); }
   });
   await new Promise((resolve) => upstream.listen(0, '127.0.0.1', resolve));
-  const config = createConfig({ rootDir: root, readEnvFile: false, port: 0, allowEphemeral: true,
+  const config = createConfig({ rootDir: root, readConfigFile: false, port: 0, allowEphemeral: true,
     approvalSecret: 'A'.repeat(32),
-    envValues: { CCM_ISSUER: 'https://example.test/ccm', CCM_RESOURCE: 'https://example.test/ccm/mcp' } });
+    configValues: { CCM_ISSUER: 'https://example.test/ccm', CCM_RESOURCE: 'https://example.test/ccm/mcp' } });
   const server = createCcmOAuthServer({ config, downloadUpstreamPort: upstream.address().port });
   try {
     await listenCcmOAuthServer(server, 0);
@@ -90,9 +90,9 @@ test('Sidecar proxies safe plain-text view over existing preview route', async (
     res.end(payload);
   });
   await new Promise((resolve) => upstream.listen(0, '127.0.0.1', resolve));
-  const config = createConfig({ rootDir: root, readEnvFile: false, port: 0,
+  const config = createConfig({ rootDir: root, readConfigFile: false, port: 0,
     allowEphemeral: true, approvalSecret: 'A'.repeat(32),
-    envValues: { CCM_ISSUER: 'https://example.test/ccm', CCM_RESOURCE: 'https://example.test/ccm/mcp' } });
+    configValues: { CCM_ISSUER: 'https://example.test/ccm', CCM_RESOURCE: 'https://example.test/ccm/mcp' } });
   const server = createCcmOAuthServer({ config, downloadUpstreamPort: upstream.address().port });
   try {
     await listenCcmOAuthServer(server, 0);

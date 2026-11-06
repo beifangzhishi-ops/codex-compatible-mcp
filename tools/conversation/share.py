@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse, importlib, json, os, re, ssl, sys, time
+import importlib, json, os, re, ssl, time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
@@ -230,62 +230,3 @@ def title_from_html(html):
         title=re.sub(r'\s*[-鈥撯€攟]\s*ChatGPT\s*$', '', title, flags=re.I).strip()
         if title:return title
     return 'ChatGPT Shared Conversation'
-
-def resolve_output_path(share_url, requested, fmt, branch, mode, cwd=None):
-    cwd=Path.cwd() if cwd is None else Path(cwd)
-    cache=(cwd/'.cache'/'chatgpt-share-export').resolve()
-    if requested:
-        requested_path=Path(requested)
-        if requested_path.is_absolute():
-            return requested_path
-        out=(cache/requested_path).resolve()
-        if out!=cache and cache not in out.parents:
-            raise ValueError('relative output_path must stay inside the ChatGPT Share cache directory.')
-        return out
-    share_id=urlparse(share_url).path.rstrip('/').split('/')[-1] or 'conversation'
-    safe=re.sub(r'[^A-Za-z0-9._-]+','-',share_id).strip('-') or 'conversation'
-    return cache/f'{safe}.{branch}.{mode}.{fmt}'
-
-def markdown_role_heading(role):
-    value=(role or 'unknown').strip()
-    known={'user':'用户','assistant':'助手','system':'系统','developer':'开发者','tool':'工具'}
-    return known.get(value.lower(), value.replace('_',' ').strip().title() or 'Unknown')
-
-def render_markdown(recs):
-    lines=["# 共享会话导出","","> 公开共享页中的会话内容",""]
-    for r in recs:
-        lines += [f"## {markdown_role_heading(r.get('role'))}", "", r.get('visible_text') or r.get('text') or '', ""]
-    return '\n'.join(lines)
-
-def main():
-    ap=argparse.ArgumentParser(); ap.add_argument('share_url'); ap.add_argument('--output'); ap.add_argument('--format',choices=['md','json'],default='md'); ap.add_argument('--branch',choices=['active','all'],default='active'); ap.add_argument('--mode',choices=['text','full'],default='text'); ap.add_argument('--json-summary',action='store_true'); a=ap.parse_args()
-    source=share_source(a.share_url); payload=fetch(a.share_url); snapshot=None
-    if source=='codex':
-        try:snapshot=json.loads(payload)
-        except json.JSONDecodeError as e:raise ValueError('Codex 共享接口未返回有效 JSON 快照') from e
-        recs=codex_records(snapshot); total_nodes=len(recs); title=snapshot.get('title') or 'Codex 共享会话'
-    else:
-        D=extract_payload(payload); nodes=unpack(D); meta=conversation_meta(D); current_node=meta.get('current_node')
-        ids=active_branch(nodes,current_node) if a.branch=='active' else sorted(nodes,key=lambda k:(message_record(k,nodes[k]) or {}).get('create_time') or 0)
-        recs=[message_record(i,nodes[i]) for i in ids]; recs=[r for r in recs if r]
-        total_nodes=len(nodes); title=meta.get('title') or meta.get('og_title') or title_from_html(payload)
-    if a.mode=='text':
-        recs=[r for r in recs if r['role'] in ('user','assistant') and r.get('type')!='reasoning' and r['visible_text'] and r['text']!='Original custom instructions no longer available' and r['text']!='The output of this plugin was redacted.']
-    turns=sum(r['role']=='user' for r in recs)
-    out=resolve_output_path(a.share_url,a.output,a.format,a.branch,a.mode)
-    out.parent.mkdir(parents=True,exist_ok=True)
-    if a.format=='json':
-        result={'title':title,'share_url':a.share_url,'branch':a.branch,'mode':a.mode,'total_nodes':total_nodes,'messages':recs if a.mode=='full' else [{'id':r['id'],'role':r['role'],'create_time':r['create_time'],'text':r['visible_text']} for r in recs]}
-        if source=='codex':
-            result['source']='codex'
-            if a.mode=='full':result['snapshot']=snapshot
-        out.write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')
-    else:
-        out.write_text(render_markdown(recs),encoding='utf-8')
-    summary={'status':'ok','title':title,'branch':a.branch,'total_nodes':total_nodes,'exported_messages':len(recs),'user_turns':turns,'assistant_messages':sum(r['role']=='assistant' for r in recs),'output_path':str(out.resolve()),'output_bytes':out.stat().st_size}
-    if source=='codex':summary.update(source='codex',snapshot_turns=len(snapshot['turns']))
-    print(json.dumps(summary,ensure_ascii=False))
-if __name__=='__main__':
-    try:main()
-    except Exception as e:
-        print(json.dumps({'status':'error','error':str(e)},ensure_ascii=False)); sys.exit(1)

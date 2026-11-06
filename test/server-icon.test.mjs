@@ -58,9 +58,9 @@ test('sidecar serves the same stable PNG URL without OAuth', async () => {
   const iconPath = path.join(root, 'ccm-icon.png');
   await fs.writeFile(iconPath, ICON_BYTES);
   const config = createConfig({
-    rootDir: root, readEnvFile: false, port: 0, allowEphemeral: true,
+    rootDir: root, readConfigFile: false, port: 0, allowEphemeral: true,
     approvalSecret: 'A'.repeat(32),
-    envValues: {
+    configValues: {
       CCM_ISSUER: 'https://ccm.example.test/ccm',
       CCM_RESOURCE: 'https://ccm.example.test/ccm/mcp',
     },

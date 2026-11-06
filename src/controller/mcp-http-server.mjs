@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { constantTimeEqual } from '../../ccm-sidecar/oauth.mjs';
-import { parseEnvFile } from '../../ccm-sidecar/config.mjs';
+import { readCcmSection } from '../runtime/ccm-config.mjs';
 import {
   PUBLISHED_FILE_UI_HTML,
   PUBLISHED_FILE_UI_URI,
@@ -71,7 +71,7 @@ function createProtocolServer(
       'If no workspace_handle is available, do not infer permission to enter or register a named project. For genuinely projectless tasks or absolute-path reads allowed by sandbox_read_scope, call the Direct create_projectless_handle tool. For registered-project writes, ask for a handle or an explicit entry request. Never use projectless to bypass a pending explicitly requested workspace approval. Pass environment_id when a particular Worker is required; otherwise use the primary Worker.',
       'An environment has no GPT-visible default workspace or project directory. Do not infer project location from Worker bootstrap cwd, CCM_WORKSPACE, Documents, Temp, a drive root, or any other internal path. CCM does not define a Projects Root; new-project placement comes from the user or upper-layer orchestrator.',
       'Use direct apply_patch and view_image for model-side workspace work. Direct ccm-extra.publish accepts either plan_id alone for Controller Plans or workspace_handle plus path for Worker files, never both modes together. ccm-extra.import_chatgpt_file remains deferred: discover it through tool_search and dispatch through exec with top-level exec.file binding; Library attachments must be materialized as raw_file before binding. It imports one file into the selected Worker context. Publish user-facing deliverables and useful previews using the direct publish tool, one file per call; call it proactively when the user asked to create or see PPT/PDF/images/reports, without waiting for a separate send request, including stage previews when useful. Continue work after publishing when needed. publish returns temporary CCM HTTPS links, not native ChatGPT attachments. For Markdown including Plans, the card shows a bounded rendered excerpt and the full preview link opens an isolated formatted HTML page; the original Markdown remains downloadable. Other UTF-8 text shows source excerpts, raster images display inline, and PDF/audio/video/HTML/SVG offer browser previews; Office formats remain download-only without conversion. Every card retains a download link. The structured download_url remains available for clients without MCP Apps. view_image only serves model-side analysis. Avoid publishing unnecessary intermediate files.',
-      'For public ChatGPT Share (https://chatgpt.com/share/...) and Codex shared conversations (https://chatgpt.com/s/cx_...), use ccm-extra.chatgpt_share_export through tool_search -> exec when asked to inspect, compare, or export the conversation. Do not use web search, web browsing, BMG, or browser automation to retrieve shared-conversation content. If the CCM export cannot retrieve it, report the failure instead of silently switching to another retrieval method.',
+      'For shared conversations at https://chatgpt.com/share/... or https://chatgpt.com/s/cx_..., use ccm-extra.conversation through tool_search -> exec: first action=import, then thread/read, thread/turns/list, thread/items/list, or export with the conversation_id returned by import. For local Codex thread UUIDs use the same tool with thread_id and the owning environment_id. Do not use web search, web browsing, BMG, or browser automation to retrieve shared-conversation content; report CCM retrieval failures without silently switching methods.',
       'Discover quark_upload through tool_search and invoke it through exec when the user asks to upload known local files through the logged-in Quark Cloud Drive desktop client.',
       'For bulk image inspection, view_image is also available through exec; batch independent image calls with parallel=true when useful.',
       'Use exec/wait for structured nested capability dispatch; host Code Mode remains responsible for JavaScript/control flow.',
@@ -251,7 +251,7 @@ export function createHttpController({
   const resolveBridgeSecret = () => {
     if (unlockBridgeSecret != null) return unlockBridgeSecret;
     const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-    const vars = parseEnvFile(fs.readFileSync(path.join(root, 'config', 'ccm.env'), 'utf8'));
+    const vars = readCcmSection('controller', path.join(root, 'ccm.config.json')).env;
     return vars.CCM_APPROVAL_SECRET ||
       fs.readFileSync(path.resolve(root, vars.CCM_APPROVAL_SECRET_FILE ||
         '.state/ccm-approval-secret.txt'), 'utf8').trim();

@@ -13,7 +13,7 @@ $supervisorLog=Join-Path $logDir 'ccm-worker-supervisor.log'
 $workerHealthFile=Join-Path $stateDir 'ccm-worker-health.json'
 
 if(-not $ConfigPath){
-    $ConfigPath=Join-Path $repoRoot 'config\worker.env'
+    $ConfigPath=Join-Path $repoRoot 'ccm.config.json'
 }
 if(-not [IO.Path]::IsPathRooted($ConfigPath)){
     $ConfigPath=Join-Path $repoRoot $ConfigPath
@@ -26,32 +26,20 @@ foreach($required in @($workerScript,$buildScript,$ConfigPath)){
     }
 }
 
-function Import-WorkerEnv([string]$path){
-    foreach($rawLine in Get-Content -LiteralPath $path){
-        $line=[string]$rawLine
-        $trimmed=$line.Trim()
-        if(-not $trimmed -or $trimmed.StartsWith('#')){ continue }
-        $equals=$line.IndexOf('=')
-        if($equals -lt 1){ throw "Invalid worker.env line: $line" }
-        $name=$line.Substring(0,$equals).Trim()
-        $value=$line.Substring($equals+1).Trim()
-        # The native executor reads CURL_CA_BUNDLE from worker.env for each
-        # new command. Do not freeze this command-only setting at Worker start.
-        if($name -eq 'CURL_CA_BUNDLE'){ continue }
-        if($value.Length -ge 2){
-            if(($value.StartsWith('"') -and $value.EndsWith('"')) -or
-               ($value.StartsWith("'") -and $value.EndsWith("'"))){
-                $value=$value.Substring(1,$value.Length-2)
-            }
+function Import-WorkerConfig([string]$path){
+    $data=Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+    if($data.version -ne 1 -or -not $data.worker -or -not $data.worker.env){
+        throw 'Invalid CCM worker configuration.'
+    }
+    foreach($setting in $data.worker.env.PSObject.Properties){
+        if($setting.Name -notmatch '^CCM_[A-Z0-9_]+$'){
+            throw "Unsupported CCM worker setting: $($setting.Name)"
         }
-        if($name -notmatch '^CCM_[A-Z0-9_]+$'){
-            throw "Unsupported worker.env variable: $name"
-        }
-        [Environment]::SetEnvironmentVariable($name,$value,'Process')
+        [Environment]::SetEnvironmentVariable($setting.Name,[string]$setting.Value,'Process')
     }
 }
 
-Import-WorkerEnv $ConfigPath
+Import-WorkerConfig $ConfigPath
 
 $healthTimeoutMs=30000
 if($env:CCM_WORKER_HEALTH_TIMEOUT_MS){
@@ -69,10 +57,10 @@ if($env:CCM_WORKER_HEALTH_INTERVAL_MS){
 }
 
 if(-not $env:CCM_WORKER_HUB_CONNECT_HOST){
-    throw 'CCM_WORKER_HUB_CONNECT_HOST is required in config\worker.env.'
+    throw 'CCM_WORKER_HUB_CONNECT_HOST is required in ccm.config.json.'
 }
 if(-not $env:CCM_WORKSPACE){
-    throw 'CCM_WORKSPACE is required in config\worker.env.'
+    throw 'CCM_WORKSPACE is required in ccm.config.json.'
 }
 if(-not (Test-Path -LiteralPath $env:CCM_WORKSPACE)){
     throw "CCM_WORKSPACE does not exist: $($env:CCM_WORKSPACE)"

@@ -262,7 +262,7 @@ test('real sidecar HTTP pairing, CSRF, duplicate unlock, and page status', async
     });
     unlock.isConfigured = () => true;
     const config = createConfig({
-      rootDir: root, readEnvFile: false,
+      rootDir: root, readConfigFile: false,
       issuer: 'https://example.test/ccm',
       resource: 'https://example.test/ccm/mcp',
       allowEphemeral: true, port: 0,

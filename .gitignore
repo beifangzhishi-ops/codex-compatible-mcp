@@ -1,11 +1,10 @@
 node_modules/
+ccm.config.json
 __pycache__/
 *.py[cod]
 .state/
 .cache/
 logs/
-config/ccm.env
-config/worker.env
 .env
 .env.*
 !.env.example

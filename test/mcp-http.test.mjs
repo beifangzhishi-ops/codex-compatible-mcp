@@ -313,17 +313,17 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.ok(publishTool.inputSchema.properties.path);
     assert.equal(listed.tools.some((tool) => tool.name === 'import_chatgpt_file'), false);
     assert.match(client.getInstructions(), /Publish user-facing deliverables and useful previews/i);
-    assert.match(client.getInstructions(), /shared conversations.*ccm-extra\.chatgpt_share_export.*tool_search -> exec/i);
+    assert.match(client.getInstructions(), /shared conversations.*ccm-extra\.conversation.*tool_search -> exec/i);
     assert.match(client.getInstructions(), /Do not use web search, web browsing, BMG, or browser automation/i);
 
-    for (const deferredName of ['chatgpt_share_export', 'quark_upload']) {
+    for (const deferredName of ['conversation', 'quark_upload']) {
       const search = await client.callTool({
         name: 'tool_search',
         arguments: { query: deferredName, limit: 10 },
       });
-      if (deferredName === 'chatgpt_share_export') {
+      if (deferredName === 'conversation') {
         const shareTool = search.structuredContent.tools.find(
-          (tool) => tool.qualified_name === 'ccm-extra.chatgpt_share_export',
+          (tool) => tool.qualified_name === 'ccm-extra.conversation',
         );
         assert.match(shareTool?.description, /Do not use web search, web browsing, BMG, or browser automation/i);
       }

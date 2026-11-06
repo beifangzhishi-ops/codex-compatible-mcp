@@ -1,43 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { readCcmSection } from '../src/runtime/ccm-config.mjs';
 
 export const SIDECAR_HOST = '127.0.0.1';
 export const SIDECAR_PORT = 18208;
 export const UPSTREAM_URL = 'http://127.0.0.1:18209/ccm';
 export const FORBIDDEN_PORTS = new Set([8317, 8765, 8766, 8767, 12306, 18209, 18301]);
-
-function unquoteEnvValue(value) {
-  if (value.length < 2) {
-    return value;
-  }
-  if (value.startsWith('"') && value.endsWith('"')) {
-    try {
-      return JSON.parse(value);
-    } catch {
-      return value.slice(1, -1);
-    }
-  }
-  if (value.startsWith("'") && value.endsWith("'")) {
-    return value.slice(1, -1);
-  }
-  return value;
-}
-
-export function parseEnvFile(content) {
-  const values = {};
-  for (const rawLine of String(content).split(/\r?\n/u)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('#')) {
-      continue;
-    }
-    const match = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/u);
-    if (!match) {
-      continue;
-    }
-    values[match[1]] = unquoteEnvValue(match[2].trim());
-  }
-  return values;
-}
 
 function resolveFromRoot(rootDir, value) {
   return path.isAbsolute(value) ? value : path.resolve(rootDir, value);
@@ -92,9 +60,9 @@ function wellKnownUrl(identity, kind) {
 export function createConfig(options = {}) {
   const {
     rootDir = process.cwd(),
-    envPath = path.join(rootDir, 'config', 'ccm.env'),
-    envValues = {},
-    readEnvFile = true,
+    configPath = path.join(rootDir, 'ccm.config.json'),
+    configValues = {},
+    readConfigFile = true,
     host,
     port,
     upstreamUrl,
@@ -109,14 +77,8 @@ export function createConfig(options = {}) {
     allowEphemeral = false,
   } = options;
 
-  let fileValues = {};
-  if (readEnvFile) {
-    if (!fs.existsSync(envPath)) {
-      throw new Error('CCM config file was not found: ' + envPath);
-    }
-    fileValues = parseEnvFile(fs.readFileSync(envPath, 'utf8'));
-  }
-  const values = { ...fileValues, ...envValues };
+  const fileValues = readConfigFile ? readCcmSection('controller', configPath).env : {};
+  const values = { ...fileValues, ...configValues };
   const selectedHost = host ?? values.CCM_SIDECAR_HOST ?? SIDECAR_HOST;
   if (selectedHost !== SIDECAR_HOST) {
     throw new Error('CCM_SIDECAR_HOST must be ' + SIDECAR_HOST + '.');

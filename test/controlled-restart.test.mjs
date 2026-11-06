@@ -13,8 +13,8 @@ import { RemoteWorkerClient } from '../src/worker/remote-worker-client.mjs';
 
 async function withPolicy(callback) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-controlled-restart-'));
-  const file = path.join(dir, 'allowlist.json');
-  const save = (value) => fs.writeFile(file, JSON.stringify(value));
+  const file = path.join(dir, 'ccm.config.json');
+  const save = (value) => fs.writeFile(file, JSON.stringify({ restart_allowlist: value }));
   await save({ controller_service_groups: ['controller-1'], workers: ['worker-a'] });
   try {
     await callback({ file, save });

@@ -8,6 +8,8 @@ import {
   WorkerQuarantinePolicy,
 } from '../src/controller/worker-quarantine-policy.mjs';
 
+const rootConfig = (value) => JSON.stringify({ worker_quarantine_errors: value });
+
 async function waitFor(predicate, timeoutMs = 2000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -19,7 +21,7 @@ async function waitFor(predicate, timeoutMs = 2000) {
 
 test('worker quarantine policy validates and normalizes error codes', () => {
   assert.deepEqual(
-    parseWorkerQuarantinePolicy(JSON.stringify({
+    parseWorkerQuarantinePolicy(rootConfig({
       error_codes: [' unknown_method ', 'unknown_method', 'new_contract'],
     })),
     ['unknown_method', 'new_contract'],
@@ -29,7 +31,7 @@ test('worker quarantine policy validates and normalizes error codes', () => {
     /Invalid worker quarantine policy JSON/,
   );
   assert.throws(
-    () => parseWorkerQuarantinePolicy(JSON.stringify({
+    () => parseWorkerQuarantinePolicy(rootConfig({
       error_codes: ['unknown_method', ''],
     })),
     /non-empty strings/,
@@ -38,13 +40,13 @@ test('worker quarantine policy validates and normalizes error codes', () => {
 
 test('worker quarantine policy hot reload keeps the last known-good config', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-quarantine-policy-'));
-  const file = path.join(tempRoot, 'worker-quarantine-errors.json');
+  const file = path.join(tempRoot, 'ccm.config.json');
   const logs = [];
   let policy = null;
   try {
     await fs.writeFile(
       file,
-      JSON.stringify({ error_codes: ['unknown_method'] }),
+      rootConfig({ error_codes: ['unknown_method'] }),
       'utf8',
     );
     policy = new WorkerQuarantinePolicy({
@@ -57,7 +59,7 @@ test('worker quarantine policy hot reload keeps the last known-good config', asy
 
     await fs.writeFile(
       file,
-      JSON.stringify({ error_codes: ['new_contract_error'] }),
+      rootConfig({ error_codes: ['new_contract_error'] }),
       'utf8',
     );
     await waitFor(() => policy.has('new_contract_error'));
@@ -70,7 +72,7 @@ test('worker quarantine policy hot reload keeps the last known-good config', asy
 
     await fs.writeFile(
       file,
-      JSON.stringify({ error_codes: ['recovered_error'] }),
+      rootConfig({ error_codes: ['recovered_error'] }),
       'utf8',
     );
     await waitFor(() => policy.has('recovered_error'));
@@ -83,9 +85,9 @@ test('worker quarantine policy hot reload keeps the last known-good config', asy
 
 test('worker quarantine policy rejects invalid startup config', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-quarantine-invalid-'));
-  const file = path.join(tempRoot, 'worker-quarantine-errors.json');
+  const file = path.join(tempRoot, 'ccm.config.json');
   try {
-    await fs.writeFile(file, JSON.stringify({ error_codes: [42] }), 'utf8');
+    await fs.writeFile(file, rootConfig({ error_codes: [42] }), 'utf8');
     assert.throws(
       () => new WorkerQuarantinePolicy({ file }),
       /non-empty strings/,

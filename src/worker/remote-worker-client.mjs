@@ -4,6 +4,7 @@ import {
   WORKER_PROTOCOL,
 } from './protocol.mjs';
 import { sendWorkerMessage as send } from './message-send.mjs';
+import { runConversationAction } from './conversation-service.mjs';
 
 
 class RemoteWorkerDispatchError extends Error {
@@ -277,6 +278,8 @@ export class RemoteWorkerClient {
         return this.runtime.workspaceRegistry.unregister(params);
       case 'create_projectless_workspace':
         return this.runtime.workspaceRegistry.createProjectless();
+      case 'conversation':
+        return runConversationAction(params);
       case 'terminate_session':
         return {
           terminated: this.runtime.processManager.terminateSession(

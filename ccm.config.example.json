@@ -1,0 +1,141 @@
+{
+  "version": 1,
+  "controller": {
+    "env": {
+      "CCM_SIDECAR_HOST": "127.0.0.1",
+      "CCM_SIDECAR_PORT": "18208",
+      "CCM_UPSTREAM_URL": "http://127.0.0.1:18209/ccm",
+      "CCM_ISSUER": "https://your-host.example.invalid/ccm",
+      "CCM_RESOURCE": "https://your-host.example.invalid/ccm/mcp",
+      "CCM_STATE_FILE": ".state/ccm-oauth-state.json",
+      "CCM_UPSTREAM_SESSION_FILE": ".state/ccm-upstream-sessions.json",
+      "CCM_APPROVAL_SECRET_FILE": ".state/ccm-approval-secret.bin",
+      "CCM_LOG_DIR": "logs",
+      "CCM_TOKEN_TTL_SECONDS": "3600"
+    }
+  },
+  "worker": {
+    "env": {
+      "CCM_WORKER_HUB_CONNECT_HOST": "127.0.0.1",
+      "CCM_WORKER_HUB_PORT": "18301",
+      "CCM_ENVIRONMENT_ID": "example-worker",
+      "CCM_WORKER_ID": "example-worker",
+      "CCM_WORKSPACE": "C:\\Users\\example\\Documents\\CCM",
+      "CCM_PERMISSION_PROFILE": "workspace-write"
+    },
+    "child_env": {}
+  },
+  "trusted_commands": {
+    "version": 1,
+    "rules": [
+      {
+        "id": "git-remote",
+        "platform": "windows",
+        "permission_profile": "workspace-write",
+        "shells": [
+          "powershell",
+          "pwsh",
+          "cmd"
+        ],
+        "executables": [
+          "git"
+        ],
+        "arguments": {
+          "type": "subcommand",
+          "values": [
+            "clone",
+            "fetch",
+            "pull",
+            "push",
+            "ls-remote"
+          ]
+        },
+        "execution": {
+          "type": "original"
+        }
+      },
+      {
+        "id": "node-test",
+        "platform": "windows",
+        "permission_profile": "workspace-write",
+        "shells": [
+          "powershell",
+          "pwsh"
+        ],
+        "executables": [
+          "node"
+        ],
+        "arguments": {
+          "type": "prefix",
+          "tokens": [
+            "--test"
+          ]
+        },
+        "execution": {
+          "type": "original"
+        }
+      },
+      {
+        "id": "npm-build-native",
+        "platform": "windows",
+        "permission_profile": "workspace-write",
+        "shells": [
+          "powershell",
+          "pwsh",
+          "cmd"
+        ],
+        "executables": [
+          "npm"
+        ],
+        "arguments": {
+          "type": "prefix",
+          "tokens": [
+            "run",
+            "build:native"
+          ]
+        },
+        "execution": {
+          "type": "original"
+        }
+      },
+      {
+        "id": "tailscale",
+        "platform": "windows",
+        "permission_profile": "workspace-write",
+        "shells": [
+          "powershell",
+          "pwsh",
+          "cmd"
+        ],
+        "executables": [
+          "tailscale"
+        ],
+        "arguments": {
+          "type": "any"
+        },
+        "execution": {
+          "type": "pinned",
+          "path": "C:\\Program Files\\Tailscale\\tailscale.exe"
+        }
+      }
+    ]
+  },
+  "restart_allowlist": {
+    "controller_service_groups": [
+      "DESKTOP-KFL6V1F"
+    ],
+    "workers": [
+      "DESKTOP-KFL6V1F",
+      "noha"
+    ]
+  },
+  "worker_quarantine_errors": {
+    "error_codes": [
+      "unknown_method"
+    ]
+  },
+  "codex": {
+    "home": null,
+    "native_sandbox_toml": "# Codex-native permissions configuration for the pinned Windows sandbox runtime.\n# This is an upstream TOML schema, not a CCM-specific rules language.\n# Staged for parity work; CCM does not yet consume it.\ndefault_permissions = \"workspace-online\"\napproval_policy = \"on-request\"\n\n[windows]\nsandbox = \"elevated\"\n\n[permissions.workspace-online]\nextends = \":workspace\"\n\n[permissions.workspace-online.network]\nenabled = true\n\n[permissions.read-only]\nextends = \":read-only\"\n"
+  }
+}

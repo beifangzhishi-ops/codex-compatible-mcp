@@ -69,6 +69,7 @@ export class EnvironmentRegistry {
       capabilities: {
         exec: true,
         writeStdin: true,
+        conversation: false,
         applyPatch: false,
         viewImage: false,
         sendFile: false,
@@ -128,6 +129,7 @@ export function createLocalEnvironmentRegistry({
     capabilities: {
       exec: true,
       writeStdin: true,
+      conversation: true,
       applyPatch: true,
       viewImage: true,
       sendFile: true,

@@ -30,8 +30,8 @@ test('OAuth config exposes CCM protected-resource identities', async () => {
   try {
     const config = createConfig({
       rootDir: root,
-      readEnvFile: false,
-      envValues: {
+      readConfigFile: false,
+      configValues: {
         CCM_ISSUER: 'https://example.test/ccm',
         CCM_RESOURCE: 'https://example.test/ccm/mcp',
       },
@@ -112,8 +112,8 @@ test('OAuth sidecar serves metadata and bearer challenge', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-oauth-http-'));
   const config = createConfig({
     rootDir: root,
-    readEnvFile: false,
-    envValues: {
+    readConfigFile: false,
+    configValues: {
       CCM_ISSUER: 'https://example.test/ccm',
       CCM_RESOURCE: 'https://example.test/ccm/mcp',
     },
@@ -196,8 +196,8 @@ test('OAuth sidecar safely persists initialize data and recovers a stale upstrea
 
   const config = createConfig({
     rootDir: root,
-    readEnvFile: false,
-    envValues: {
+    readConfigFile: false,
+    configValues: {
       CCM_ISSUER: 'https://example.test/ccm',
       CCM_RESOURCE: 'https://example.test/ccm/mcp',
     },
@@ -342,8 +342,8 @@ test('OAuth sidecar isolates repeated JSON-RPC ids across sessionless requests',
 
   const config = createConfig({
     rootDir: root,
-    readEnvFile: false,
-    envValues: {
+    readConfigFile: false,
+    configValues: {
       CCM_ISSUER: 'https://example.test/ccm',
       CCM_RESOURCE: 'https://example.test/ccm/mcp',
     },
@@ -464,8 +464,8 @@ test('OAuth sidecar gives each downstream initialize its own upstream session', 
   const upstreamPort = upstream.address().port;
   const config = createConfig({
     rootDir: root,
-    readEnvFile: false,
-    envValues: {
+    readConfigFile: false,
+    configValues: {
       CCM_ISSUER: 'https://example.test/ccm',
       CCM_RESOURCE: 'https://example.test/ccm/mcp',
     },
@@ -590,8 +590,8 @@ test('OAuth sidecar refreshes an invalid downstream session with that client ini
   const upstreamPort = upstream.address().port;
   const config = createConfig({
     rootDir: root,
-    readEnvFile: false,
-    envValues: {
+    readConfigFile: false,
+    configValues: {
       CCM_ISSUER: 'https://example.test/ccm',
       CCM_RESOURCE: 'https://example.test/ccm/mcp',
     },
@@ -678,8 +678,8 @@ test('OAuth sidecar declines session-multiplexed GET SSE instead of sharing one 
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-oauth-get-'));
   const config = createConfig({
     rootDir: root,
-    readEnvFile: false,
-    envValues: {
+    readConfigFile: false,
+    configValues: {
       CCM_ISSUER: 'https://example.test/ccm',
       CCM_RESOURCE: 'https://example.test/ccm/mcp',
     },

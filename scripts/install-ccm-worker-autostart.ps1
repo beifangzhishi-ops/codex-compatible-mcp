@@ -10,7 +10,7 @@ $supervisor=Join-Path $repoRoot 'scripts\ccm-worker-supervisor.ps1'
 $vbs=Join-Path $stateDir 'ccm-worker-supervisor-hidden.vbs'
 
 if(-not $ConfigPath){
-    $ConfigPath=Join-Path $repoRoot 'config\worker.env'
+    $ConfigPath=Join-Path $repoRoot 'ccm.config.json'
 }
 if(-not [IO.Path]::IsPathRooted($ConfigPath)){
     $ConfigPath=Join-Path $repoRoot $ConfigPath
