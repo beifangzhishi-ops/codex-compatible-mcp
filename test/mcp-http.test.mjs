@@ -154,8 +154,9 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(client.getInstructions(), /Do not read the entire Plan solely for the handoff/i);
     assert.match(client.getInstructions(), /later plan_read calls during implementation remain lifecycle-neutral/i);
     assert.match(client.getInstructions(), /does not maintain a Plan-Mode state machine/i);
-    assert.match(client.getInstructions(), /If the owner provides that ID, use it directly/i);
-    assert.match(client.getInstructions(), /As a fallback.*discover deferred ccm\.claim_full_access with tool_search and call it through exec/i);
+    assert.match(client.getInstructions(), /copy button first writes the ID to the clipboard and then claims it/i);
+    assert.match(client.getInstructions(), /If the owner provides the copied ID after webpage confirmation, use it directly/i);
+    assert.match(client.getInstructions(), /discover deferred ccm\.claim_full_access with tool_search and call it through exec/i);
     assert.match(
       client.getInstructions(),
       /live process only needs polling.*invoke ccm\.write_stdin through exec from the first poll/i,

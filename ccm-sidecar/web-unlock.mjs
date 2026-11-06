@@ -10,11 +10,29 @@ const COPY_SCRIPT = `
 const copyButton = document.getElementById('copy-grant');
 if (copyButton) {
   copyButton.addEventListener('click', async () => {
+    if (copyButton.disabled) return;
+    copyButton.disabled = true;
     try {
       await navigator.clipboard.writeText(copyButton.dataset.copy);
-      copyButton.textContent = '已复制，请返回 ChatGPT 粘贴';
     } catch {
-      copyButton.textContent = '复制失败，请手动选择上方句柄复制';
+      copyButton.textContent = '复制失败，请重试';
+      copyButton.disabled = false;
+      return;
+    }
+    try {
+      const result = await fetch('/ccm/unlock', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          action: 'claim', csrf: copyButton.dataset.csrf, grant_id: copyButton.dataset.grantId,
+        }),
+      });
+      if (!result.ok) throw new Error('Claim failed');
+      window.location.replace('/ccm/unlock');
+    } catch {
+      copyButton.textContent = '已复制，但领取确认失败；请重试';
+      copyButton.disabled = false;
     }
   });
 }
@@ -55,7 +73,7 @@ function responseHtml(response, status, html, setCookies = []) {
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'DENY',
     'Referrer-Policy': 'no-referrer',
-    'Content-Security-Policy': `default-src 'none'; script-src 'sha256-${createHash('sha256').update(COPY_SCRIPT).digest('base64')}'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`,
+    'Content-Security-Policy': `default-src 'none'; script-src 'sha256-${createHash('sha256').update(COPY_SCRIPT).digest('base64')}'; connect-src 'self'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`,
     ...(setCookies.length ? { 'Set-Cookie': setCookies } : {}),
   });
   response.end(html);
@@ -73,20 +91,20 @@ function redirect(response, query, setCookies = []) {
 }
 
 function renderPage({ paired, csrf, grant, message = '', error = false, configured = true }) {
-  const active = paired && grant?.active;
-  const grantId = active ? grant.full_access_grant_id : null;
+  const pending = paired && grant?.pending;
+  const grantId = pending ? grant.full_access_grant_id : null;
   const grantMessage = grantId
-    ? `CCM 全权限句柄 full_access_grant_id：${grantId}。请在需要全权限的 CCM 工具调用中直接使用此参数，无需领取。`
+    ? `CCM 全权限句柄 full_access_grant_id：${grantId}。网页完成复制领取并回到解锁页后，请在需要全权限的 CCM 工具调用中直接使用此参数。`
     : '';
-  const grantContent = active
-    ? `<p class="notice" role="status">全权限已解锁，有效期至 ${escape(grant.expires_at)}。</p>
+  const grantContent = pending
+    ? `<p class="notice" role="status">全权限待领取，有效期至 ${escape(grant.expires_at)}。复制成功后完成领取并返回解锁页面。</p>
        <p class="copy-text" id="grant-id">${escape(grantId)}</p>
-       <button type="button" id="copy-grant" data-copy="${escape(grantMessage)}">一键复制全权限句柄</button>
-       ${grant.claim_available ? '<p class="muted">如句柄消息被拦截，可告诉 ChatGPT「CCM 已解锁，请调用领取工具」，在解锁后的 5 分钟内使用备用领取方式。</p>' : ''}`
+       <button type="button" id="copy-grant" data-copy="${escape(grantMessage)}" data-csrf="${escape(csrf)}" data-grant-id="${escape(grantId)}">一键复制并领取全权限句柄</button>
+       <p class="muted">不复制时，可直接让 ChatGPT 调用领取工具。复制领取后如消息被拦截，工具仍可在原领取窗口内找回同一份句柄一次，不会续期。</p>`
     : '';
   const form = !configured
     ? '<p>CCM 手机验证器尚未在本机初始化并确认。请先按照 README 的步骤在 6v 本机终端完成配对。</p>'
-    : active
+    : pending
       ? ''
     : paired
       ? `<form method="post" action="${WEB_UNLOCK_PATH}">
@@ -122,7 +140,7 @@ function renderPage({ paired, csrf, grant, message = '', error = false, configur
     <p class="muted">全局授权 · 适用于所有 CCM Worker · 网页直接签发</p>
     ${message ? `<p class="notice${error ? ' error' : ''}" role="status">${escape(message)}</p>` : ''}
     ${grantContent}${form}
-    ${!active ? '<p class="muted">解锁后复制句柄发给 ChatGPT，授权自解锁时起计时，到期自动失效。</p>' : ''}
+    ${!pending ? '<p class="muted">解锁后点击复制即领取；页面会恢复锁定，已领取句柄仍按原有效期可用。</p>' : ''}
     </main><script>${COPY_SCRIPT}</script></body></html>`;
 }
 
@@ -138,16 +156,17 @@ export class CcmWebUnlock {
     this.totp = totp;
     this.secret = secret;
     this.now = now;
-    this.bridge = bridge || (async (action, durationSeconds) => {
+    this.bridge = bridge || (async (action, value) => {
       const reply = await fetch('http://127.0.0.1:18209/ccm/internal/web-unlock', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-CCM-Unlock-Bridge': secret,
         },
-        body: JSON.stringify({ action, duration_seconds: durationSeconds }),
+        body: JSON.stringify({ action, duration_seconds: action === 'issue' ? value : undefined, grant_id: action === 'claim' ? value : undefined }),
         signal: AbortSignal.timeout(3000),
       });
+      if (action === 'claim' && reply.status === 409) return null;
       if (!reply.ok) throw new Error('CCM Controller unlock bridge unavailable.');
       return reply.json();
     });
@@ -196,7 +215,7 @@ export class CcmWebUnlock {
       const csrf = token();
       const info = configured && paired ? await this.bridge('status') : { active: false };
       const query = new URL(request.url, 'http://localhost').searchParams;
-      const message = paired && !info.active && query.has('paired')
+      const message = paired && !info.pending && query.has('paired')
         ? '浏览器配对成功。现在可以点击临时解锁。' : '';
       responseHtml(response, 200, renderPage({
         paired, csrf, configured, grant: info, message,
@@ -243,6 +262,21 @@ export class CcmWebUnlock {
       }
       await this.bridge('issue', seconds);
       redirect(response, '');
+      return;
+    }
+    if (body.get('action') === 'claim' && paired && configured) {
+      const expectedId = body.get('grant_id');
+      if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(expectedId || '')) {
+        responseHtml(response, 400, 'Invalid grant ID');
+        return;
+      }
+      const claim = await this.bridge('claim', expectedId);
+      if (claim?.full_access_grant_id !== expectedId) {
+        responseHtml(response, 409, 'Grant was already claimed or expired');
+        return;
+      }
+      response.writeHead(204, { 'Cache-Control': 'no-store' });
+      response.end();
       return;
     }
     responseHtml(response, 403, renderPage({

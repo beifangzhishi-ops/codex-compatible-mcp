@@ -17,43 +17,47 @@ import { createConfig } from '../ccm-sidecar/config.mjs';
 import { createCcmOAuthServer, listenCcmOAuthServer, closeCcmOAuthServer } from '../ccm-sidecar/server.mjs';
 import { createHttpController } from '../src/controller/mcp-http-server.mjs';
 
-test('web unlock immediately activates a grant; fallback claim returns the same ID without extending expiry', () => {
+test('web unlock waits for one claim, restores locked page state, and preserves previously claimed grants', () => {
   let now = 100_000;
   const grants = new WebFullAccess({ now: () => now });
   const first = grants.issue(60);
-  assert.equal(grants.authorize(first.full_access_grant_id), true);
+  assert.equal(grants.status().pending, true);
+  assert.throws(() => grants.authorize(first.full_access_grant_id), /unknown or expired/);
   now += 30_000;
   const duplicate = grants.issue(604800);
   assert.equal(first.issued, true);
   assert.equal(duplicate.issued, false);
   assert.equal(duplicate.full_access_grant_id, first.full_access_grant_id);
   assert.equal(duplicate.expires_at, first.expires_at);
+  assert.equal(grants.claim('00000000-0000-4000-8000-000000000000'), null);
   const claimed = grants.claim();
   assert.equal(claimed.duration_seconds, 60);
   assert.equal(claimed.full_access_grant_id, first.full_access_grant_id);
   assert.equal(claimed.expires_at, first.expires_at);
   assert.equal(grants.claim(), null);
-  assert.equal(grants.status().claim_available, false);
+  assert.deepEqual(grants.status(), { pending: false });
+  assert.equal(grants.authorize(first.full_access_grant_id), true);
+  const next = grants.issue(300);
+  assert.equal(next.issued, true);
+  assert.notEqual(next.full_access_grant_id, first.full_access_grant_id);
   assert.equal(grants.authorize(first.full_access_grant_id), true);
   now += 60_001;
   assert.throws(() => grants.authorize(first.full_access_grant_id), /expired/);
-  assert.equal(grants.status().active, false);
-  assert.equal(grants.issue(300).issued, true);
+  assert.equal(grants.status().pending, true);
 });
 
-test('unclaimed fallback expires in five minutes while longer web grant remains active', () => {
+test('unclaimed pending grant expires in five minutes and can be replaced', () => {
   let now = 100_000;
   const grants = new WebFullAccess({ now: () => now });
   const first = grants.issue(3600);
   now += 299_000;
   assert.equal(grants.issue(3600).issued, false);
-  assert.equal(grants.status().claim_available, true);
+  assert.equal(grants.status().pending, true);
   now += 1001;
   assert.equal(grants.claim(), null);
-  assert.equal(grants.status().claim_available, false);
-  assert.equal(grants.status().full_access_grant_id, first.full_access_grant_id);
-  assert.equal(grants.authorize(first.full_access_grant_id), true);
-  assert.equal(grants.issue(300).issued, false);
+  assert.deepEqual(grants.status(), { pending: false });
+  assert.throws(() => grants.authorize(first.full_access_grant_id), /unknown or expired/);
+  assert.equal(grants.issue(300).issued, true);
   assert.throws(() => grants.authorize('00000000-0000-4000-8000-000000000000'), /unknown/);
 });
 
@@ -64,30 +68,61 @@ test('deferred fallback tool yields the already-active browser grant exactly onc
   const claimed = await registry.get('claim_full_access').handler({});
   assert.equal(claimed.structuredContent.full_access_grant_id, issued.full_access_grant_id);
   assert.equal(claimed.structuredContent.expires_at, issued.expires_at);
+  assert.deepEqual(grants.status(), { pending: false });
   assert.equal(grants.authorize(issued.full_access_grant_id), true);
   const duplicate = await registry.get('claim_full_access').handler({});
   assert.equal(duplicate.structuredContent.claimed, false);
 });
 
-test("one-minute grant expires without the fallback's five-minute window prolonging it", () => {
+test('web copy consumes the pending grant, then the model fallback can recover the same ID once', () => {
+  let now = 100_000;
+  const grants = new WebFullAccess({ now: () => now });
+  const pending = grants.issue(3600);
+  const claimed = grants.claim(pending.full_access_grant_id);
+  assert.equal(claimed.full_access_grant_id, pending.full_access_grant_id);
+  assert.deepEqual(grants.status(), { pending: false });
+  assert.equal(grants.authorize(pending.full_access_grant_id), true);
+  now += 240_000;
+  const recovered = grants.claim();
+  assert.equal(recovered.full_access_grant_id, pending.full_access_grant_id);
+  assert.equal(recovered.expires_at, pending.expires_at);
+  assert.equal(grants.claim(), null);
+  assert.equal(grants.authorize(pending.full_access_grant_id), true);
+  const second = grants.issue(300);
+  assert.notEqual(second.full_access_grant_id, pending.full_access_grant_id);
+  assert.equal(grants.authorize(pending.full_access_grant_id), true);
+});
+
+test('copy recovery expires at the original five-minute claim deadline', () => {
+  let now = 100_000;
+  const grants = new WebFullAccess({ now: () => now });
+  const issued = grants.issue(3600);
+  now += 60_000;
+  grants.claim(issued.full_access_grant_id);
+  now += 240_001;
+  assert.equal(grants.claim(), null);
+  assert.equal(grants.authorize(issued.full_access_grant_id), true);
+});
+
+test("one-minute pending grant expires without the five-minute window prolonging it", () => {
   let now = 10_000;
   const grants = new WebFullAccess({ now: () => now });
   const issued = grants.issue(60);
   now += 60_001;
-  assert.deepEqual(grants.status(), { active: false });
+  assert.deepEqual(grants.status(), { pending: false });
   assert.equal(grants.claim(), null);
   assert.throws(() => grants.authorize(issued.full_access_grant_id), /expired/);
 });
 
-test('phone enrollment revision change revokes directly issued and fallback-claimed grants', () => {
+test('phone enrollment revision change revokes pending and claimed grants', () => {
   let revision = 'first-phone';
   const grants = new WebFullAccess({ enrollmentRevision: () => revision });
   const issued = grants.issue(300);
-  assert.equal(grants.authorize(issued.full_access_grant_id), true);
+  assert.throws(() => grants.authorize(issued.full_access_grant_id), /unknown or expired/);
   const first = grants.claim();
   assert.equal(grants.authorize(first.full_access_grant_id), true);
   revision = null;
-  assert.deepEqual(grants.status(), { active: false });
+  assert.deepEqual(grants.status(), { pending: false });
   assert.throws(() => grants.authorize(first.full_access_grant_id), /not confirmed/);
   assert.throws(() => grants.issue(300), /not confirmed/);
   revision = 'replacement-phone';
@@ -109,7 +144,8 @@ test('local PowerShell TOTP implementation passes RFC and confirmation-window se
 
 test('one browser-issued grant applies across new and existing Workers, without changing base profile', async () => {
   const grants = new WebFullAccess();
-  const { full_access_grant_id: grant } = grants.issue(300);
+  grants.issue(300);
+  const { full_access_grant_id: grant } = grants.claim();
   const sent = [];
   const registry = {
     resolve(id) {
@@ -156,7 +192,8 @@ test('one browser-issued grant applies across new and existing Workers, without 
 
 test('web-issued Full Access grants controller-side patch dispatch while keeping Worker root identity', async () => {
   const grants = new WebFullAccess();
-  const issued = grants.issue(60);
+  grants.issue(60);
+  const issued = grants.claim();
   let forwarded;
   const files = new RemoteFileService({
     webFullAccess: grants,
@@ -219,12 +256,13 @@ test('real sidecar HTTP pairing, CSRF, duplicate unlock, and page status', async
       stateFile: path.join(root, 'browsers.json'),
       secret: 'fake-test-only-secret',
       totp: { verify: (code) => code === '123456' },
-      bridge: async (action, seconds) =>
-        action === 'status' ? grants.status() : grants.issue(seconds),
+      bridge: async (action, value) =>
+        action === 'status' ? grants.status() :
+          action === 'claim' ? grants.claim(value) : grants.issue(value),
     });
     unlock.isConfigured = () => true;
     const config = createConfig({
-      rootDir: root, readEnvFile: false,
+      rootDir: root, readConfigFile: false,
       issuer: 'https://example.test/ccm',
       resource: 'https://example.test/ccm/mcp',
       allowEphemeral: true, port: 0,
@@ -262,43 +300,81 @@ test('real sidecar HTTP pairing, CSRF, duplicate unlock, and page status', async
     assert.equal(second.headers.get('location'), '/ccm/unlock');
     assert.equal(grants.status().expires_at, deadline);
     assert.equal(grants.status().full_access_grant_id, issued.full_access_grant_id);
+    assert.throws(() => grants.authorize(issued.full_access_grant_id), /unknown or expired/);
     const unpairedPage = await fetch(origin + '/ccm/unlock');
     assert.doesNotMatch(await unpairedPage.text(), new RegExp(issued.full_access_grant_id));
     const activePage = await fetch(origin + '/ccm/unlock', { headers: { Cookie: combined } });
     const activeHtml = await activePage.text();
-    assert.equal((activeHtml.match(/全权限已解锁/g) || []).length, 1);
+    assert.equal((activeHtml.match(/全权限待领取/g) || []).length, 1);
     assert.match(activeHtml, new RegExp(`id="grant-id">${issued.full_access_grant_id}</p>`));
     assert.match(activeHtml, /id="copy-grant" data-copy="CCM 全权限句柄 full_access_grant_id：/);
-    assert.match(activeHtml, /CCM 已解锁，请调用领取工具/);
+    assert.match(activeHtml, /不复制时，可直接让 ChatGPT 调用领取工具/);
     assert.doesNotMatch(activeHtml, /name="duration_seconds"|查看待认领授权/);
+    const activeCsrf = activeHtml.match(/data-csrf="([^"]+)"/)[1];
+    const activeCookie = activePage.headers.get('set-cookie').split(';', 1)[0] + '; ' + pairCookie;
+    const claimRequest = (id, csrfValue = activeCsrf, cookieValue = activeCookie) => fetch(origin + '/ccm/unlock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Cookie: cookieValue },
+      body: new URLSearchParams({ action: 'claim', csrf: csrfValue, grant_id: id }),
+    });
+    assert.equal((await claimRequest(issued.full_access_grant_id, 'invalid')).status, 403);
+    assert.equal((await claimRequest(issued.full_access_grant_id, activeCsrf, activeCookie.split('; ')[0])).status, 403);
+    assert.equal((await claimRequest('00000000-0000-4000-8000-000000000000')).status, 409);
+    assert.equal(grants.status().pending, true);
     const script = activeHtml.match(/<script>([\s\S]*?)<\/script>/)?.[1];
     assert.ok(script);
     const expectedHash = createHash('sha256').update(script).digest('base64');
     assert.ok(activePage.headers.get('content-security-policy').includes(`script-src 'sha256-${expectedHash}'`));
+    assert.match(activePage.headers.get('content-security-policy'), /connect-src 'self'/);
     let click;
     let copied;
+    let navigated;
     const button = {
-      dataset: { copy: `CCM 全权限句柄 full_access_grant_id：${issued.full_access_grant_id}。请在需要全权限的 CCM 工具调用中直接使用此参数，无需领取。` },
-      textContent: '一键复制全权限句柄',
+      disabled: false,
+      dataset: { copy: `CCM 全权限句柄 full_access_grant_id：${issued.full_access_grant_id}。网页完成复制领取并回到解锁页后，请在需要全权限的 CCM 工具调用中直接使用此参数。`, csrf: activeCsrf, grantId: issued.full_access_grant_id },
+      textContent: '一键复制并领取全权限句柄',
       addEventListener: (type, handler) => { if (type === 'click') click = handler; },
     };
+    let failedClick;
+    const failedButton = { ...button, addEventListener: (_type, handler) => { failedClick = handler; } };
+    runInNewContext(script, {
+      document: { getElementById: () => failedButton },
+      navigator: { clipboard: { writeText: async () => { throw new Error('denied'); } } },
+    });
+    await failedClick();
+    assert.equal(grants.status().pending, true);
+    assert.equal(failedButton.disabled, false);
+    assert.match(failedButton.textContent, /复制失败/);
     runInNewContext(script, {
       document: { getElementById: (id) => id === 'copy-grant' ? button : null },
       navigator: { clipboard: { writeText: async (value) => { copied = value; } } },
+      URLSearchParams,
+      fetch: async (_url, options) => fetch(origin + '/ccm/unlock', {
+        ...options, headers: { ...options.headers, Cookie: activeCookie },
+      }),
+      window: { location: { replace: (value) => { navigated = value; } } },
     });
     assert.equal(typeof click, 'function');
     await click();
     assert.equal(copied, button.dataset.copy);
     assert.equal(copied.includes(issued.full_access_grant_id), true);
-    assert.match(button.textContent, /已复制/);
-
-    const fallback = grants.claim();
-    assert.equal(fallback.full_access_grant_id, issued.full_access_grant_id);
-    assert.equal(fallback.expires_at, deadline);
+    assert.equal(navigated, '/ccm/unlock');
+    assert.deepEqual(grants.status(), { pending: false });
+    assert.equal(grants.authorize(issued.full_access_grant_id), true);
+    assert.equal(grants.claim()?.full_access_grant_id, issued.full_access_grant_id);
+    assert.equal(grants.claim(), null);
+    assert.equal((await claimRequest(issued.full_access_grant_id)).status, 409);
     const claimedPage = await fetch(origin + '/ccm/unlock?issued=1', { headers: { Cookie: combined } });
     const claimedHtml = await claimedPage.text();
-    assert.match(claimedHtml, new RegExp(`id="grant-id">${issued.full_access_grant_id}</p>`));
-    assert.doesNotMatch(claimedHtml, /CCM 已解锁，请调用领取工具|name="duration_seconds"/);
+    assert.doesNotMatch(claimedHtml, new RegExp(issued.full_access_grant_id));
+    assert.match(claimedHtml, /name="duration_seconds"/);
+    const next = await request('unlock', { duration_seconds: '300' }, combined);
+    assert.equal(next.status, 303);
+    const nextGrant = grants.status();
+    assert.notEqual(nextGrant.full_access_grant_id, issued.full_access_grant_id);
+    assert.equal(grants.authorize(issued.full_access_grant_id), true);
+    const fallback = grants.claim();
+    assert.equal(fallback.full_access_grant_id, nextGrant.full_access_grant_id);
   } finally {
     if (runtime) await closeCcmOAuthServer(runtime);
     rmSync(root, { recursive: true, force: true });
@@ -322,21 +398,33 @@ test('Controller loopback unlock bridge requires its shared secret and rejects i
   try {
     const address = controller.address;
     const url = 'http://127.0.0.1:' + address.port + '/ccm/internal/web-unlock';
-    const post = async (secret, action, seconds) => fetch(url, {
+    const post = async (secret, action, value) => fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-CCM-Unlock-Bridge': secret,
       },
-      body: JSON.stringify({ action, duration_seconds: seconds }),
+      body: JSON.stringify({ action, duration_seconds: action === 'issue' ? value : undefined, grant_id: action === 'claim' ? value : undefined }),
     });
     assert.equal((await post('wrong', 'issue', 300)).status, 403);
     assert.equal((await post('test-secret-not-production', 'unknown')).status, 400);
     const first = await post('test-secret-not-production', 'issue', 300);
     assert.equal(first.status, 200);
-    assert.equal((await first.json()).issued, true);
+    const issued = await first.json();
+    assert.equal(issued.issued, true);
     const duplicate = await post('test-secret-not-production', 'issue', 604800);
     assert.equal((await duplicate.json()).issued, false);
+    assert.equal((await post('wrong', 'claim', issued.full_access_grant_id)).status, 403);
+    assert.equal((await post('test-secret-not-production', 'claim', undefined)).status, 400);
+    assert.equal((await post('test-secret-not-production', 'claim', 'invalid')).status, 400);
+    assert.equal((await post('test-secret-not-production', 'claim', '00000000-0000-4000-8000-000000000000')).status, 409);
+    assert.equal(grants.status().pending, true);
+    const claimed = await post('test-secret-not-production', 'claim', issued.full_access_grant_id);
+    assert.equal(claimed.status, 200);
+    assert.equal((await claimed.json()).full_access_grant_id, issued.full_access_grant_id);
+    assert.equal(grants.status().pending, false);
+    assert.equal(grants.authorize(issued.full_access_grant_id), true);
+    assert.equal((await post('test-secret-not-production', 'claim', issued.full_access_grant_id)).status, 409);
   } finally {
     await controller.close();
   }
