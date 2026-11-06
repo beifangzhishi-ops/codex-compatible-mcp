@@ -12,7 +12,8 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { resolveCodexRuntime, codexWorkspaceRootsOverride } from '../src/runtime/sandbox/codex-windows-sandbox.mjs';
+import { CodexWindowsSandboxBackend } from '../src/runtime/sandbox/codex-windows-sandbox.mjs';
+import { provisionCodexRuntimeHome } from '../src/runtime/sandbox/codex-runtime-home.mjs';
 
 const ENABLED = process.platform === 'win32' &&
   process.env.CCM_RUN_CODEX_ELEVATED_CONTAINMENT === '1';
@@ -21,7 +22,6 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 test('upstream Elevated Sandbox prevents ordinary accidental outside writes and records hardlink behavior', {
   skip: !ENABLED && 'requires explicit trusted Windows integration run',
 }, (t) => {
-  const cli = resolveCodexRuntime();
   const fixtureRoot = path.join(ROOT, '..', '.cache', 'codex-elevated-integration-' + randomUUID());
   const workspace = path.join(fixtureRoot, 'workspace');
   const cwd = path.join(workspace, 'sub');
@@ -43,17 +43,24 @@ test('upstream Elevated Sandbox prevents ordinary accidental outside writes and 
     "try {Set-Content -LiteralPath " + quotePs(victim) + " -Value 'LINKED' -ErrorAction Stop; Write-Output 'LINKED_OUTSIDE_WRITABLE'} catch {Write-Output 'LINKED_OUTSIDE_DENIED'}",
     "try {Set-Content -LiteralPath " + quotePs(link) + " -Value 'LINKED_AGAIN' -ErrorAction Stop; Write-Output 'HARDLINK_WRITABLE'} catch {Write-Output 'HARDLINK_DENIED'}",
   ].join('; ');
-  const args = [
-    'sandbox', '-P', 'workspace-online', '-C', cwd,
-    '-c', 'permissions.workspace-online.extends=":workspace"',
-    '-c', 'permissions.workspace-online.network.enabled=true',
-    '-c', codexWorkspaceRootsOverride(workspace),
-    '-c', 'windows.sandbox="elevated"',
-    '--', path.join(process.env.WINDIR || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-    '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script,
-  ];
   try {
-    const result = spawnSync(cli, args, { encoding: 'utf8', windowsHide: true, timeout: 45000 });
+    const backend = new CodexWindowsSandboxBackend({
+      codexHome: provisionCodexRuntimeHome(),
+    });
+    const invocation = backend.buildInvocation({
+      environment: {
+        platform: 'windows', cwd: workspace, workspaceRoots: [workspace],
+        shell: { path: path.join(process.env.WINDIR || 'C:\\Windows',
+          'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe') },
+      },
+      command: script,
+      cwd,
+      permissionProfile: 'workspace-write',
+    });
+    const result = spawnSync(invocation.file, invocation.args, {
+      encoding: 'utf8', windowsHide: true, timeout: 45000,
+      env: { ...process.env, ...invocation.environmentOverrides },
+    });
     t.diagnostic('exit=' + result.status + ' stderr=' + String(result.stderr).slice(0, 1200));
     t.diagnostic('stdout=' + String(result.stdout).slice(0, 1000));
     assert.equal(result.status, 0, 'Codex sandbox did not start');

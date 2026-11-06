@@ -6,9 +6,9 @@ const CODEX_CONFIG_TEMPLATE = fileURLToPath(
   new URL('../../../config/codex/config.toml', import.meta.url),
 );
 
-// The Codex CLI owns its native config, credentials, ACL setup and sandbox
-// accounts. CCM only supplies a separate, machine-local Codex home to avoid
-// modifying a person's interactive Codex preferences.
+// The upstream Codex Windows sandbox library owns credentials, ACL setup and
+// sandbox accounts. CCM supplies a dedicated machine-local native sandbox
+// home rather than modifying the owner's interactive Codex preferences.
 export function codexRuntimeHome({
   localAppData = process.env.LOCALAPPDATA,
 } = {}) {

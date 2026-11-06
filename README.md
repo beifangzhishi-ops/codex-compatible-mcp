@@ -329,68 +329,41 @@ The `preworker` script builds the native helper for the current platform first.
 
 ### Upstream Codex Elevated Sandbox alignment (staging only)
 
-The merged sandbox implementation records the **entire** reviewed upstream
-`openai/codex` source tree as a Git submodule at commit
-`f79b26ccbb3116b052544666a181012fb45dc49b`
-(`rust-v0.166.0-alpha.5.1`). This is a **source-audit baseline, not a required
-Codex CLI runtime version**. See
-`docs/codex-upstream-windows-parity.md` for the exact native source,
-configuration decision chain, host findings, and required acceptance matrix.
-The Codex-schema `config/codex/config.toml` is a *non-secret staged
-configuration*: the trusted runtime helper copies its exact bytes to
-`%LOCALAPPDATA%\\CCM\\CodexSandbox\\config.toml`, without modifying the
-interactive user's `%USERPROFILE%\\.codex\\config.toml`. This native config
-is exercised by the isolated execution tests; it is not yet the production
-Worker default.
+The upstream `openai/codex` source is recorded as a Git submodule at
+`f79b26ccbb3116b052544666a181012fb45dc49b`. This commit is a
+**source-review baseline**, not a required version of an installed Codex CLI.
 
-**Not deployed:** CCM still uses its existing Windows native sandbox and approval
-logic. Neither Worker has been switched to the upstream Codex runtime. Until
-the entire decision chain is integrated and tested, do not call the CCM sandbox
-Codex-equivalent or assume experimental `run_as_admin` is safe.
+The staged `createWorkerRuntime({codexSandbox:true})` now invokes the
+CCM-built `ccm-codex-native-sandbox.exe` directly. This Rust transport
+entrypoint calls the upstream `codex-windows-sandbox` library for
+permission-profile resolution, Elevated setup/refresh, session spawn,
+stdin/stdout forwarding, cancellation and process lifetime; the matching
+`codex-command-runner.exe` and `codex-windows-sandbox-setup.exe` are
+built from that same source. **No external `codex.exe` installation is
+required.** Nothing falls back to the old external launcher.
 
-The native Codex CLI adapter has unit tests and opt-in privileged Windows
-integration tests. Its merged implementation is covered by the CCM Node test
-suite; real host-level sandbox testing is tracked separately. On 6v,
-an existing NTFS hardlink from the selected writable root to a disposable
-outside file caused Codex ACL setup to grant its sandbox account write rights
-to the outside file. **The owner explicitly accepts this upstream limitation**:
-the purpose is to prevent accidental modifications of important files, not to
-enforce a malicious-actor-proof or absolute outside-workspace security boundary.
-Do not fork Codex to patch hardlinks or claim guaranteed confinement.
-Continue testing ordinary outside-file write denial and functional compatibility
-before enabling the new backend. CCM no longer pins the installed Codex CLI
-to a particular release: it chooses the newest complete installation with
-the native command runner and sandbox setup helper in the same directory.
-Different CLI versions are allowed on different Workers; incompatible command
-or config behavior must be fixed and verified rather than dismissed solely
-because of a version number. Host-level probes used disposable files and left
-running Workers unchanged.
+The native components are built separately via `npm run build:codex-native`
+after checking out the pinned `vendor/openai-codex` submodule.
+The regular `npm run build:native` and Worker startup are unchanged; the
+new sandbox is **not the production default**. Its dedicated
+`%LOCALAPPDATA%\\CCM\\CodexSandbox` is distinct from the user's
+interactive `%USERPROFILE%\\.codex` configuration.
 
-The 6v trusted-host `ProcessManager → NativeEnvironmentExecutor → codex sandbox`
-integration test **passed**, including the staged
-`createWorkerRuntime({codexSandbox:true})` selection and dedicated Codex home.
-The selection checks the installed CLI and its two adjacent native helpers, then
-provisions the native config before accepting commands. It captured the normal
-exit code and `CodexSandboxOnline` identity, permitted an inside write, and
-denied an accidental outside write. The first run provisioned native sandbox
-users, ACLs and offline networking and may take noticeably longer; reusing the
-same dedicated home avoids re-creating its initial configuration. Permanent
-native tests are `test/codex-elevated-execution.test.mjs` and
-`test/codex-elevated-containment.test.mjs` (both opt-in on trusted Windows).
-Neither test requires patching upstream Codex.
-The actual Worker Agent has not selected this staged backend yet: the
-interactive/TTY, cancellation and cross-machine functional gates remain open.
-The opt-in native PTY integration suite is `test/codex-elevated-terminal.test.mjs`
-(trusted elevated Windows host only, `CCM_RUN_CODEX_ELEVATED_TERMINAL=1`).
-It covers repeated stdin, incremental output, Ctrl+C and cancellation of the
-full process tree. Ordinary runs deliberately skip these three privileged
-cases; mock transport tests verify argv and stdin forwarding but do not
-replace native acceptance. See `docs/codex-upstream-windows-parity.md` for
-the remaining two-machine acceptance requirements.
-At the 2026-11-06 staging checkpoint, the 6v full Node suite completed
-using `node --test --test-isolation=none` with **340 passed, 0 failed,
-5 intentionally skipped**. Plain `npm test` could not spawn isolated test
-files inside that Worker's current sandbox (`spawn EPERM`).
+**Build and release status (2026-11-06):** The new launcher, build task and
+native argument transport have non-privileged JavaScript contract tests.
+The Rust dependency graph resolves, but the actual native binary build
+has **not completed**: in the restricted 6v Worker, Cargo cannot download
+`mio 1.2.0` because Windows Schannel returns `SEC_E_NO_CREDENTIALS`.
+Consequently neither real Elevated PTY nor ACL containment tests are
+counted as passed for the new launcher; privileged integration on 6v and
+noha, and complete policy/approval parity, remain release gates.
+
+The owner's approved security goal is accidental-write protection, not a
+malicious-actor-proof sandbox. Prior upstream native testing demonstrated
+an NTFS hardlink can extend an ACL grant to an outside target; this accepted
+limitation remains and is not a reason to patch Codex's security code.
+Detailed upstream API mapping, build blockers and acceptance cases are in
+`docs/codex-upstream-windows-parity.md`.
 
 ### User-command environment refresh
 

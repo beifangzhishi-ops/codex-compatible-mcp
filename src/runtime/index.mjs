@@ -3,7 +3,7 @@ import { ExecutorRegistry } from './executors/executor-registry.mjs';
 import { NativeEnvironmentExecutor } from './executors/native-executor.mjs';
 import { ProcessManager } from './process-manager.mjs';
 import { NativeSandboxBackend } from './sandbox/native-sandbox.mjs';
-import { CodexWindowsSandboxBackend, resolveCodexRuntime } from './sandbox/codex-windows-sandbox.mjs';
+import { CodexWindowsSandboxBackend, resolveNativeCodexRuntime } from './sandbox/codex-windows-sandbox.mjs';
 import { provisionCodexRuntimeHome } from './sandbox/codex-runtime-home.mjs';
 import { NativeFileService } from './filesystem/native-file-service.mjs';
 import { WorkerTransferService } from './filesystem/transfer-worker.mjs';
@@ -20,7 +20,7 @@ export function createWorkerRuntime(options = {}) {
       }
       // This is the trusted Worker-side construction path, not a user-command
       // option. Require a complete Codex CLI installation before accepting work.
-      resolveCodexRuntime();
+      resolveNativeCodexRuntime();
       return new CodexWindowsSandboxBackend({
         codexHome: provisionCodexRuntimeHome(),
       });

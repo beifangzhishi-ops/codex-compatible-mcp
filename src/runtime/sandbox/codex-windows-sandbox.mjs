@@ -1,50 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { directShellInvocation } from './native-sandbox.mjs';
 import { codexRuntimeHome } from './codex-runtime-home.mjs';
 
-// The sandbox argv and permissions TOML were verified against upstream Codex
-// at f79b26ccbb3116b052544666a181012fb45dc49b. The installed Codex CLI
-// version is deliberately NOT pinned: select the newest complete installation.
-const HELPERS = ['codex.exe', 'codex-command-runner.exe', 'codex-windows-sandbox-setup.exe'];
-
-function parseCodexCliVersion(output) {
-  const match = /^codex-cli (\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/
-    .exec(String(output).trim());
-  return match ? {
-    numbers: match.slice(1, 4).map(Number),
-    prerelease: match[4]?.split('.') || [],
-  } : null;
-}
-
-function compareCodexCliVersions(left, right) {
-  for (let i = 0; i < 3; i++) {
-    if (left.numbers[i] !== right.numbers[i]) {
-      return left.numbers[i] > right.numbers[i] ? 1 : -1;
-    }
-  }
-  if (!left.prerelease.length) return right.prerelease.length ? 1 : 0;
-  if (!right.prerelease.length) return -1;
-  for (let i = 0; i < Math.max(left.prerelease.length, right.prerelease.length); i++) {
-    const a = left.prerelease[i];
-    const b = right.prerelease[i];
-    if (a === undefined) return -1;
-    if (b === undefined) return 1;
-    if (a === b) continue;
-    const aNumeric = /^\d+$/.test(a);
-    const bNumeric = /^\d+$/.test(b);
-    if (aNumeric && bNumeric) {
-      const aa = BigInt(a), bb = BigInt(b);
-      if (aa !== bb) return aa > bb ? 1 : -1;
-    } else if (aNumeric !== bNumeric) {
-      return aNumeric ? -1 : 1;
-    } else {
-      return a > b ? 1 : -1;
-    }
-  }
-  return 0;
-}
+// These three binaries are built from the same pinned upstream Codex source.
+// There is no dependency on a separately installed Codex CLI.
+const BIN_DIR = fileURLToPath(new URL('../../../native/bin/', import.meta.url));
+const NATIVE_RUNNER = 'ccm-codex-native-sandbox.exe';
+const UPSTREAM_HELPERS = [
+  'codex-command-runner.exe',
+  'codex-windows-sandbox-setup.exe',
+];
 
 function windowsPath(value, name) {
   if (typeof value !== 'string' || !path.win32.isAbsolute(value)) {
@@ -62,75 +29,39 @@ function isWithinWindowsRoot(root, candidate) {
   );
 }
 
-/**
- * Select the newest installed Codex CLI that has its command runner and setup
- * helper alongside it. No fixed CLI version is required.
- * Equal-version duplicates remain ambiguous rather than picking arbitrarily.
- * This is a lookup of the trusted host's installed binary, not a search in PATH.
+/** Resolve only CCM-built, colocated Codex Windows sandbox binaries.
+ * Neither PATH nor an installed codex.exe is consulted.
  */
-export function resolveCodexRuntime({
-  binRoot = path.win32.join(process.env.LOCALAPPDATA || '', 'OpenAI', 'Codex', 'bin'),
-  readdir = fs.readdirSync,
-  isFile = (candidate) => fs.statSync(candidate).isFile(),
-  execute = spawnSync,
+export function resolveNativeCodexRuntime({
+  binDir = BIN_DIR,
+  fileExists = (candidate) => fs.statSync(candidate).isFile(),
 } = {}) {
-  const root = windowsPath(binRoot, 'Codex installation root');
-  const matches = [];
-  for (const entry of readdir(root, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    const directory = path.win32.join(root, entry.name);
-    const executables = HELPERS.map((name) => path.win32.join(directory, name));
-    try {
-      if (!executables.every((candidate) => isFile(candidate))) continue;
-    } catch {
-      continue;
-    }
-    const result = execute(executables[0], ['--version'], {
-      encoding: 'utf8',
-      windowsHide: true,
-      timeout: 10_000,
-    });
-    const version = !result.error && result.status === 0
-      ? parseCodexCliVersion(result.stdout) : null;
-    if (version) {
-      matches.push({ executable: executables[0], version });
-    }
-  }
-  if (!matches.length) {
+  const root = windowsPath(binDir, 'CCM native sandbox binary directory');
+  const files = [NATIVE_RUNNER, ...UPSTREAM_HELPERS].map(
+    (name) => path.win32.join(root, name),
+  );
+  const missing = files.filter((file) => {
+    try { return !fileExists(file); } catch { return true; }
+  });
+  if (missing.length) {
     throw new Error(
-      'Codex sandbox requires an installed Codex CLI with its native command runner ' +
-      'and sandbox setup helper in the same directory.',
+      'CCM-native Codex sandbox is not built: missing ' +
+      missing.map((file) => path.win32.basename(file)).join(', ') +
+      '. Build the upstream Rust runner and its two helpers with ' +
+      'npm run build:codex-native. No external Codex CLI is required.',
     );
   }
-  matches.sort((a, b) => compareCodexCliVersions(b.version, a.version));
-  if (matches.length > 1 &&
-      compareCodexCliVersions(matches[0].version, matches[1].version) === 0) {
-    throw new Error('Multiple equally recent Codex CLI installations were found; ' +
-      'unable to choose a unique native sandbox runtime.');
-  }
-  return matches[0].executable;
-}
-
-// Upstream: codex-rs/config/src/permissions_toml.rs, WorkspaceRootsToml.
-// A literal TOML inline table is passed as one argv element, not interpolated
-// into an executable command. JSON string encoding is valid TOML basic-string
-// encoding for Windows paths.
-export function codexWorkspaceRootsOverride(workspaceRoot) {
-  const root = windowsPath(workspaceRoot, 'Workspace root');
-  return 'permissions.workspace-online.workspace_roots={ ' +
-    JSON.stringify(root) + ' = true }';
+  return files[0];
 }
 
 /**
- * Staged transport adapter for Codex's own Windows sandbox CLI.
- * Does not create Windows tokens, ACLs, firewall rules or sandbox users:
- * those belong entirely to the installed upstream Codex and its paired helpers.
- *
- * This backend is NOT enabled by default until end-to-end containment tests pass.
+ * The experimental Windows backend calls a CCM-owned Rust entrypoint that
+ * invokes codex-windows-sandbox directly. It neither reimplements ACLs/tokens
+ * nor shells out to codex.exe. It is not the production Worker default.
  */
 export class CodexWindowsSandboxBackend {
   constructor({
-    resolveRuntime = resolveCodexRuntime,
+    resolveRuntime = resolveNativeCodexRuntime,
     codexHome = codexRuntimeHome(),
     fileExists = fs.existsSync,
   } = {}) {
@@ -155,9 +86,11 @@ export class CodexWindowsSandboxBackend {
       };
     }
     if (!['workspace-write', 'read-only'].includes(permissionProfile)) {
-      throw new Error('Codex sandbox cannot accept CCM-specific or unsandboxed profile: ' + permissionProfile);
+      throw new Error('Codex sandbox cannot accept unsupported CCM profile: ' +
+        permissionProfile);
     }
-    const root = windowsPath(environment.workspaceRoots?.[0] || environment.cwd, 'Workspace root');
+    const root = windowsPath(environment.workspaceRoots?.[0] || environment.cwd,
+      'Workspace root');
     const workdir = windowsPath(cwd, 'Command workdir');
     if (!isWithinWindowsRoot(root, workdir)) {
       throw new Error('Refusing Codex sandbox launch outside the registered workspace.');
@@ -169,29 +102,27 @@ export class CodexWindowsSandboxBackend {
     if (!this.fileExists(path.win32.join(codexHome, 'config.toml'))) {
       throw new Error('Codex runtime home is missing its native config.toml.');
     }
-    // Resolve a complete Codex installation before spawn. No CLI version pin.
-    // There is no unrestricted executable-path override in the production API.
-    const codexExecutable = windowsPath(this.resolveRuntime(), 'Codex CLI');
-    const commandInvocation = directShellInvocation({
+    // Verify the CCM-built native binaries, not any installed Codex CLI.
+    const executable = windowsPath(this.resolveRuntime(), 'CCM Codex native runner');
+    const shellInvocation = directShellInvocation({
       platform: 'windows',
       shell: shell || environment.shell,
       command,
       useProfile,
     });
-    const profile = permissionProfile === 'workspace-write' ? 'workspace-online' : 'read-only';
-    const args = ['sandbox', '-P', profile, '-C', workdir];
-    if (permissionProfile === 'workspace-write') {
-      args.push('-c', codexWorkspaceRootsOverride(root));
-    }
-    args.push('--', commandInvocation.file, ...commandInvocation.args);
+    const profile = permissionProfile === 'workspace-write'
+      ? 'workspace-online' : 'read-only';
     return {
-      file: codexExecutable,
-      args,
+      file: executable,
+      args: [
+        '--workspace-root', root,
+        '--codex-home', codexHome,
+        '--cwd', workdir,
+        '--profile', profile,
+        '--', shellInvocation.file, ...shellInvocation.args,
+      ],
       sandboxed: true,
       permissionProfile,
-      // Native Codex isolation is established by a trusted Worker launcher.
-      // The child MUST use the separate, protected CODEX_HOME, never a writable
-      // workspace-owned or user's unrelated personal Codex configuration.
       environmentOverrides: { CODEX_HOME: codexHome },
       tty,
     };

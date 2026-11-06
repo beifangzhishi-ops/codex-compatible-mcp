@@ -18,3 +18,4 @@ native/pty-proxy/target/
 native/codex-powershell-parser/target/
 native/codex-execpolicy/target/
 native/codex-utils-absolute-path/target/
+native/codex-native-sandbox/target/

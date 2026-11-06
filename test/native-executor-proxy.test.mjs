@@ -76,10 +76,11 @@ test('native executor applies proxy/direct mode to each newly spawned process', 
   assert.equal(harness.spawned[2].file, 'ccm-pty-proxy.exe');
 });
 
-test('native executor forwards native Codex home to both pipe and PTY children', () => {
+test('native executor forwards the dedicated Codex home to both pipe and PTY children', () => {
   const harness = createHarness({
     invocation: () => ({
-      file: 'codex.exe', args: ['sandbox'], sandboxed: true,
+      file: 'ccm-codex-native-sandbox.exe', args: ['--profile', 'workspace-online'],
+      sandboxed: true,
       environmentOverrides: { CODEX_HOME: 'C:\\protected-codex-home' },
     }),
   });
@@ -89,12 +90,15 @@ test('native executor forwards native Codex home to both pipe and PTY children',
   assert.equal(harness.spawned[1].options.env.CODEX_HOME, 'C:\\protected-codex-home');
 });
 
-test('Codex sandbox PTY uses ConPTY wrapper without altering the upstream CLI argv or stdin', () => {
-  const argv = ['sandbox', '-P', 'workspace-online', '-C', 'C:\\work',
+test('Codex sandbox PTY transports unmodified native Rust runner argv and stdin', () => {
+  const argv = ['--workspace-root', 'C:\\work',
+    '--codex-home', 'C:\\protected-codex-home',
+    '--cwd', 'C:\\work', '--profile', 'workspace-online',
     '--', 'cmd.exe', '/d', '/s', '/c', 'set /p USER_INPUT='];
   const harness = createHarness({
     invocation: () => ({
-      file: 'C:\\Codex\\codex.exe', args: argv, sandboxed: true,
+      file: 'C:\\ccm\\native\\ccm-codex-native-sandbox.exe', args: argv,
+      sandboxed: true,
       environmentOverrides: { CODEX_HOME: 'C:\\protected-codex-home' },
     }),
   });
@@ -104,7 +108,7 @@ test('Codex sandbox PTY uses ConPTY wrapper without altering the upstream CLI ar
   assert.equal(harness.spawned[0].file, 'ccm-pty-proxy.exe');
   assert.deepEqual(harness.spawned[0].args.slice(0, 8), [
     '--cwd', 'C:\\work', '--cols', '120', '--rows', '30', '--',
-    'C:\\Codex\\codex.exe',
+    'C:\\ccm\\native\\ccm-codex-native-sandbox.exe',
   ]);
   assert.deepEqual(harness.spawned[0].args.slice(8), argv);
   assert.equal(harness.spawned[0].options.env.CODEX_HOME, 'C:\\protected-codex-home');

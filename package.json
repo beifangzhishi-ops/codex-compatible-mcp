@@ -10,6 +10,7 @@
   },
   "scripts": {
     "build:native": "node scripts/build-native.mjs",
+    "build:codex-native": "node scripts/build-codex-native.mjs",
     "prestart": "npm run build:native",
     "start": "node src/index.mjs",
     "oauth": "node ccm-sidecar/server.mjs",

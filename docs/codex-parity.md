@@ -23,21 +23,21 @@
 | Configuration loading, inheritance and policy | `codex-rs/config`, `codex-rs/protocol/src/config_types.rs` | Worker bootstrap and `config/` | **Not aligned overall**; only the shell environment policy TOML subset has been ported. |
 | Worker routing and GPT Host delivery | Codex execution host and protocol interfaces | CCM Controller/Worker RPC, MCP, OAuth, approval UI | **Adaptation surface**; Host-specific presentation excluded, but execution semantics must still be equivalent. |
 
-**Staged upstream native Windows execution (merged into main):**
-`vendor/openai-codex` records the reviewed source at
-`f79b26ccbb3116b052544666a181012fb45dc49b` and includes
-`src/runtime/sandbox/codex-windows-sandbox.mjs` with native CLI/runtime
-discovery (newest complete installation, no CLI version pin), native named permission profiles, and dedicated `CODEX_HOME`
-provisioning. It is not the production default. On 6v, CCM's actual
-`ProcessManager` successfully used this adapter to launch a native
-`CodexSandboxOnline` process, write within the workspace, deny an ordinary
-outside write, and report its output/exit code. Separate upstream probes
-demonstrated the known outside-file hardlink limitation, accepted by the owner
-as outside the accidental-write safety goal. Each Worker now selects its newest
-complete local Codex installation independently; actual sandbox behavior with
-updated releases must still be validated before production activation.
-See `docs/codex-upstream-windows-parity.md` for exact upstream source locations,
-native setup evidence, accepted limitations and remaining integration gaps.
+**Staged upstream native Windows execution (independent integration branch):**
+`vendor/openai-codex` pins the reviewed upstream source
+`f79b26ccbb3116b052544666a181012fb45dc49b`.
+`native/codex-native-sandbox` adds a small Rust process-transport entrypoint
+directly calling upstream `codex-windows-sandbox` APIs, with upstream-native
+command-runner and setup binaries built in the same release. The staged
+`src/runtime/sandbox/codex-windows-sandbox.mjs` requires only these CCM-built
+executables, never an installed Codex CLI. The real production Worker does
+**not** use this backend by default. Its JavaScript transport tests pass, but
+the native Rust build is blocked by the restricted 6v Worker's Cargo TLS
+credentials (`SEC_E_NO_CREDENTIALS` fetching `mio`). No new native Elevated
+filesystem/PTY validation has passed yet. The user's accepted upstream NTFS
+hardlink limitation still applies. See
+`docs/codex-upstream-windows-parity.md` for the source call-chain mapping
+and remaining release gates.
 
 ## Evidence and remaining acceptance gates
 
