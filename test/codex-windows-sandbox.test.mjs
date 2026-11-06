@@ -157,3 +157,47 @@ test('Codex runtime selection follows SemVer for prereleases and stable releases
   options.execute = () => ({ status: 0, stdout: 'unknown CLI output' });
   assert.throws(() => resolveCodexRuntime(options), /requires an installed Codex CLI/);
 });
+
+test('Codex resolver distinguishes sandbox-denied CLI execution from missing helpers', () => {
+  const root = 'C:\\Codex\\bin';
+  const complete = ['codex.exe', 'codex-command-runner.exe', 'codex-windows-sandbox-setup.exe'];
+  const paths = new Set(complete.map((name) => path.win32.join(root, 'installed', name)));
+  const options = {
+    binRoot: root,
+    readdir: () => [{ name: 'installed', isDirectory: () => true }],
+    isFile: (candidate) => paths.has(candidate),
+    execute: () => ({
+      status: null,
+      error: Object.assign(new Error('spawnSync codex.exe EPERM'), { code: 'EPERM' }),
+    }),
+  };
+  assert.throws(() => resolveCodexRuntime(options),
+    (error) => /installed.*cannot launch codex.exe \(EPERM\)/.test(error.message) &&
+      /not a missing installation or a CLI version mismatch/.test(error.message));
+  options.execute = () => {
+    throw Object.assign(new Error('spawn EACCES'), { code: 'EACCES' });
+  };
+  assert.throws(() => resolveCodexRuntime(options), /cannot launch codex.exe \(EACCES\)/);
+  options.execute = () => ({ status: 0, stdout: 'codex-cli 0.167.0\n' });
+  assert.equal(resolveCodexRuntime(options),
+    path.win32.join(root, 'installed', 'codex.exe'));
+  options.isFile = () => false;
+  assert.throws(() => resolveCodexRuntime(options), /requires an installed Codex CLI/);
+});
+
+test('Codex resolver can use another complete installation if one is blocked', () => {
+  const root = 'C:\\Codex\\bin';
+  const names = ['blocked', 'available'];
+  const paths = new Set(names.flatMap((directory) =>
+    ['codex.exe', 'codex-command-runner.exe', 'codex-windows-sandbox-setup.exe']
+      .map((name) => path.win32.join(root, directory, name))));
+  const result = resolveCodexRuntime({
+    binRoot: root,
+    readdir: () => names.map((name) => ({ name, isDirectory: () => true })),
+    isFile: (candidate) => paths.has(candidate),
+    execute: (file) => file.includes('\\blocked\\')
+      ? { error: Object.assign(new Error('EPERM'), { code: 'EPERM' }) }
+      : { status: 0, stdout: 'codex-cli 0.168.0\n' },
+  });
+  assert.equal(result, path.win32.join(root, 'available', 'codex.exe'));
+});

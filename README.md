@@ -366,6 +366,18 @@ or config behavior must be fixed and verified rather than dismissed solely
 because of a version number. Host-level probes used disposable files and left
 running Workers unchanged.
 
+**Current restricted-Worker launch constraint (2026-11-06):** On both 6v and
+noha, the installed Codex directory contains `codex.exe`,
+`codex-command-runner.exe` and `codex-windows-sandbox-setup.exe`, but
+attempting to start the CLI even for `--version` from CCM's restricted
+Worker fails with `spawnSync EPERM`. These Workers' effective tokens have
+the Administrators group marked `Deny only`, despite a high integrity
+label. `resolveCodexRuntime` now distinguishes this host-execution denial
+from a missing/incompatible Codex installation; it does not automatically
+switch to a weaker sandbox or bypass the execution restriction. Native
+Elevated PTY acceptance must run under an explicitly trusted, genuinely
+elevated Windows host. The CLI version is still not pinned.
+
 The 6v trusted-host `ProcessManager → NativeEnvironmentExecutor → codex sandbox`
 integration test **passed**, including the staged
 `createWorkerRuntime({codexSandbox:true})` selection and dedicated Codex home.

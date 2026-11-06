@@ -36,6 +36,11 @@ demonstrated the known outside-file hardlink limitation, accepted by the owner
 as outside the accidental-write safety goal. Each Worker now selects its newest
 complete local Codex installation independently; actual sandbox behavior with
 updated releases must still be validated before production activation.
+Both restricted Workers currently fail `codex.exe --version` with
+`spawnSync EPERM` even though all three installed native executables
+are present. This is now diagnosed as a blocked host launch in
+`resolveCodexRuntime`, rather than as an absent/mismatched Codex CLI;
+the actual privileged native PTY acceptance remains open.
 See `docs/codex-upstream-windows-parity.md` for exact upstream source locations,
 native setup evidence, accepted limitations and remaining integration gaps.
 

@@ -76,6 +76,7 @@ export function resolveCodexRuntime({
 } = {}) {
   const root = windowsPath(binRoot, 'Codex installation root');
   const matches = [];
+  const launchDenied = [];
   for (const entry of readdir(root, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     const directory = path.win32.join(root, entry.name);
@@ -85,11 +86,20 @@ export function resolveCodexRuntime({
     } catch {
       continue;
     }
-    const result = execute(executables[0], ['--version'], {
-      encoding: 'utf8',
-      windowsHide: true,
-      timeout: 10_000,
-    });
+    let result;
+    try {
+      result = execute(executables[0], ['--version'], {
+        encoding: 'utf8',
+        windowsHide: true,
+        timeout: 10_000,
+      });
+    } catch (error) {
+      result = { error };
+    }
+    if (['EPERM', 'EACCES'].includes(result?.error?.code)) {
+      launchDenied.push(result.error.code);
+      continue;
+    }
     const version = !result.error && result.status === 0
       ? parseCodexCliVersion(result.stdout) : null;
     if (version) {
@@ -97,6 +107,14 @@ export function resolveCodexRuntime({
     }
   }
   if (!matches.length) {
+    if (launchDenied.length) {
+      throw new Error(
+        'Codex CLI and both native helpers are installed, but the current Worker ' +
+        'cannot launch codex.exe (' + launchDenied[0] + '). This is a host execution ' +
+        'permission failure, not a missing installation or a CLI version mismatch. ' +
+        'Run the native sandbox integration test from a trusted elevated Windows host.',
+      );
+    }
     throw new Error(
       'Codex sandbox requires an installed Codex CLI with its native command runner ' +
       'and sandbox setup helper in the same directory.',
