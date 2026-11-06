@@ -6,6 +6,20 @@ import { CcmTotpManager } from './totp.mjs';
 export const WEB_UNLOCK_PATH = '/ccm/unlock';
 const PAIR_COOKIE = '__Secure-ccm-web-pair';
 const CSRF_COOKIE = '__Secure-ccm-web-csrf';
+const CLAIM_MESSAGE = 'ccm已解锁 允许领取并使用全权限ccm';
+const COPY_SCRIPT = `
+const copyButton = document.getElementById('copy-claim');
+if (copyButton) {
+  copyButton.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(copyButton.dataset.copy);
+      copyButton.textContent = '已复制，请返回 ChatGPT 粘贴发送';
+    } catch {
+      copyButton.textContent = '复制失败，请手动选择上方文字复制';
+    }
+  });
+}
+`;
 const PAIR_TTL_MS = 90 * 24 * 60 * 60_000;
 const MAX_PAIRED_BROWSERS = 8;
 const DURATIONS = [
@@ -42,7 +56,7 @@ function responseHtml(response, status, html, setCookies = []) {
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'DENY',
     'Referrer-Policy': 'no-referrer',
-    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+    'Content-Security-Policy': `default-src 'none'; script-src 'sha256-${createHash('sha256').update(COPY_SCRIPT).digest('base64')}'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`,
     ...(setCookies.length ? { 'Set-Cookie': setCookies } : {}),
   });
   response.end(html);
@@ -61,11 +75,15 @@ function redirect(response, query, setCookies = []) {
 
 function renderPage({ paired, csrf, pending, expires, message = '', error = false, configured = true }) {
   const remaining = expires ? Math.max(0, Math.ceil((Date.parse(expires) - Date.now()) / 1000)) : 0;
-  const pendingText = pending
-    ? `<p class="notice">已有待认领授权，剩余约 ${remaining} 秒。重复点击不会创建新授权，也不会重置倒计时。</p>`
+  const pendingContent = pending
+    ? `<p class="notice" role="status">已创建待认领授权，剩余约 ${remaining} 秒。请将下面的消息发给 ChatGPT 认领。</p>
+       <p class="copy-text" id="claim-message">${CLAIM_MESSAGE}</p>
+       <button type="button" id="copy-claim" data-copy="${escape(CLAIM_MESSAGE)}">一键复制认领消息</button>`
     : '';
   const form = !configured
     ? '<p>CCM 手机验证器尚未在本机初始化并确认。请先按照 README 的步骤在 6v 本机终端完成配对。</p>'
+    : paired && pending
+      ? ''
     : paired
       ? `<form method="post" action="${WEB_UNLOCK_PATH}">
           <input type="hidden" name="csrf" value="${escape(csrf)}">
@@ -73,7 +91,7 @@ function renderPage({ paired, csrf, pending, expires, message = '', error = fals
           <label for="duration">授权时长</label>
           <select id="duration" name="duration_seconds">${DURATIONS.map(([s, name]) =>
             `<option value="${s}"${s === 21600 ? ' selected' : ''}>${name}</option>`).join('')}</select>
-          <button type="submit">${pending ? '查看待认领授权' : '临时解锁 CCM'}</button>
+          <button type="submit">临时解锁 CCM</button>
         </form>`
       : `<p class="muted">此浏览器首次使用，需要手机验证器的一次性验证码。之后直接点击即可解锁。</p>
         <form method="post" action="${WEB_UNLOCK_PATH}">
@@ -95,12 +113,13 @@ function renderPage({ paired, csrf, pending, expires, message = '', error = fals
     input,select,button{box-sizing:border-box;padding:13px;font:inherit;border-radius:9px;width:100%}
     button{border:0;background:#2764d7;color:white;font-weight:650;cursor:pointer;margin-top:8px}
     .notice{padding:10px 12px;border-radius:8px;background:#568a7a22}.error{background:#d65b5b26}
+    .copy-text{padding:12px;border:1px solid #8886;border-radius:8px;user-select:all;overflow-wrap:anywhere}
     </style></head><body><main class="panel"><h1>CCM 临时解锁</h1>
     <p class="muted">全局授权 · 适用于所有 CCM Worker · 单次模型认领</p>
     ${message ? `<p class="notice${error ? ' error' : ''}" role="status">${escape(message)}</p>` : ''}
-    ${pendingText}${form}
-    <p class="muted">网页解锁后请回 ChatGPT 让模型认领。5 分钟未认领则失效；认领后网页恢复待解锁状态，已认领授权持续到期。</p>
-    </main></body></html>`;
+    ${pendingContent}${form}
+    ${!pending ? '<p class="muted">网页解锁后需回 ChatGPT 认领，5 分钟内未认领则失效；已认领授权持续到期。</p>' : ''}
+    </main><script>${COPY_SCRIPT}</script></body></html>`;
 }
 
 export class CcmWebUnlock {
@@ -173,9 +192,8 @@ export class CcmWebUnlock {
       const csrf = token();
       const info = configured ? await this.bridge('status') : { pending: false };
       const query = new URL(request.url, 'http://localhost').searchParams;
-      const message = paired && query.has('issued') ? '已创建待认领授权。回到 ChatGPT 让模型认领。'
-        : paired && query.has('paired') ? '浏览器配对成功。现在可以点击临时解锁。'
-          : paired && query.has('pending') ? '已有待认领授权，未重复签发。' : '';
+      const message = paired && !info.pending && query.has('paired')
+        ? '浏览器配对成功。现在可以点击临时解锁。' : '';
       responseHtml(response, 200, renderPage({
         paired, csrf, configured, pending: paired && info.pending,
         expires: info.claim_expires_at, message,
@@ -220,8 +238,8 @@ export class CcmWebUnlock {
         }));
         return;
       }
-      const result = await this.bridge('issue', seconds);
-      redirect(response, result.issued ? '?issued=1' : '?pending=1');
+      await this.bridge('issue', seconds);
+      redirect(response, '');
       return;
     }
     responseHtml(response, 403, renderPage({

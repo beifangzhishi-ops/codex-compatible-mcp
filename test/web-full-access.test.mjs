@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, mkdirSync, existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
+import { runInNewContext } from 'node:vm';
 import { WebFullAccess } from '../src/controller/web-full-access.mjs';
 import { RemoteProcessManager } from '../src/runtime/remote-process-manager.mjs';
 import { RemoteFileService } from '../src/runtime/filesystem/remote-file-service.mjs';
@@ -203,6 +205,7 @@ test('real sidecar HTTP pairing, CSRF, duplicate unlock, and page status', async
     const get = await fetch(origin + '/ccm/unlock');
     assert.equal(get.status, 200);
     const page = await get.text();
+    assert.doesNotMatch(page, /id="copy-claim"|已创建待认领授权/);
     const csrf = page.match(/name="csrf" value="([^"]+)"/)[1];
     const csrfCookie = get.headers.get('set-cookie').split(';', 1)[0];
     const request = (action, form, cookie) => fetch(origin + '/ccm/unlock', {
@@ -222,11 +225,39 @@ test('real sidecar HTTP pairing, CSRF, duplicate unlock, and page status', async
     const first = await request('unlock', { duration_seconds: '60' }, combined);
     const deadline = grants.status().claim_expires_at;
     const second = await request('unlock', { duration_seconds: '3600' }, combined);
-    assert.equal(first.headers.get('location'), '/ccm/unlock?issued=1');
-    assert.equal(second.headers.get('location'), '/ccm/unlock?pending=1');
+    assert.equal(first.headers.get('location'), '/ccm/unlock');
+    assert.equal(second.headers.get('location'), '/ccm/unlock');
     assert.equal(grants.status().claim_expires_at, deadline);
     const pendingPage = await fetch(origin + '/ccm/unlock', { headers: { Cookie: combined } });
-    assert.match(await pendingPage.text(), /已有待认领授权/);
+    const pendingHtml = await pendingPage.text();
+    assert.equal((pendingHtml.match(/已创建待认领授权/g) || []).length, 1);
+    assert.match(pendingHtml, /id="copy-claim" data-copy="ccm已解锁 允许领取并使用全权限ccm"/);
+    assert.doesNotMatch(pendingHtml, /name="duration_seconds"|查看待认领授权/);
+    const script = pendingHtml.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+    assert.ok(script);
+    const expectedHash = createHash('sha256').update(script).digest('base64');
+    assert.ok(pendingPage.headers.get('content-security-policy').includes(`script-src 'sha256-${expectedHash}'`));
+    let click;
+    let copied;
+    const button = {
+      dataset: { copy: 'ccm已解锁 允许领取并使用全权限ccm' },
+      textContent: '一键复制认领消息',
+      addEventListener: (type, handler) => { if (type === 'click') click = handler; },
+    };
+    runInNewContext(script, {
+      document: { getElementById: (id) => id === 'copy-claim' ? button : null },
+      navigator: { clipboard: { writeText: async (value) => { copied = value; } } },
+    });
+    assert.equal(typeof click, 'function');
+    await click();
+    assert.equal(copied, 'ccm已解锁 允许领取并使用全权限ccm');
+    assert.match(button.textContent, /已复制/);
+
+    assert.ok(grants.claim());
+    const claimedPage = await fetch(origin + '/ccm/unlock?issued=1', { headers: { Cookie: combined } });
+    const claimedHtml = await claimedPage.text();
+    assert.doesNotMatch(claimedHtml, /已创建待认领授权|id="copy-claim"|查看待认领授权/);
+    assert.match(claimedHtml, /name="duration_seconds"/);
   } finally {
     if (runtime) await closeCcmOAuthServer(runtime);
     rmSync(root, { recursive: true, force: true });
