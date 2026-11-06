@@ -59,6 +59,41 @@ Only GPT Host/MCP transport adaptation is exempted from matching Codex. A matchi
 5. Codex's config precedence, permissions profiles, failure semantics, approval/allowlist lifecycle and trust-boundaries are checked end-to-end. No legacy CCM-only semantics are silently retained.
 6. Tests pass on both machines **before** replacing default CCM sandbox. Restart and health/reconnect verification follow a clean version-synchronized release; stop on any failure.
 
+### Staged interactive terminal acceptance (2026-11-06)
+
+The opt-in `test/codex-elevated-terminal.test.mjs` runs through the real
+`createWorkerRuntime({ codexSandbox: true })` and
+`ProcessManager → NativeEnvironmentExecutor → ConPTY proxy → native Codex sandbox`
+chain, rather than simulating the sandbox with a fake child process. It checks:
+
+- Two successive interactive stdin submissions, incremental PTY output, and a normal exit.
+- Ctrl+C delivered to the live ConPTY session and confirmed termination.
+- `terminateSession` stopping the process tree, verified by the absence of a delayed workspace marker.
+
+It uses only disposable workspaces under the project's ignored `.cache`, keeps
+the production Worker sandbox unchanged, and requires both Windows and the
+explicit `CCM_RUN_CODEX_ELEVATED_TERMINAL=1` environment variable on a
+**trusted elevated host**. Its three cases are *skipped* during ordinary CCM
+test runs. **These three real-host checks have not yet passed on either
+machine**: starting the native sandbox from the currently restricted CCM
+Worker cannot provision its privileged Windows sandbox components.
+
+`test/native-executor-proxy.test.mjs` separately verifies that the staged
+Codex CLI receives the unaltered native argument vector and protected
+`CODEX_HOME` through the ConPTY launcher, while stdin bytes (including Ctrl+C)
+are forwarded to the proxy. This test is a transport contract check, **not**
+evidence of a completed privileged native PTY integration test.
+
+On 6v, the focused non-privileged suite returned **16 pass / 0 fail / 3
+intentionally skipped** using Node's `--test-isolation=none`. A regular
+`npm test` attempt was blocked before any test-file body executed because the
+Worker sandbox denied spawning Node's test-file subprocesses (`spawn EPERM`);
+those framework errors are not functional failures of Codex PTY. The attempted
+process-internal *full* suite did not yield a usable completion result from
+this Worker environment. Neither attempt counts as a complete regression
+pass. The previously verified full-suite results from an earlier commit do
+not cover these newly added tests.
+
 ## Explicitly unresolved
 
 The upstream sandbox implementation is a multi-crate Rust subsystem with independently provisioned users and persistent OS policy. Simply replacing the current C# token flags or wrapping `codex sandbox` inside the current CCM sandbox does **not** deliver parity. Native upstream-code integration or a verified upstream runner in the trusted Worker execution layer is necessary. This research does **not** authorize deployment or a weaker fallback.

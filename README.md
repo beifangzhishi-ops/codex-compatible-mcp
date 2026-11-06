@@ -380,6 +380,13 @@ native tests are `test/codex-elevated-execution.test.mjs` and
 Neither test requires patching upstream Codex.
 The actual Worker Agent has not selected this staged backend yet: the
 interactive/TTY, cancellation and cross-machine functional gates remain open.
+The opt-in native PTY integration suite is `test/codex-elevated-terminal.test.mjs`
+(trusted elevated Windows host only, `CCM_RUN_CODEX_ELEVATED_TERMINAL=1`).
+It covers repeated stdin, incremental output, Ctrl+C and cancellation of the
+full process tree. Ordinary runs deliberately skip these three privileged
+cases; mock transport tests verify argv and stdin forwarding but do not
+replace native acceptance. See `docs/codex-upstream-windows-parity.md` for
+the remaining two-machine acceptance requirements.
 
 ### User-command environment refresh
 

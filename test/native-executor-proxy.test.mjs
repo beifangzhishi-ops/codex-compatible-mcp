@@ -10,7 +10,8 @@ function fakeChild() {
   const child = new EventEmitter();
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
-  child.stdin = { writable: true, write() {} };
+  child.stdinWrites = [];
+  child.stdin = { writable: true, write(chars) { child.stdinWrites.push(chars); } };
   child.kill = () => {};
   return child;
 }
@@ -36,8 +37,9 @@ function createHarness({ workerEnvPath, commandEnvironment = (env) => ({ ...env 
     workerEnvPath,
     fileExists: () => true,
     spawnProcess(file, args, options) {
-      spawned.push({ file, args, options });
-      return fakeChild();
+      const child = fakeChild();
+      spawned.push({ file, args, options, child });
+      return child;
     },
   });
   const start = (tty = false) => executor.startProcess({
@@ -85,6 +87,32 @@ test('native executor forwards native Codex home to both pipe and PTY children',
   harness.start(true);
   assert.equal(harness.spawned[0].options.env.CODEX_HOME, 'C:\\protected-codex-home');
   assert.equal(harness.spawned[1].options.env.CODEX_HOME, 'C:\\protected-codex-home');
+});
+
+test('Codex sandbox PTY uses ConPTY wrapper without altering the upstream CLI argv or stdin', () => {
+  const argv = ['sandbox', '-P', 'workspace-online', '-C', 'C:\\work',
+    '--', 'cmd.exe', '/d', '/s', '/c', 'set /p USER_INPUT='];
+  const harness = createHarness({
+    invocation: () => ({
+      file: 'C:\\Codex\\codex.exe', args: argv, sandboxed: true,
+      environmentOverrides: { CODEX_HOME: 'C:\\protected-codex-home' },
+    }),
+  });
+  const session = harness.start(true);
+  assert.equal(session.sandboxed, true);
+  assert.equal(session.stdinWritable, true);
+  assert.equal(harness.spawned[0].file, 'ccm-pty-proxy.exe');
+  assert.deepEqual(harness.spawned[0].args.slice(0, 8), [
+    '--cwd', 'C:\\work', '--cols', '120', '--rows', '30', '--',
+    'C:\\Codex\\codex.exe',
+  ]);
+  assert.deepEqual(harness.spawned[0].args.slice(8), argv);
+  assert.equal(harness.spawned[0].options.env.CODEX_HOME, 'C:\\protected-codex-home');
+  session.write('first\n');
+  session.write('second\r\n');
+  session.write('\x03');
+  assert.deepEqual(harness.spawned[0].child.stdinWrites,
+    ['first\n', 'second\r\n', '\x03']);
 });
 
 test('native executor reads machine-local CURL_CA_BUNDLE for each pipe and PTY child', (t) => {
