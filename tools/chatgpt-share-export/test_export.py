@@ -1,10 +1,19 @@
 import importlib.util, io, json, os, sys, tempfile, unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
 P=Path(__file__).with_name('export.py')
 spec=importlib.util.spec_from_file_location('share_export',P)
 e=importlib.util.module_from_spec(spec); spec.loader.exec_module(e)
+
+@contextmanager
+def temporary_output(suffix):
+ fd,name=tempfile.mkstemp(suffix=suffix)
+ os.close(fd)
+ out=Path(name)
+ try:yield out
+ finally:out.unlink(missing_ok=True)
 
 class ParserTests(unittest.TestCase):
  def test_ca_bundle_prefers_explicit_environment_file(self):
@@ -14,6 +23,21 @@ class ParserTests(unittest.TestCase):
  def test_fetch_rejects_non_share_url_before_network_access(self):
   with self.assertRaises(ValueError):
    e.fetch('https://chatgpt.com/')
+ def test_chatgpt_fetch_requests_desktop_html_instead_of_metadata_only_response(self):
+  response=unittest.mock.MagicMock()
+  response.__enter__.return_value=response
+  response.read.return_value=b'<html>full Share HTML</html>'
+  response.headers.get_content_charset.return_value='utf-8'
+  opener=unittest.mock.MagicMock()
+  opener.open.return_value=response
+  url='https://chatgpt.com/share/example?ogimg=plain'
+  with patch.object(e,'build_opener',return_value=opener),patch.object(e,'ssl_context'):
+   self.assertEqual(e.fetch(url),'<html>full Share HTML</html>')
+  request=opener.open.call_args.args[0]
+  self.assertEqual(request.full_url,url)
+  self.assertTrue(request.get_header('User-agent').startswith('Mozilla/5.0'))
+  self.assertIn('text/html',request.get_header('Accept'))
+  self.assertIn('en-US',request.get_header('Accept-language'))
  def test_codex_url_routes_to_public_snapshot_without_html(self):
   url='https://chatgpt.com/s/cx_'+'a'*32+'?来源=测试'
   response=unittest.mock.MagicMock()
@@ -26,6 +50,7 @@ class ParserTests(unittest.TestCase):
    self.assertEqual(json.loads(e.fetch(url)),{'version':1,'turns':[]})
   request=opener.open.call_args.args[0]
   self.assertEqual(request.full_url,'https://chatgpt.com/backend-api/wham/shared_threads/cx_'+'a'*32)
+  self.assertEqual(request.get_header('Accept'),'application/json')
   self.assertEqual(opener.open.call_args.kwargs['timeout'],60)
  def test_url_validation_rejects_unrelated_paths_and_hosts(self):
   for url in ('https://chatgpt.com/s/cx_bad','https://chatgpt.com/s/abc','https://chatgpt.com.evil.test/s/cx_'+'a'*32,'http://chatgpt.com/share/abc','https://chatgpt.com:8443/share/abc','https://user@chatgpt.com/share/abc'):
@@ -67,8 +92,7 @@ class ParserTests(unittest.TestCase):
   snapshot=self.codex_snapshot()
   for branch in ('active','all'):
    for mode in ('text','full'):
-    with self.subTest(branch=branch,mode=mode),tempfile.TemporaryDirectory() as tmp:
-     out=Path(tmp)/'共享会话.json'
+    with self.subTest(branch=branch,mode=mode),temporary_output('-共享会话.json') as out:
      args=['export.py','https://chatgpt.com/s/cx_'+'a'*32,'--format','json','--output',str(out),'--branch',branch,'--mode',mode]
      with patch.object(sys,'argv',args),patch.object(e,'fetch',return_value=json.dumps(snapshot)),patch('sys.stdout',new_callable=io.StringIO) as stdout:
       e.main()
@@ -84,8 +108,7 @@ class ParserTests(unittest.TestCase):
       self.assertEqual([r['role'] for r in result['messages']],['user','assistant','assistant','user'])
       self.assertIn('图片',result['messages'][-1]['text'])
  def test_codex_cli_markdown_and_invalid_json(self):
-  with tempfile.TemporaryDirectory() as tmp:
-   out=Path(tmp)/'共享会话.md'
+  with temporary_output('-共享会话.md') as out:
    args=['export.py','https://chatgpt.com/s/cx_'+'a'*32,'--output',str(out),'--mode','full']
    with patch.object(sys,'argv',args),patch.object(e,'fetch',return_value=json.dumps(self.codex_snapshot())),patch('sys.stdout',new_callable=io.StringIO):e.main()
    content=out.read_text(encoding='utf-8')
@@ -95,8 +118,7 @@ class ParserTests(unittest.TestCase):
  def test_chatgpt_cli_still_decodes_html_mapping(self):
   data=['mapping',{'n1':2},{'message':{'author':{'role':'user'},'content':{'parts':['你好']}}},'title','示例标题','current_node','n1',{'_3':4,'_5':6}]
   html='streamController.enqueue('+json.dumps(json.dumps(data))+')'
-  with tempfile.TemporaryDirectory() as tmp:
-   out=Path(tmp)/'共享会话.json'
+  with temporary_output('-共享会话.json') as out:
    args=['export.py','https://chatgpt.com/share/example','--output',str(out),'--format','json']
    with patch.object(sys,'argv',args),patch.object(e,'fetch',return_value=html),patch('sys.stdout',new_callable=io.StringIO):e.main()
    result=json.loads(out.read_text(encoding='utf-8'))

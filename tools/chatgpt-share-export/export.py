@@ -37,7 +37,16 @@ def fetch(url):
         share_id=urlparse(url).path.rstrip('/').split('/')[-1]
         url='https://chatgpt.com/backend-api/wham/shared_threads/'+share_id
     opener=build_opener(HTTPSHandler(context=ssl_context()))
-    request=Request(url,headers={'User-Agent':'ccm-chatgpt-share-export/1.0'})
+    if source=='chatgpt':
+        # The Share route serves metadata-only HTML to non-browser clients, even with HTTP 200.
+        headers={
+            'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            'Accept':'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language':'en-US,en;q=0.9',
+        }
+    else:
+        headers={'Accept':'application/json'}
+    request=Request(url,headers=headers)
     last_error=None
     for attempt in range(2):
         try:

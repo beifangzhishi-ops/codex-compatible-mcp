@@ -251,6 +251,8 @@ CCM deliberately does not embed a second JavaScript interpreter for Code Mode. T
 
 **Model routing:** For public ChatGPT Share (`https://chatgpt.com/share/...`) and Codex shared-conversation (`https://chatgpt.com/s/cx_...`) links, inspect, compare, or export the conversation with `ccm-extra.chatgpt_share_export` via `tool_search` -> `exec`. Do not substitute web search, web browsing, BMG, or browser automation to retrieve shared-conversation content; report CCM retrieval failures. This rule is provided to models in the MCP Server instructions and the deferred tool description, rather than requiring a global user instruction.
 
+ChatGPT Share HTML is fetched directly with desktop browser-like `User-Agent`, `Accept`, and `Accept-Language` headers. A generic non-browser client receives an HTTP 200 metadata-only page, not the serialized conversation; the desktop request exposes the indexed payload for the built-in parser. Both ordinary `/share/...` links and URLs with `?ogimg=plain` work without browser automation. Codex shared-thread snapshots continue to use the JSON endpoint.
+
 `ccm-extra.chatgpt_share_export` 使用 Deferred + Code Mode，可读取并导出公开 ChatGPT 与 Codex 共享会话，无需 BMG 或浏览器自动化。通过 `tool_search` 发现工具，再通过 `exec` 调用。
 
 Supported features:
