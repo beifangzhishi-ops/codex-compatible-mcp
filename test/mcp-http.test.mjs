@@ -100,7 +100,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
   await worker.connect();
   await runtime.workerHub.waitForEnvironment('mcp-worker');
 
-  const { registry, codeModeManager } = createToolRegistry(runtime);
+  const { registry } = createToolRegistry(runtime);
   const controller = createHttpController({ toolRegistry: registry, runtime, port: 0 });
   await controller.start();
 
@@ -111,265 +111,43 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
 
   try {
     await client.connect(transport);
-    assert.match(
-      client.getInstructions(),
-      /Always reuse an existing workspace_handle for the target workspace/i,
-    );
-    assert.match(
-      client.getInstructions(),
-      /not an environment_id, workspace_id, or conversation context/i,
-    );
-    assert.match(
-      client.getInstructions(),
-      /Discover deferred select_workspace through tool_search and invoke it through exec only if no usable handle exists AND the user explicitly requests workspace entry/i,
-    );
-    assert.match(
-      client.getInstructions(),
-      /Discover deferred register_workspace through tool_search and invoke it through exec only if the user explicitly requests workspace registration and no usable handle exists/i,
-    );
-    assert.match(
-      client.getInstructions(),
-      /call the Direct create_projectless_handle tool/i,
-    );
-    assert.match(
-      client.getInstructions(),
-      /Reading, inspecting, searching, editing, or working on a project.*does not authorize entry or registration/i,
-    );
-    assert.match(
-      client.getInstructions(),
-      /Never initiate workspace-entry approval implicitly/i,
-    );
-    assert.match(
-      client.getInstructions(),
-      /For registered-project writes, ask for a handle or an explicit entry request/i,
-    );
-    assert.match(client.getInstructions(), /explore discoverable facts first/i);
-    assert.match(client.getInstructions(), /ask rather than guess/i);
-    assert.match(client.getInstructions(), /2-4 mutually exclusive choices/i);
-    assert.match(client.getInstructions(), /user-visible question/i);
-    assert.match(client.getInstructions(), /recommended default there when useful/i);
-    assert.match(client.getInstructions(), /tracked implementation edits.*remain gated/i);
-    assert.match(client.getInstructions(), /decision-complete for another executor/i);
-    assert.match(client.getInstructions(), /call Direct ccm-extra\.publish with plan_id alone/i);
-    assert.match(client.getInstructions(), /Do not read the entire Plan solely for the handoff/i);
-    assert.match(client.getInstructions(), /later plan_read calls during implementation remain lifecycle-neutral/i);
-    assert.match(client.getInstructions(), /does not maintain a Plan-Mode state machine/i);
-    assert.match(client.getInstructions(), /copy button first writes the ID to the clipboard and then claims it/i);
-    assert.match(client.getInstructions(), /If the owner provides the copied ID after webpage confirmation, use it directly/i);
-    assert.match(client.getInstructions(), /discover deferred ccm\.claim_full_access with tool_search and call it through exec/i);
-    assert.match(
-      client.getInstructions(),
-      /live process only needs polling.*invoke ccm\.write_stdin through exec from the first poll/i,
-    );
-    assert.match(
-      client.getInstructions(),
-      /top-level Direct write_stdin.*real non-empty interactive\/TTY stdin writes/i,
-    );
-    assert.match(
-      client.getInstructions(),
-      /retry the same exec -> ccm\.write_stdin route at most twice.*do not fall back to Direct empty polling/i,
-    );
-    assert.match(client.getInstructions(), /proactively provide a useful prefix_rule/i);
-    assert.match(client.getInstructions(), /npm run build:native.*prefix_rule=/i);
-    assert.match(client.getInstructions(), /Do not propose a generic shell or interpreter alone/i);
-    assert.match(client.getInstructions(), /global cross-Worker\/cross-workspace rule/i);
+    assert.match(client.getInstructions(), /Always reuse an existing workspace_handle/);
+    assert.match(client.getInstructions(), /Host owns tool discovery/);
+    assert.match(client.getInstructions(), /Call list_projects directly/);
+    assert.match(client.getInstructions(), /call claim_full_access directly/);
+    assert.match(client.getInstructions(), /plan_patch \/ plan_read directly/);
+    assert.match(client.getInstructions(), /call ccm-extra.conversation directly/);
+    assert.match(client.getInstructions(), /write_stdin.*read-only poll/);
+    assert.match(client.getInstructions(), /proactively provide a useful prefix_rule/);
+    assert.match(client.getInstructions(), /Never initiate workspace-entry approval implicitly/);
+    assert.match(client.getInstructions(), /Publish user-facing deliverables and useful previews/);
     const listed = await client.listTools();
     const names = listed.tools.map((tool) => tool.name).sort();
-    assert.deepEqual(names, [
-      'apply_patch',
-      'create_projectless_handle',
-      'exec',
-      'exec_command',
-      'get_approval_status',
-      'get_verification_input_status',
-      'publish',
-      'request_approval',
-      'request_verification_input',
-      'resolve_pending_action',
-      'show_workspace_handle',
-      'submit_verification_input',
-      'tool_search',
-      'view_image',
-      'wait',
-      'write_stdin',
-    ]);
-    const execTool = listed.tools.find((tool) => tool.name === 'exec');
-    assert.ok(execTool);
+    assert.deepEqual(names, registry.list().map((tool) => tool.name).sort());
+    assert.equal(names.length, 30);
+    for (const name of ['list_projects','claim_full_access','select_workspace','register_workspace','unregister_workspace',
+      'plan_patch','plan_read','restart','restart_status','import_chatgpt_file','conversation','quark_upload',
+      'transfer_path','transfer_status','transfer_cancel']) {
+      assert.ok(names.includes(name), name + ' must be a top-level MCP tool');
+    }
     const commandTool = listed.tools.find((tool) => tool.name === 'exec_command');
-    assert.match(commandTool.description, /proactively supply a practical prefix_rule/i);
-    assert.match(commandTool.description, /Never use a bare general-purpose shell or interpreter/i);
-    assert.match(commandTool.inputSchema.properties.prefix_rule.description, /stable, narrowly useful ordered-token prefix/i);
-    assert.deepEqual(execTool._meta?.['openai/fileParams'], ['file']);
-    assert.deepEqual(
-      execTool.inputSchema.properties.file.required,
-      ['download_url', 'file_id'],
-    );
-    assert.equal(
-      execTool.inputSchema.properties.file.additionalProperties,
-      false,
-    );
-    assert.deepEqual(
-      Object.keys(execTool.inputSchema.properties.file.properties).sort(),
-      ['download_url', 'file_id', 'file_name', 'mime_type'],
-    );
-    assert.deepEqual(
-      listed.tools.find((tool) => tool.name === 'resolve_pending_action')
-        ?._meta?.ui?.visibility,
-      ['app'],
-    );
-    assert.deepEqual(
-      listed.tools.find((tool) => tool.name === 'get_approval_status')
-        ?._meta?.ui?.visibility,
-      ['app'],
-    );
-    for (const name of ['get_verification_input_status', 'submit_verification_input']) {
-      assert.deepEqual(
-        listed.tools.find((tool) => tool.name === name)?._meta?.ui?.visibility,
-        ['app'],
-      );
+    assert.match(commandTool.description, /proactively supply a practical prefix_rule/);
+    assert.match(commandTool.inputSchema.properties.prefix_rule.description, /stable, narrowly useful ordered-token prefix/);
+    const receiveFileTool = listed.tools.find((tool) => tool.name === 'import_chatgpt_file');
+    assert.deepEqual(receiveFileTool._meta?.['openai/fileParams'], ['file']);
+    assert.deepEqual(receiveFileTool.inputSchema.properties.file.required, ['download_url','file_id']);
+    assert.equal(receiveFileTool.inputSchema.properties.file.additionalProperties, false);
+    for (const name of ['resolve_pending_action','get_approval_status','submit_verification_input','get_verification_input_status']) {
+      assert.deepEqual(listed.tools.find((tool) => tool.name === name)?._meta?.ui?.visibility, ['app']);
     }
-    assert.equal(
-      listed.tools.find((tool) => tool.name === 'request_verification_input')
-        ?._meta?.ui?.resourceUri,
-      'ui://ccm/verification-input-v1.html',
-    );
-    const approvalTool = listed.tools.find(
-      (tool) => tool.name === 'request_approval',
-    );
-    assert.equal(approvalTool?._meta?.ui?.resourceUri, APPROVAL_UI_URI);
-    const publishedFileUiTool = listed.tools.find((tool) => tool.name === 'publish');
-    assert.equal(publishedFileUiTool?._meta?.ui?.resourceUri, PUBLISHED_FILE_UI_URI);
-    assert.equal(publishedFileUiTool?._meta?.['openai/outputTemplate'], PUBLISHED_FILE_UI_URI);
-    for (const name of ['select_workspace', 'register_workspace']) {
-      assert.equal(listed.tools.some((entry) => entry.name === name), false);
-      const found = await client.callTool({
-        name: 'tool_search',
-        arguments: { query: name, limit: 5 },
-      });
-      const deferred = found.structuredContent.tools.find((entry) => entry.name === name);
-      assert.ok(deferred, name + ' must be discoverable');
-      assert.deepEqual(deferred.surfaces, ['deferred', 'code_mode']);
-    }
-    const handleTool = listed.tools.find((entry) => entry.name === 'show_workspace_handle');
-    assert.equal(handleTool?._meta?.ui?.resourceUri, WORKSPACE_HANDLE_UI_URI);
-    assert.equal(handleTool?._meta?.['openai/outputTemplate'], WORKSPACE_HANDLE_UI_URI);
-    const keyResource = await client.readResource({ uri: WORKSPACE_HANDLE_UI_URI });
-    const inputResource = await client.readResource({
-      uri: 'ui://ccm/verification-input-v1.html',
-    });
-    assert.match(inputResource.contents[0].text, /submit_verification_input/);
-    assert.equal(keyResource.contents[0].text, WORKSPACE_HANDLE_UI_HTML);
-    assert.equal(listed.tools.some((tool) => tool.name === 'list_projects'), false);
-    assert.equal(listed.tools.some((tool) => tool.name === 'send_file'), false);
-    assert.equal(listed.tools.some((tool) => tool.name === 'receive_file'), false);
-
-    const rejectedDirectPoll = await client.callTool({
-      name: 'write_stdin',
-      arguments: {
-        session_id: 999999,
-        workspace_handle: '00000000-0000-4000-8000-000000000099',
-        chars: '',
-      },
-    });
-    assert.equal(rejectedDirectPoll.isError, true);
-    assert.match(
-      rejectedDirectPoll.content[0].text,
-      /Direct empty write_stdin polling is disabled/i,
-    );
-    assert.match(
-      rejectedDirectPoll.content[0].text,
-      /through exec with a nested ccm\.write_stdin call/i,
-    );
-
-    const receiveSearch = await client.callTool({
-      name: 'tool_search',
-      arguments: { query: 'import_chatgpt_file', limit: 5 },
-    });
-    const receiveFileTool = receiveSearch.structuredContent.tools.find(
-      (tool) => tool.qualified_name === 'ccm-extra.import_chatgpt_file',
-    );
-    assert.ok(receiveFileTool);
-    assert.deepEqual(receiveFileTool.surfaces, ['deferred', 'code_mode']);
-    assert.deepEqual(
-      receiveFileTool.input_schema.properties.file.required,
-      ['download_url', 'file_id'],
-    );
-    assert.equal(
-      receiveFileTool.input_schema.properties.file.additionalProperties,
-      false,
-    );
-    assert.deepEqual(
-      Object.keys(receiveFileTool.input_schema.properties.file.properties).sort(),
-      ['download_url', 'file_id', 'file_name', 'mime_type'],
-    );
-    assert.match(receiveFileTool.description, /ordinary conversation attachment.*top-level file/i);
-    assert.match(receiveFileTool.description, /Library file.*materialize.*raw_file.*top-level exec\.file/i);
-
-    const publishTool = listed.tools.find((tool) => tool.name === 'publish');
-    assert.ok(publishTool);
-    assert.match(publishTool.description, /proactively publish/i);
-    assert.ok(publishTool.inputSchema.properties.plan_id);
-    assert.ok(publishTool.inputSchema.properties.workspace_handle);
-    assert.ok(publishTool.inputSchema.properties.path);
-    assert.equal(listed.tools.some((tool) => tool.name === 'import_chatgpt_file'), false);
-    assert.match(client.getInstructions(), /Publish user-facing deliverables and useful previews/i);
-    assert.match(client.getInstructions(), /shared conversations.*ccm-extra\.conversation.*tool_search -> exec/i);
-    assert.match(client.getInstructions(), /Do not use web search, web browsing, BMG, or browser automation/i);
-
-    for (const deferredName of ['conversation', 'quark_upload']) {
-      const search = await client.callTool({
-        name: 'tool_search',
-        arguments: { query: deferredName, limit: 10 },
-      });
-      if (deferredName === 'conversation') {
-        const shareTool = search.structuredContent.tools.find(
-          (tool) => tool.qualified_name === 'ccm-extra.conversation',
-        );
-        assert.match(shareTool?.description, /Do not use web search, web browsing, BMG, or browser automation/i);
-      }
-      assert.equal(
-        search.structuredContent.tools.some(
-          (tool) => tool.qualified_name === 'ccm-extra.' + deferredName,
-        ),
-        true,
-        deferredName + ' should be deferred',
-      );
-    }
-
-    const listProjectsSearch = await client.callTool({
-      name: 'tool_search',
-      arguments: { query: 'list projects', limit: 5 },
-    });
-    assert.ok(
-      listProjectsSearch.structuredContent.tools.some(
-        (tool) => tool.qualified_name === 'ccm.list_projects',
-      ),
-    );
-    const projectDiscovery = await client.callTool({
-      name: 'exec',
-      arguments: {
-        calls: [{ tool: 'ccm.list_projects', arguments: {} }],
-      },
-    });
-    assert.equal(projectDiscovery.isError, undefined);
-    const nestedProjectDiscovery =
-      projectDiscovery.structuredContent.calls[0].result.structured_content;
-    assert.equal(nestedProjectDiscovery.default_environment_id, 'mcp-worker');
-    assert.equal(nestedProjectDiscovery.environments.length, 1);
-    assert.equal(nestedProjectDiscovery.environments[0].id, 'mcp-worker');
-    assert.equal(nestedProjectDiscovery.environments[0].projects.length, 1);
-    assert.equal(
-      nestedProjectDiscovery.environments[0].projects[0].project_id,
-      workerRuntime.workspaceRegistry.listRegistered()[0].workspace_id,
-    );
-    assert.equal(
-      Object.hasOwn(
-        nestedProjectDiscovery.environments[0],
-        'projectless_workspaces',
-      ),
-      false,
-    );
-
+    assert.equal(listed.tools.find((tool) => tool.name === 'request_approval')?._meta?.ui?.resourceUri, APPROVAL_UI_URI);
+    assert.equal(listed.tools.find((tool) => tool.name === 'publish')?._meta?.ui?.resourceUri, PUBLISHED_FILE_UI_URI);
+    assert.equal(listed.tools.find((tool) => tool.name === 'show_workspace_handle')?._meta?.ui?.resourceUri, WORKSPACE_HANDLE_UI_URI);
+    const discovered = await client.callTool({name:'list_projects', arguments:{}});
+    assert.equal(discovered.isError, undefined);
+    assert.equal(discovered.structuredContent.default_environment_id, 'mcp-worker');
+    assert.equal(discovered.structuredContent.environments[0].id, 'mcp-worker');
+    assert.equal(discovered.structuredContent.environments[0].projects.length, 1);
     const approvalResource = await client.readResource({ uri: APPROVAL_UI_URI });
     assert.equal(approvalResource.contents[0].text, APPROVAL_UI_HTML);
     assert.equal(approvalResource.contents[0]._meta.ui.prefersBorder, true);
@@ -396,37 +174,18 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(projectlessResult.workspace_kind, 'projectless');
 
     const completeProjectDiscovery = await client.callTool({
-      name: 'exec',
-      arguments: {
-        calls: [{ tool: 'ccm.list_projects', arguments: { all: true } }],
-      },
+      name: 'list_projects', arguments: { all: true },
     });
     assert.equal(completeProjectDiscovery.isError, undefined);
-    const nestedCompleteProjectDiscovery =
-      completeProjectDiscovery.structuredContent.calls[0].result.structured_content;
-    assert.equal(
-      nestedCompleteProjectDiscovery.environments[0]
-        .projectless_workspaces[0].projectless_id,
-      projectlessResult.workspace_id,
-    );
-
+    assert.equal(completeProjectDiscovery.structuredContent.environments[0]
+      .projectless_workspaces[0].projectless_id, projectlessResult.workspace_id);
     const seededWorkspace = workerRuntime.workspaceRegistry.listRegistered()[0];
     const workspacePrepare = await client.callTool({
-      name: 'exec',
-      arguments: {
-        calls: [{
-          tool: 'ccm.select_workspace',
-          arguments: {
-            environment_id: 'mcp-worker',
-            workspace_id: seededWorkspace.workspace_id,
-          },
-        }],
-        yield_time_ms: 1000,
-      },
+      name: 'select_workspace',
+      arguments: { environment_id: 'mcp-worker', workspace_id: seededWorkspace.workspace_id },
     });
     assert.equal(workspacePrepare.isError, undefined);
-    const workspacePending =
-      workspacePrepare.structuredContent.calls[0].result.structured_content;
+    const workspacePending = workspacePrepare.structuredContent;
     assert.equal(workspacePending.kind, 'workspace');
     assert.equal(
       workspacePending.operation,
@@ -540,27 +299,12 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(escalatedResult.content[0].text, /MCP_ESCALATED_OK/);
     assert.equal(escalatedResult.structuredContent.state, 'consumed');
 
-    const nestedCore = await client.callTool({
-      name: 'exec',
-      arguments: {
-        calls: [{
-          tool: 'ccm.exec_command',
-          arguments: {
-            workspace_handle: workspaceHandle,
-            cmd: 'Write-Output NESTED_CORE_OK',
-          },
-        }],
-        yield_time_ms: 2000,
-      },
+    const peerCore = await client.callTool({
+      name: 'exec_command',
+      arguments: { workspace_handle: workspaceHandle, cmd: 'Write-Output PEER_CORE_OK' },
     });
-    assert.equal(nestedCore.isError, undefined);
-    assert.equal(nestedCore.structuredContent.state, 'completed');
-    assert.match(
-      nestedCore.structuredContent.calls[0]
-        .result.structured_content.output,
-      /NESTED_CORE_OK/,
-    );
-
+    assert.equal(peerCore.isError, undefined);
+    assert.match(peerCore.structuredContent.output, /PEER_CORE_OK/);
     const patchResult = await client.callTool({
       name: 'apply_patch',
       arguments: {
@@ -586,31 +330,13 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     );
     await fs.writeFile(path.join(workspaceRoot, 'tiny.png'), png);
     const imageResult = await client.callTool({
-      name: 'exec',
-      arguments: {
-        calls: [{
-          tool: 'ccm.view_image',
-          arguments: {
-            workspace_handle: workspaceHandle,
-            path: 'tiny.png',
-          },
-        }],
-        yield_time_ms: 1000,
-      },
+      name: 'view_image', arguments: { workspace_handle: workspaceHandle, path: 'tiny.png' },
     });
     assert.equal(imageResult.isError, undefined);
-    const nestedImage = imageResult.content.find((item) => item.type === 'image');
-    assert.ok(nestedImage);
-    assert.equal(nestedImage.mimeType, 'image/png');
-    assert.equal(
-      Buffer.from(nestedImage.data, 'base64').length,
-      png.length,
-    );
-    assert.equal(
-      imageResult.structuredContent.calls[0].result.content[0].data_omitted,
-      true,
-    );
-
+    const image = imageResult.content.find((item) => item.type === 'image');
+    assert.ok(image);
+    assert.equal(image.mimeType, 'image/png');
+    assert.equal(Buffer.from(image.data, 'base64').length, png.length);
     const docBytes = Buffer.alloc(3 * 1024 * 1024, 0x61);
     await fs.writeFile(path.join(workspaceRoot, 'preview.docx'), docBytes);
     const publishResult = await client.callTool({
@@ -650,62 +376,12 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(planPreview.headers.get('content-type'), /^text\/html/);
     assert.match(await planPreview.text(), /<h1>Delivered plan<\/h1>/);
 
-    registry.register({
-      name: 'late_echo',
-      namespace: 'dynamic',
-      provider: 'mcp-test',
-      provenance: 'mcp-test',
-      surfaces: { deferred: true, codeMode: true },
-      description: 'A capability registered after MCP initialization.',
-      inputSchema: {
-        value: z.string(),
-      },
-      supportsParallel: true,
-      handler: async (args) => ({
-        content: [{ type: 'text', text: args.value }],
-        structuredContent: { value: args.value },
-      }),
-    });
-
-    const listedAfterRegistration = await client.listTools();
-    assert.deepEqual(
-      listedAfterRegistration.tools.map((tool) => tool.name).sort(),
-      names,
-    );
-
-    const searchResult = await client.callTool({
-      name: 'tool_search',
-      arguments: { query: 'late echo' },
-    });
-    assert.equal(searchResult.isError, undefined);
-    assert.equal(
-      searchResult.structuredContent.tools[0].qualified_name,
-      'dynamic.late_echo',
-    );
-
-    const nestedResult = await client.callTool({
-      name: 'exec',
-      arguments: {
-        calls: [{
-          tool: 'dynamic.late_echo',
-          arguments: { value: 'DEFERRED_OK' },
-        }],
-        yield_time_ms: 1000,
-      },
-    });
-    assert.equal(nestedResult.isError, undefined);
-    assert.equal(nestedResult.structuredContent.state, 'completed');
-    assert.equal(
-      nestedResult.structuredContent.calls[0]
-        .result.structured_content.value,
-      'DEFERRED_OK',
-    );
-    assert.equal(Object.hasOwn(nestedResult, 'resultType'), false);
+    const listedAgain = await client.listTools();
+    assert.deepEqual(listedAgain.tools.map((tool) => tool.name).sort(), names);
   } finally {
     await client.close().catch(() => {});
     await worker.close().catch(() => {});
     workerRuntime.close();
-    codeModeManager.close();
     await controller.close();
     await fs.rm(tempRoot, { recursive: true, force: true });
   }

@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { registerCoreTools } from '../src/tools/core-tools.mjs';
-import { registerArchitectureTools } from '../src/tools/architecture-tools.mjs';
 import { ToolRegistry } from '../src/tools/tool-registry.mjs';
 
 function runtimeStub() {
@@ -190,24 +189,26 @@ function runtimeStub() {
 test('core tool surface separates successful workspace handle rendering from approval cards', async () => {
   const registry = registerCoreTools(new ToolRegistry(), runtimeStub());
 
-  const direct = registry.listDirect().map((tool) => tool.name).sort();
+  const direct = registry.list().map((tool) => tool.name).sort();
   assert.deepEqual(direct, [
     'apply_patch',
+    'claim_full_access',
     'create_projectless_handle',
     'exec_command',
     'get_approval_status',
     'get_verification_input_status',
+    'list_projects',
+    'register_workspace',
     'request_approval',
     'request_verification_input',
     'resolve_pending_action',
+    'select_workspace',
     'show_workspace_handle',
     'submit_verification_input',
+    'unregister_workspace',
     'view_image',
     'write_stdin',
   ]);
-  assert.equal(registry.get('claim_full_access').surfaces.direct, false);
-  assert.equal(registry.get('claim_full_access').surfaces.deferred, true);
-  assert.equal(registry.get('claim_full_access').surfaces.codeMode, true);
   assert.deepEqual(
     registry.get('resolve_pending_action').mcpMeta.ui.visibility,
     ['app'],
@@ -223,9 +224,6 @@ test('core tool surface separates successful workspace handle rendering from app
     registry.get('list_projects').description,
     /sandbox_read_scope.*sandbox_write_scope/,
   );
-  assert.equal(registry.get('list_projects').surfaces.direct, false);
-  assert.equal(registry.get('list_projects').surfaces.deferred, true);
-  assert.equal(registry.get('list_projects').surfaces.codeMode, true);
   assert.match(
     registry.get('create_projectless_handle').description,
     /absolute paths outside the projectless root/,
@@ -276,9 +274,6 @@ test('core tool surface separates successful workspace handle rendering from app
     /On full-access success, call show_workspace_handle/i,
   );
   const unregisterTool = registry.get('unregister_workspace');
-  assert.equal(unregisterTool.surfaces.direct, false);
-  assert.equal(unregisterTool.surfaces.deferred, true);
-  assert.equal(unregisterTool.surfaces.codeMode, true);
   assert.match(unregisterTool.description, /Always requires a one-shot CCM approval card/);
   assert.match(
     registry.get('exec_command').description,
@@ -301,30 +296,15 @@ test('core tool surface separates successful workspace handle rendering from app
     /do not select\/register a project merely to inspect images/i,
   );
 
-  for (const name of [
-    'list_projects',
-    'select_workspace',
-    'register_workspace',
-  ]) {
-    const tool = registry.get(name);
-    assert.equal(tool.surfaces.direct, false, name + ' should not be direct');
-    assert.equal(tool.surfaces.deferred, true, name + ' should be deferred');
-    assert.equal(tool.surfaces.codeMode, true, name + ' should support exec');
+  for (const name of ['list_projects', 'select_workspace', 'register_workspace']) {
+    assert.ok(registry.get(name));
   }
   for (const name of ['select_workspace', 'register_workspace']) {
     const tool = registry.get(name);
-    assert.equal(tool.surfaces.direct, false);
-    assert.equal(tool.surfaces.deferred, true);
-    assert.equal(tool.surfaces.codeMode, true);
     assert.equal(tool.mcpMeta?.ui?.resourceUri, undefined, name + ' must not render an empty card before approval');
   }
   const projectlessTool = registry.get('create_projectless_handle');
-  assert.equal(projectlessTool.surfaces.direct, true);
-  assert.equal(projectlessTool.surfaces.deferred, false);
-  assert.equal(projectlessTool.surfaces.codeMode, true);
   const showHandle = registry.get('show_workspace_handle');
-  assert.equal(showHandle.surfaces.direct, true);
-  assert.equal(showHandle.surfaces.codeMode, false);
   assert.equal(showHandle.mcpMeta.ui.resourceUri, 'ui://ccm/workspace-handle-v1.html');
   const displayed = await showHandle.handler({ workspace_handle: '00000000-0000-4000-8000-000000000009' });
   assert.equal(displayed.structuredContent.workspace_kind, 'registered');
@@ -477,201 +457,46 @@ test('core tool surface separates successful workspace handle rendering from app
   );
   assert.equal(workspacePending._meta, undefined);
 
-  const { codeModeManager } = registerArchitectureTools(registry);
-  try {
-    assert.deepEqual(
-      registry.listDirect().map((tool) => tool.name).sort(),
-      [
-        'apply_patch',
-        'create_projectless_handle',
-        'exec',
-        'exec_command',
-        'get_approval_status',
-        'get_verification_input_status',
-        'request_approval',
-        'request_verification_input',
-        'resolve_pending_action',
-        'show_workspace_handle',
-        'submit_verification_input',
-        'tool_search',
-        'view_image',
-        'wait',
-        'write_stdin',
-      ],
-    );
-
-    const search = await registry.get('tool_search').handler({
-      query: 'select_workspace',
-      limit: 5,
-    });
-    assert.ok(
-      search.structuredContent.tools.some(
-        (tool) => tool.qualified_name === 'ccm.select_workspace',
-      ),
-    );
-    const registerSearch = await registry.get('tool_search').handler({
-      query: 'register_workspace',
-      limit: 5,
-    });
-    assert.ok(registerSearch.structuredContent.tools.some(
-      (tool) => tool.qualified_name === 'ccm.register_workspace',
-    ));
-    const grantSearch = await registry.get('tool_search').handler({
-      query: 'claim_full_access',
-      limit: 5,
-    });
-    assert.ok(grantSearch.structuredContent.tools.some(
-      (tool) => tool.qualified_name === 'ccm.claim_full_access' && tool.exposure === 'Deferred',
-    ));
-    const grantClaim = await registry.get('exec').handler({
-      calls: [{ tool: 'ccm.claim_full_access', arguments: {} }],
-    });
-    assert.equal(grantClaim.structuredContent.calls[0].result.structured_content.claimed, false);
-    assert.equal(registry.searchDeferred('create_projectless_handle').length, 0);
-
-    const projectSearch = await registry.get('tool_search').handler({
-      query: 'list projects',
-      limit: 5,
-    });
-    assert.ok(
-      projectSearch.structuredContent.tools.some(
-        (tool) => tool.qualified_name === 'ccm.list_projects',
-      ),
-    );
-
-    const projectless = await registry.get('exec').handler({
-      calls: [{
-        tool: 'ccm.create_projectless_handle',
-        arguments: { environment_id: 'noha' },
-      }],
-      yield_time_ms: 1000,
-    });
-    assert.equal(
-      projectless.structuredContent.calls[0].result.structured_content.environment_id,
-      'noha',
-    );
-
-    const nestedProjects = await registry.get('exec').handler({
-      calls: [{
-        tool: 'list_projects',
-        arguments: { environment_id: 'noha', all: true },
-      }],
-      yield_time_ms: 1000,
-    });
-    const nestedProjectResult =
-      nestedProjects.structuredContent.calls[0].result.structured_content;
-    assert.equal(nestedProjectResult.environments[0].id, 'noha');
-    assert.equal(
-      nestedProjectResult.environments[0].projectless_workspaces[0].projectless_id,
-      'projectless-noha',
-    );
-
-    const select = await registry.get('exec').handler({
-      calls: [{
-        tool: 'ccm.select_workspace',
-        arguments: {
-          environment_id: 'noha',
-          workspace_id: 'project',
-        },
-      }],
-      yield_time_ms: 1000,
-    });
-    const pending = select.structuredContent.calls[0].result.structured_content;
-    assert.equal(pending.approval_required, true);
-    assert.doesNotMatch(pending.justification, /read access/i);
-
-    const register = await registry.get('exec').handler({
-      calls: [{
-        tool: 'ccm.register_workspace',
-        arguments: {
-          environment_id: 'noha',
-          workspace_id: 'new-project',
-          path: 'C:\\work\\new-project',
-          create_if_missing: true,
-        },
-      }],
-      yield_time_ms: 1000,
-    });
-    const registerPending =
-      register.structuredContent.calls[0].result.structured_content;
-    assert.equal(registerPending.approval_required, true);
-    assert.equal(registerPending.create_if_missing, true);
-    assert.match(registerPending.justification, /create, register, and enter/i);
-    assert.match(
-      registerPending.instruction,
-      /remains the user's intended target.*wait for this frozen action to resolve/i,
-    );
-    assert.match(
-      registerPending.instruction,
-      /do not retry the same target.*projectless workspace to bypass it/i,
-    );
-    assert.match(
-      registerPending.instruction,
-      /Changing projects alone does not authorize new entry.*explicit entry\/registration instruction/i,
-    );
-  } finally {
-    codeModeManager.close();
-  }
+  assert.ok(registry.list().some((tool) => tool.name === 'claim_full_access'));
+  assert.equal((await registry.get('claim_full_access').handler({})).structuredContent.claimed, false);
+  const projectless = await registry.get('create_projectless_handle').handler({ environment_id: 'noha' });
+  assert.equal(projectless.structuredContent.environment_id, 'noha');
+  const nohaProjects = await registry.get('list_projects').handler({ environment_id: 'noha', all: true });
+  assert.equal(nohaProjects.structuredContent.environments[0].id, 'noha');
+  assert.equal(nohaProjects.structuredContent.environments[0].projectless_workspaces[0].projectless_id, 'projectless-noha');
+  const select = await registry.get('select_workspace').handler({ environment_id: 'noha', workspace_id: 'project' });
+  assert.equal(select.structuredContent.approval_required, true);
+  const register = await registry.get('register_workspace').handler({
+    environment_id: 'noha', workspace_id: 'new-project',
+    path: 'C:\\work\\new-project', create_if_missing: true,
+  });
+  assert.equal(register.structuredContent.approval_required, true);
+  assert.equal(register.structuredContent.create_if_missing, true);
+  assert.match(register.structuredContent.justification, /create, register, and enter/i);
+  assert.match(register.structuredContent.instruction,
+    /remains the user's intended target.*wait for this frozen action to resolve/i);
 });
 
-test('write_stdin hard-rejects Direct empty polls while preserving nested polling and Direct input', async () => {
+test('write_stdin supports direct empty polling and interactive input', async () => {
   const runtime = runtimeStub();
   const writeCalls = [];
   runtime.processManager.writeStdin = async (args) => {
     writeCalls.push(structuredClone(args));
     return { wall_time_seconds: 0, output: 'continued', exit_code: 0 };
   };
-
   const registry = registerCoreTools(new ToolRegistry(), runtime);
-  const directWriteStdin = registry.get('write_stdin');
-  const workspaceHandle = '00000000-0000-4000-8000-000000000001';
-
-  const omittedChars = await directWriteStdin.handler({
-    session_id: 41,
-    workspace_handle: workspaceHandle,
-  }, { extra: {} });
-  assert.equal(omittedChars.isError, true);
-  assert.match(omittedChars.content[0].text, /Direct empty write_stdin polling is disabled/);
-  assert.match(omittedChars.content[0].text, /CCM did not poll or modify this session/);
-  assert.match(omittedChars.content[0].text, /through exec with a nested ccm\.write_stdin call/);
-  assert.equal(writeCalls.length, 0);
-
-  const explicitEmpty = await directWriteStdin.handler({
-    session_id: 41,
-    workspace_handle: workspaceHandle,
-    chars: '',
-  }, { extra: {} });
-  assert.equal(explicitEmpty.isError, true);
-  assert.equal(writeCalls.length, 0);
-
-  const directInput = await directWriteStdin.handler({
-    session_id: 41,
-    workspace_handle: workspaceHandle,
-    chars: 'y\n',
-  }, { extra: {} });
-  assert.equal(directInput.isError, undefined);
-  assert.equal(directInput.structuredContent.exit_code, 0);
-  assert.equal(writeCalls.length, 1);
-  assert.equal(writeCalls[0].chars, 'y\n');
-
-  const { codeModeManager } = registerArchitectureTools(registry);
-  try {
-    const nestedPoll = await registry.get('exec').handler({
-      calls: [{
-        tool: 'ccm.write_stdin',
-        arguments: {
-          session_id: 41,
-          workspace_handle: workspaceHandle,
-          chars: '',
-        },
-      }],
-      yield_time_ms: 1000,
-    });
-    assert.equal(nestedPoll.isError, undefined);
-    assert.equal(nestedPoll.structuredContent.has_errors, false);
-    assert.equal(writeCalls.length, 2);
-    assert.equal(writeCalls[1].chars, '');
-  } finally {
-    codeModeManager.close();
+  const tool = registry.get('write_stdin');
+  const workspace_handle = '00000000-0000-4000-8000-000000000001';
+  for (const args of [
+    { session_id: 41, workspace_handle },
+    { session_id: 41, workspace_handle, chars: '' },
+    { session_id: 41, workspace_handle, chars: 'y\n' },
+  ]) {
+    const result = await tool.handler(args);
+    assert.equal(result.isError, undefined);
+    assert.equal(result.structuredContent.exit_code, 0);
   }
+  assert.equal(writeCalls.length, 3);
+  assert.equal(writeCalls[1].chars, '');
+  assert.equal(writeCalls[2].chars, 'y\n');
 });

@@ -75,7 +75,7 @@ export function registerPlanTools(registry, runtime) {
   registry.register({
     name: 'plan_patch',
     provider: 'ccm-core',
-    surfaces: { deferred: true, codeMode: true },
+
     tags: ['plan', 'planning', 'patch', 'codex'],
     description: [
       'Create or update one durable CCM Plan using the same Codex-style patch grammar as apply_patch. Omit plan_id to create a new Plan with exactly one `*** Add File: plan.md` hunk; pass plan_id to update that Plan with exactly one `*** Update File: plan.md` hunk. No real filesystem path is accepted.',
@@ -112,7 +112,7 @@ export function registerPlanTools(registry, runtime) {
   registry.register({
     name: 'plan_read',
     provider: 'ccm-core',
-    surfaces: { deferred: true, codeMode: true },
+
     tags: ['plan', 'read', 'search', 'lines'],
     supportsParallel: true,
     description: 'Read only the Plan identified by plan_id. With no range/query, reads a bounded prefix; start_line/end_line reads a bounded 1-based line range; query performs literal case-insensitive substring search within that Plan and returns 1-based match/context line numbers. This is a lifecycle-neutral reference lookup: it does not enter, exit, resume, or re-enter planning behavior and should not interrupt an implementation workflow.',

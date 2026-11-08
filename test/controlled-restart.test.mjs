@@ -109,7 +109,7 @@ test('restart respects identity, live connection, and immediate allowlist edits 
   });
 });
 
-test('restart tool is Deferred, with strict input and no execution arguments', async () => {
+test('restart tool is a top-level peer, with strict input and no execution arguments', async () => {
   await withPolicy(async ({ file }) => {
     const runtime = {
       controlledRestart: new ControlledRestart({
@@ -121,8 +121,7 @@ test('restart tool is Deferred, with strict input and no execution arguments', a
     const registry = new ToolRegistry();
     registerRestartTools(registry, runtime);
     const tool = registry.get('ccm.restart');
-    assert.equal(tool.exposure, 'Deferred');
-    assert.equal(tool.surfaces.direct, false);
+    assert.ok(registry.list().includes(tool));
     assert.deepEqual(Object.keys(tool.inputSchema.shape), ['component', 'environment_id']);
     assert.throws(() => tool.inputSchema.parse({
       component: 'worker', environment_id: 'worker-a', cmd: 'taskkill.exe /F',

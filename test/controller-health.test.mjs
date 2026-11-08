@@ -17,7 +17,7 @@ function fakeRuntime() {
 test('controller health includes local Worker state from health provider', async () => {
   let state = 'connected';
   const controller = createHttpController({
-    toolRegistry: { listDirect: () => [] },
+    toolRegistry: { list: () => [] },
     runtime: fakeRuntime(),
     host: '127.0.0.1',
     port: 0,

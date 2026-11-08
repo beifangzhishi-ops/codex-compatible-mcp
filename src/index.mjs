@@ -82,7 +82,7 @@ if (spawnLocalWorker) {
   }
 }
 
-const { registry: toolRegistry, codeModeManager } = createToolRegistry(runtime);
+const { registry: toolRegistry } = createToolRegistry(runtime);
 const controller = createHttpController({
   toolRegistry,
   runtime,
@@ -113,7 +113,6 @@ async function shutdown() {
   if (stopping) return;
   stopping = true;
   await localWorkerSupervisor?.stop().catch(() => {});
-  codeModeManager.close();
   await controller.close();
   process.exit(0);
 }

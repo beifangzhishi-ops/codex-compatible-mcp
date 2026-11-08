@@ -7,7 +7,6 @@ import { registerSpecializedTools } from '../src/tools/specialized-tools.mjs';
 import { ToolRegistry } from '../src/tools/tool-registry.mjs';
 import { FileTransferStore } from '../src/controller/file-transfer-store.mjs';
 import { PUBLISHED_FILE_UI_URI } from '../src/ui/published-file-app.mjs';
-import { registerArchitectureTools } from '../src/tools/architecture-tools.mjs';
 import { PlanManager } from '../src/controller/plan-manager.mjs';
 
 function fakeRuntime() {
@@ -96,15 +95,12 @@ function fakeRuntime() {
   };
 }
 
-test('publish is Direct + Code Mode and yields an HTTPS URL through direct and exec', async () => {
+test('publish is a peer MCP tool and yields an HTTPS URL', async () => {
   const runtime = fakeRuntime();
   const registry = new ToolRegistry();
   registerSpecializedTools(registry, runtime);
   const publish = registry.get('ccm-extra.publish');
   assert.ok(publish);
-  assert.equal(publish.surfaces.direct, true);
-  assert.equal(publish.surfaces.codeMode, true);
-  assert.equal(publish.surfaces.deferred, false);
   assert.equal(publish.mcpMeta.ui.resourceUri, PUBLISHED_FILE_UI_URI);
   assert.equal(publish.mcpMeta['openai/outputTemplate'], PUBLISHED_FILE_UI_URI);
   assert.match(publish.description, /proactively publish/i);
@@ -120,14 +116,10 @@ test('publish is Direct + Code Mode and yields an HTTPS URL through direct and e
   assert.ok(!direct.content.some((item) => item.type === 'resource_link'));
   const token = direct.structuredContent.download_url.split('/').at(-1);
   assert.equal(runtime.fileTransferStore.get(token).byte_length, 4);
-  registerArchitectureTools(registry);
-  const nested = await registry.get('exec').handler({ calls: [{ tool: 'ccm-extra.publish', arguments: args }] });
-  assert.equal(nested.isError, undefined);
-  assert.equal(nested.structuredContent.state, 'completed');
-  assert.equal(nested.structuredContent.calls[0].result.structured_content.capability, 'publish');
-  assert.ok(!nested.content.some((item) => item.type === 'resource_link'));
-  const parallel = await registry.get('exec').handler({ calls: [{ tool: 'ccm-extra.publish', arguments: args }], parallel: true });
-  assert.equal(parallel.isError, true);
+  const second = await publish.handler(args);
+  assert.equal(second.isError, undefined);
+  assert.equal(second.structuredContent.capability, 'publish');
+  assert.ok(!second.content.some((item) => item.type === 'resource_link'));
   runtime.fileTransferStore.close();
 });
 
@@ -242,21 +234,18 @@ test('publish accepts exclusive Plan or Worker modes, with a complete immutable 
   }
 });
 
-test('receive_file is Deferred + Code Mode and preserves native file objects through exec', async () => {
+test('import_chatgpt_file binds the native file on its own MCP tool', async () => {
   const runtime = fakeRuntime();
   const registry = new ToolRegistry();
   registerSpecializedTools(registry, runtime);
   const receiveFile = registry.get('ccm-extra.import_chatgpt_file');
   assert.ok(receiveFile);
-  assert.equal(receiveFile.surfaces.direct, false);
-  assert.equal(receiveFile.surfaces.deferred, true);
-  assert.equal(receiveFile.surfaces.codeMode, true);
   assert.equal(receiveFile.supportsParallel, false);
   assert.match(receiveFile.description, /Import exactly one ChatGPT file/i);
   assert.match(receiveFile.description, /sequential/i);
   assert.match(receiveFile.description, /multiple imports must be sequential/i);
-  assert.match(receiveFile.description, /ordinary conversation attachment.*top-level file/i);
-  assert.match(receiveFile.description, /Library file.*materialize.*raw_file.*top-level exec\.file/i);
+  assert.match(receiveFile.description, /ordinary conversation attachment.*file parameter/i);
+  assert.match(receiveFile.description, /Library file.*materialize.*raw_file.*file parameter/i);
 
   const input = {
     download_url: 'https://files.example.test/download',
@@ -281,76 +270,13 @@ test('receive_file is Deferred + Code Mode and preserves native file objects thr
     },
   });
 
-  registerArchitectureTools(registry);
-  const execTool = registry.get('exec');
-  assert.deepEqual(execTool.mcpMeta['openai/fileParams'], ['file']);
-  const nested = await registry.get('exec').handler({
-    calls: [{
-      tool: 'ccm-extra.import_chatgpt_file',
-      arguments: {
-        workspace_handle: '00000000-0000-4000-8000-000000000001',
-        file: input,
-        destination: 'nested-incoming.txt',
-      },
-    }],
+  assert.deepEqual(receiveFile.mcpMeta['openai/fileParams'], ['file']);
+  const second = await receiveFile.handler({
+    workspace_handle: '00000000-0000-4000-8000-000000000001',
+    file: input, destination: 'second-incoming.txt',
   });
-  assert.equal(nested.isError, undefined);
-  assert.equal(nested.structuredContent.state, 'completed');
-  assert.deepEqual(runtime.calls.at(-1), {
-    receiveFile: {
-      workspace_handle: '00000000-0000-4000-8000-000000000001',
-      file: input,
-      destination: 'nested-incoming.txt',
-      overwrite: false,
-    },
-  });
-
-  const bridged = await registry.get('exec').handler({
-    file: input,
-    calls: [{
-      tool: 'ccm-extra.import_chatgpt_file',
-      arguments: {
-        workspace_handle: '00000000-0000-4000-8000-000000000001',
-        destination: 'bridged-incoming.txt',
-      },
-    }],
-  });
-  assert.equal(bridged.isError, undefined);
-  assert.equal(bridged.structuredContent.state, 'completed');
-  assert.deepEqual(runtime.calls.at(-1), {
-    receiveFile: {
-      workspace_handle: '00000000-0000-4000-8000-000000000001',
-      file: input,
-      destination: 'bridged-incoming.txt',
-      overwrite: false,
-    },
-  });
-
-  const duplicateFile = await registry.get('exec').handler({
-    file: input,
-    calls: [{
-      tool: 'ccm-extra.import_chatgpt_file',
-      arguments: {
-        workspace_handle: '00000000-0000-4000-8000-000000000001',
-        file: input,
-      },
-    }],
-  });
-  assert.equal(duplicateFile.isError, true);
-  assert.match(duplicateFile.content[0].text, /cannot be combined/i);
-
-  const rejectedParallel = await registry.get('exec').handler({
-    calls: [{
-      tool: 'ccm-extra.import_chatgpt_file',
-      arguments: {
-        workspace_handle: '00000000-0000-4000-8000-000000000001',
-        file: input,
-      },
-    }],
-    parallel: true,
-  });
-  assert.equal(rejectedParallel.isError, true);
-  assert.match(rejectedParallel.content[0].text, /parallel-call support/i);
+  assert.equal(second.isError, undefined);
+  assert.equal(runtime.calls.at(-1).receiveFile.destination, 'second-incoming.txt');
 });
 
 
@@ -367,9 +293,6 @@ test('conversation tool advertises unified import and read actions', async () =>
   registerSpecializedTools(registry, runtime);
   const tool = registry.get('ccm-extra.conversation');
   assert.ok(tool);
-  assert.equal(tool.surfaces.direct, false);
-  assert.equal(tool.surfaces.deferred, true);
-  assert.equal(tool.surfaces.codeMode, true);
   assert.match(tool.description, /Do not use web search/);
   const result = await tool.handler({
     action: 'import', share_url: 'https://chatgpt.com/share/test-id', environment_id: 'worker-a',
@@ -400,15 +323,12 @@ test('conversation capability guard does not invoke an old Worker or trigger qua
   assert.match(result.content[0].text, /does not support conversation/);
 });
 
-test('quark_upload is Deferred + Code Mode and advertises deferred routing', () => {
+test('quark_upload is a peer MCP tool', () => {
   const registry = new ToolRegistry();
   registerSpecializedTools(registry, fakeRuntime());
   const quarkUpload = registry.get('ccm-extra.quark_upload');
   assert.ok(quarkUpload);
-  assert.equal(quarkUpload.surfaces.direct, false);
-  assert.equal(quarkUpload.surfaces.deferred, true);
-  assert.equal(quarkUpload.surfaces.codeMode, true);
-  assert.match(quarkUpload.description, /discover this capability through tool_search and invoke it through exec/i);
+  assert.match(quarkUpload.description, /call this tool directly/i);
 });
 
 test('conversation handles Codex Share and local UUID without workspace registration', async () => {
@@ -430,7 +350,7 @@ test('conversation handles Codex Share and local UUID without workspace registra
   assert.equal(runtime.calls[0].method, 'conversation');
 });
 
-test('Bilibili deferred tool consumes only a local bridge handoff on 6v without exposing signed URLs', async () => {
+test('Bilibili tool consumes only a local bridge handoff on 6v without exposing signed URLs', async () => {
   const runtime = fakeRuntime();
   const registry = new ToolRegistry();
   registerSpecializedTools(registry, runtime);

@@ -188,7 +188,7 @@ export function registerSpecializedTools(registry, runtime) {
       name,
       provider: 'ccm-specialized',
       provenance: 'ccm-workerhub-file-transfer',
-      surfaces: { deferred: true, codeMode: true },
+
       tags: ['file', 'transfer', 'workerhub'],
       supportsParallel: false,
       description,
@@ -211,7 +211,7 @@ export function registerSpecializedTools(registry, runtime) {
     name: 'publish',
     provider: 'ccm-specialized',
     provenance: 'ccm-https-file-publishing',
-    surfaces: { direct: true, codeMode: true },
+
     tags: ['file', 'attachment', 'transfer', 'gpt'],
     mcpMeta: {
       ui: { resourceUri: PUBLISHED_FILE_UI_URI },
@@ -262,9 +262,10 @@ export function registerSpecializedTools(registry, runtime) {
   registry.register({
     namespace: 'ccm-extra',
     name: 'import_chatgpt_file',
+    mcpMeta: { 'openai/fileParams': ['file'] },
     provider: 'ccm-specialized',
     provenance: 'ccm-native-file-transfer',
-    surfaces: { deferred: true, codeMode: true },
+
     tags: ['file', 'attachment', 'transfer', 'gpt', 'receive'],
     environmentRequirements: {
       capabilities: ['receiveFile'],
@@ -272,9 +273,9 @@ export function registerSpecializedTools(registry, runtime) {
     supportsParallel: false,
     description: [
       'Import exactly one ChatGPT file into the Worker selected by workspace_handle; multiple imports must be sequential.',
-      'For an ordinary conversation attachment, bind it through exec\'s top-level file parameter, then call ccm-extra.import_chatgpt_file once; exec injects the resolved native file object into this nested call.',
-      'For a ChatGPT Library file, first materialize the exact Library object as raw_file with ChatGPT Files, then bind that materialized file through top-level exec.file and call ccm-extra.import_chatgpt_file once.',
-      'Do not pass a Library/file ID, ref, or URI as nested arguments.file.',
+      'For an ordinary conversation attachment, bind the native file directly to the file parameter.',
+      'For a ChatGPT Library file, materialize it as raw_file with ChatGPT Files, then bind the native file directly to the file parameter.',
+      'Do not pass a Library/file ID, ref, or URI in place of the native file object.',
       'workspace_handle is required and determines the Worker and context root. Imports write only inside that root. destination must be relative; absolute paths and workspace escapes are rejected.',
       'If destination is omitted, the sanitized ChatGPT file_name is used at the context root. Existing files are not replaced unless overwrite=true.',
       'The Worker downloads the temporary ChatGPT URL directly; CCM does not route the file bytes through BMG or the Controller file-transfer cache.',
@@ -318,7 +319,7 @@ export function registerSpecializedTools(registry, runtime) {
     name: 'conversation',
     provider: 'ccm-specialized',
     provenance: 'ccm-conversation-reader',
-    surfaces: { deferred: true, codeMode: true },
+
     tags: ['chatgpt', 'codex', 'conversation', 'thread', 'share', 'import', 'read', 'export'],
     environmentRequirements: { capabilities: ['exec'] },
     supportsParallel: true,
@@ -373,7 +374,7 @@ export function registerSpecializedTools(registry, runtime) {
     name: 'gmail',
     provider: 'ccm-specialized',
     provenance: 'google-gmail-api',
-    surfaces: { deferred: true, codeMode: true },
+
     tags: ['gmail', 'google', 'email', 'mail', 'search', 'read', 'oauth'],
     environmentRequirements: {
       platform: 'windows',
@@ -427,7 +428,7 @@ export function registerSpecializedTools(registry, runtime) {
     name: 'quark_upload',
     provider: 'ccm-specialized',
     provenance: 'ported-from-wcm/tools/quark-transfer',
-    surfaces: { deferred: true, codeMode: true },
+
     tags: ['quark', 'cloud', 'upload', 'transfer', 'windows'],
     environmentRequirements: {
       platform: 'windows',
@@ -436,9 +437,9 @@ export function registerSpecializedTools(registry, runtime) {
     },
     description: [
       'Upload one or more files through the logged-in Quark Cloud Drive desktop client on the selected Windows Remote Worker.',
-      'When the user asks to upload known local files to Quark Cloud Drive, discover this capability through tool_search and invoke it through exec after resolving the intended local paths.',
+      'When the user asks to upload known local files to Quark Cloud Drive, call this tool directly after resolving the intended local paths.',
       'The bundled WCM-derived helper uses Quark Desktop local APIs and its in-memory WSG/account mapping. It does not print or persist account secrets.',
-      'By default it waits until every upload reports completion, 100% progress, and matching local/remote sizes. Long uploads may return a live session; poll that session through exec with nested ccm.write_stdin, reusing the returned workspace_handle and session_id.',
+      'By default it waits until every upload reports completion, 100% progress, and matching local/remote sizes. Long uploads may return a live session; poll that session with write_stdin, reusing the returned workspace_handle and session_id.',
       'Current implementation accepts files only, not directories.',
     ].join('\n\n'),
     inputSchema: {
@@ -495,7 +496,7 @@ export function registerSpecializedTools(registry, runtime) {
     name: 'bilibili_download_dash',
     provider: 'ccm-specialized',
     provenance: 'ccm-bilibili-bmgctl-dash',
-    surfaces: { deferred: true, codeMode: true },
+
     tags: [
       'bilibili',
       'video',
@@ -516,7 +517,7 @@ export function registerSpecializedTools(registry, runtime) {
       'Before downloading, the tool automatically pauses and verifies playback in the supplied browser_tab_id through BMGCTL; if that fails, the download does not start.',
       'BRIDGE IS REQUIRED: BMGCTL redacts signed DASH URLs. For an existing 6v projectless workspace_handle, start tools/bilibili-download/bridge.py via CCM exec_command with the SAME handle and --projectless-handoff. The Bridge writes .bilibili-dash-urls.json in that projectless workspace. Call this tool with workspace_handle and an output_path MP4 filename: the Python downloader reads and deletes that file from the same workspace, without a new handle. If no existing handle is used, the shared Bridge mode still writes to ignored .cache/bilibili-download/dash_urls.json under CCM install root, and this download tool creates its own projectless handle. Never mix these two handoff modes.',
       'In the BMGCTL logged-in Bilibili tab use chrome_javascript to POST JSON {video_url,audio_url,expected_height} from actual selected DASH representations directly to http://127.0.0.1:8765/dash. Use fetch with method POST, mode no-cors, and Content-Type text/plain (JSON-encoded body): this is required because the browser blocks CORS requests to the loopback Bridge. The browser response is opaque and cannot reveal HTTP status. Require the Bridge process to exit with BRIDGE_RECEIVED (it only reports this after accepting JSON and returning HTTP 204); do not count an opaque browser response alone as success. Never print signed URLs in tool results. The one-shot Bridge transfers only to a local file; the Worker consumes and deletes that file, downloads via curl.exe, remuxes with ffmpeg -c copy, and checks ffprobe video height and audio presence. Do not call before Bridge success. Never export cookies, SESSDATA, or credentials. Follow Bilibili account permissions.',
-      'Long downloads may return a live session; poll through exec with nested ccm.write_stdin, reusing workspace_handle and session_id.',
+      'Long downloads may return a live session; poll with write_stdin, reusing workspace_handle and session_id.',
     ].join('\n\n'),
     inputSchema: {
       output_path: z.string().regex(/^[^\\/:*?"<>|]+\.mp4$/i).describe(

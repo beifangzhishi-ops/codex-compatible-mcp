@@ -853,14 +853,14 @@ test('Tailscale with an untrusted segment returns the config hint when its pipe 
     });
     assert.equal(denied.exit_code, 0);
     assert.match(denied.output, /failed to connect to local tailscaled/);
-    assert.match(denied.output, /config\/trusted-commands\.json/);
+    assert.match(denied.output, /ccm\.config\.json trusted_commands/);
     assert.doesNotMatch(denied.output, /separate calls/);
 
     const unrelated = await manager.execCommand({
       workspace_handle: '00000000-0000-4000-8000-000000000001',
       cmd: 'Write-Output something',
     });
-    assert.doesNotMatch(unrelated.output, /config\/trusted-commands\.json/);
+    assert.doesNotMatch(unrelated.output, /ccm\.config\.json trusted_commands/);
   } finally {
     await manager.close();
   }
@@ -893,7 +893,7 @@ test('Tailscale denial during write_stdin polling also includes the config hint'
       chars: '',
     });
     assert.equal(finished.exit_code, 0);
-    assert.match(finished.output, /config\/trusted-commands\.json/);
+    assert.match(finished.output, /ccm\.config\.json trusted_commands/);
   } finally {
     await manager.close();
   }

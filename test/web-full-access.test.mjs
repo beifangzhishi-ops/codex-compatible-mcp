@@ -61,7 +61,7 @@ test('unclaimed pending grant expires in five minutes and can be replaced', () =
   assert.throws(() => grants.authorize('00000000-0000-4000-8000-000000000000'), /unknown/);
 });
 
-test('deferred fallback tool yields the already-active browser grant exactly once', async () => {
+test('claim_full_access peer tool yields the already-active browser grant exactly once', async () => {
   const grants = new WebFullAccess();
   const issued = grants.issue(1800);
   const registry = registerCoreTools(new ToolRegistry(), { webFullAccess: grants });

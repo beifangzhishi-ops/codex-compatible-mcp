@@ -398,7 +398,7 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'claim_full_access',
     provider: 'ccm-core',
-    surfaces: { deferred: true, codeMode: true },
+
     tags: ['approval', 'full-access', 'unlock'],
     description: 'Fallback only when the owner has unlocked CCM but has not provided a usable full_access_grant_id (for example, ChatGPT blocked the copied message). Claim the pending web grant, or recover the SAME already-claimed ID once after browser copy, within the original five-minute claim window or earlier grant expiry. No arguments. Do not call if the user supplied an already-claimed ID. Use the returned full_access_grant_id explicitly in privileged tools; claiming or recovery never extends expiry or changes Worker configuration.',
     inputSchema: {},
@@ -413,7 +413,7 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'request_verification_input',
     provider: 'ccm-core',
-    surfaces: { direct: true },
+
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     mcpMeta: {
       ui: { resourceUri: VERIFICATION_INPUT_UI_URI, visibility: ['model', 'app'] },
@@ -455,7 +455,7 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'get_verification_input_status',
     provider: 'ccm-core',
-    surfaces: { direct: true },
+
     mcpMeta: { ui: { visibility: ['app'] }, 'openai/widgetAccessible': true },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     tags: ['verification', 'status', 'app-only'],
@@ -475,7 +475,7 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'submit_verification_input',
     provider: 'ccm-core',
-    surfaces: { direct: true },
+
     mcpMeta: { ui: { visibility: ['app'] }, 'openai/widgetAccessible': true },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     tags: ['verification', 'input', 'app-only'],
@@ -500,12 +500,12 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'list_projects',
     provider: 'ccm-core',
-    surfaces: { deferred: true, codeMode: true },
+
     tags: ['project', 'environment', 'worker', 'capabilities'],
     supportsParallel: true,
     description: [
       'List connected CCM environments and their registered projects without entering a project.',
-      'Discover this capability through tool_search and invoke it through exec.',
+      'Call this tool directly.',
       'With no environment_id, returns every connected environment. Pass environment_id to restrict discovery to one environment.',
       'Registered projects are returned by default. Set all=true only when existing projectless workspaces also need to be inspected.',
       'Discovery is isolated per environment: an abnormal or stale Worker is reported on that environment without blocking healthy Workers. Explicit environment_id calls remain strict.',
@@ -590,7 +590,7 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'create_projectless_handle',
     provider: 'ccm-core',
-    surfaces: { direct: true, codeMode: true },
+
     tags: ['workspace', 'projectless', 'context', 'environment'],
     supportsParallel: true,
     description: [
@@ -618,7 +618,7 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'select_workspace',
     provider: 'ccm-core',
-    surfaces: { deferred: true, codeMode: true },
+
     tags: ['workspace', 'project', 'approval'],
     description: [
       'Enter one registered workspace. Full-access environments return the workspace_handle directly; restricted environments return a frozen approval request.',
@@ -685,7 +685,7 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'register_workspace',
     provider: 'ccm-core',
-    surfaces: { deferred: true, codeMode: true },
+
     tags: ['workspace', 'project', 'approval', 'register'],
     description: [
       'Register and enter one exact project directory. Full-access environments return the workspace_handle directly; restricted environments return a frozen approval request.',
@@ -759,7 +759,7 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'show_workspace_handle',
     provider: 'ccm-core',
-    surfaces: { direct: true },
+
     mcpMeta: {
       ui: { resourceUri: WORKSPACE_HANDLE_UI_URI },
       'openai/outputTemplate': WORKSPACE_HANDLE_UI_URI,
@@ -789,12 +789,12 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'unregister_workspace',
     provider: 'ccm-core',
-    surfaces: { deferred: true, codeMode: true },
+
     tags: ['workspace', 'project', 'approval', 'unregister'],
     description: [
       'Remove exactly one registered workspace from a Worker, without deleting its directory or files.',
       'Always requires a one-shot CCM approval card, even in full-access environments. No Always allow policy is available.',
-      'Discover through tool_search and invoke through exec. If approval_required=true, pass its approval_id to the top-level request_approval tool and wait for the card decision; never manually retry or bypass it.',
+      'Call directly. If approval_required=true, pass its approval_id to request_approval and wait for the card decision; never manually retry or bypass it.',
       'Approval freezes the environment, workspace id, root, and registration identity. Previously issued workspace_handle handles for that registration are revoked. Existing running processes are not forcibly terminated.',
       'Only registered workspaces may be unregistered. Projectless workspaces are not registration entries. The project directory may already be missing; it is not needed for deregistration.',
     ].join('\n\n'),
@@ -840,13 +840,13 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'exec_command',
     provider: 'ccm-core',
-    surfaces: { direct: true, codeMode: true },
+
     tags: ['shell', 'process', 'terminal', 'command'],
     environmentRequirements: { capabilities: ['exec'] },
     supportsParallel: true,
     description: [
       'Runs a command using plain pipes by default; set tty=true to allocate a PTY. Returns output or a session ID for ongoing interaction.',
-      'When the owner has clicked the CCM webpage copy button and the page returned to locked state, use the provided claimed full_access_grant_id directly for timed Full Access. If no ID was provided (for example the message was blocked), use deferred ccm.claim_full_access through tool_search -> exec to claim the pending grant or recover the same already-claimed ID once within the original five-minute claim window. The fallback never extends expiry. Include full_access_grant_id in each privileged command. This bypasses the sandbox for that dispatch on any Worker until expiration, without permanent shell rules or Worker configuration changes. Missing grants follow existing sandbox/approval behavior; unclaimed, unknown or expired grants fail closed.',
+      'When the owner has clicked the CCM webpage copy button and the page returned to locked state, use the provided claimed full_access_grant_id directly for timed Full Access. If no ID was provided (for example the message was blocked), call claim_full_access directly to claim the pending grant or recover the same already-claimed ID once within the original five-minute claim window. The fallback never extends expiry. Include full_access_grant_id in each privileged command. This bypasses the sandbox for that dispatch on any Worker until expiration, without permanent shell rules or Worker configuration changes. Missing grants follow existing sandbox/approval behavior; unclaimed, unknown or expired grants fail closed.',
       'workspace_handle is required and determines the Worker, cwd/session ownership, and restricted-write root. It does not narrow filesystem reads below the environment\'s sandbox_read_scope. Do not pass or infer a separate environment for this command.',
       'Reuse a supplied workspace_handle directly. Without one, create_projectless_handle may support projectless work and permitted absolute-path reads; do not select/register merely to inspect a project. For registered-project writes without a handle, ask the user for a handle or explicit entry instruction. Never bypass a pending explicit workspace approval.',
       'Built-in command trust comes from ccm.config.json trusted_commands and is reloaded for every exec_command. Supported compound commands are matched one segment at a time; only fully trusted commands execute without approval. Unrecognized syntax falls back to the normal sandbox or escalation path.',
@@ -890,7 +890,7 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'request_approval',
     provider: 'ccm-core',
-    surfaces: { direct: true },
+
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
@@ -940,7 +940,7 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'get_approval_status',
     provider: 'ccm-core',
-    surfaces: { direct: true },
+
     mcpMeta: { ui: { visibility: ['app'] }, 'openai/widgetAccessible': true },
     tags: ['approval', 'status', 'app-only'],
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
@@ -964,7 +964,7 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'resolve_pending_action',
     provider: 'ccm-core',
-    surfaces: { direct: true },
+
     annotations: {
       readOnlyHint: false,
       destructiveHint: true,
@@ -1024,7 +1024,7 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'write_stdin',
     provider: 'ccm-core',
-    surfaces: { direct: true, codeMode: true },
+
     tags: ['process', 'terminal', 'session', 'stdin'],
     description: [
       'Writes characters to an existing unified exec session and returns recent output.',
@@ -1038,20 +1038,8 @@ export function registerCoreTools(registry, runtime) {
       max_output_tokens: z.number().int().positive().optional().describe('Output token budget. Defaults to 10000 tokens.'),
     },
     outputSchema: UNIFIED_EXEC_OUTPUT_SCHEMA,
-    handler: async (args, context) => {
+    handler: async (args) => {
       try {
-        const nestedCodeMode =
-          context?.source === 'code_mode' && context?.nested === true;
-        const emptyPoll = (args.chars ?? '').length === 0;
-        if (emptyPoll && !nestedCodeMode) {
-          return toolError(new Error([
-            'Direct empty write_stdin polling is disabled.',
-            'CCM did not poll or modify this session.',
-            'Poll the existing session through exec with a nested ccm.write_stdin call, reusing the exact workspace_handle and session_id.',
-            'Do not create a replacement session or retry the empty poll through top-level write_stdin.',
-            'Top-level write_stdin remains available for real non-empty interactive/TTY stdin writes.',
-          ].join(' ')));
-        }
         return execResult(await runtime.processManager.writeStdin(args));
       } catch (error) {
         return toolError(error);
@@ -1062,12 +1050,12 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'apply_patch',
     provider: 'ccm-core',
-    surfaces: { direct: true, codeMode: true },
+
     tags: ['edit', 'patch', 'filesystem'],
     environmentRequirements: { capabilities: ['applyPatch'] },
     description: [
       'Apply a Codex-style Begin/End Patch inside an existing workspace_handle.',
-      'For timed Full Access, pass the full_access_grant_id supplied by the owner from the CCM unlock webpage, or returned by the fallback deferred ccm.claim_full_access. Otherwise the original Worker write boundary remains in force.',
+      'For timed Full Access, pass the full_access_grant_id supplied by the owner from the CCM unlock webpage, or returned by claim_full_access. Otherwise the original Worker write boundary remains in force.',
       'Reuse the existing workspace_handle. For genuinely projectless edits, use create_projectless_handle; for registered-project edits without a handle, request the handle or an explicit workspace-entry instruction. Never select/register implicitly or bypass pending approval.',
     ].join('\n\n'),
     inputSchema: {
@@ -1091,7 +1079,7 @@ export function registerCoreTools(registry, runtime) {
   registry.register({
     name: 'view_image',
     provider: 'ccm-core',
-    surfaces: { direct: true, codeMode: true },
+
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
@@ -1103,7 +1091,7 @@ export function registerCoreTools(registry, runtime) {
     description: [
       'Read a local image and return bounded MCP image content. When the output byte budget is exceeded, the Worker first tries full-resolution low-loss WebP (quality 95/90/85), then progressively reduces dimensions if necessary to fit the budget. The source file is never modified. Source files are limited to 64 MiB.',
       'Reuse the existing workspace_handle. For genuinely projectless image reads, use create_projectless_handle; do not select/register a project merely to inspect images, or bypass a pending explicit entry approval.',
-      'This direct tool is also available through exec for nested or batched image calls.',
+      'For multiple images, the Host may call this tool repeatedly.',
     ].join(' '),
     inputSchema: {
       path: z.string().min(1).describe('Image path relative to the selected context root.'),

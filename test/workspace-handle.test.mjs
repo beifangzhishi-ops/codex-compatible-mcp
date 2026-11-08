@@ -307,7 +307,6 @@ test('full-access Controller enters registered workspaces without approval', asy
     projectlessRoot,
   });
   let client = null;
-  let codeModeManager = null;
 
   await controller.start();
   try {
@@ -351,7 +350,6 @@ test('full-access Controller enters registered workspaces without approval', asy
     );
 
     const tools = createToolRegistry(controller);
-    codeModeManager = tools.codeModeManager;
     const elevated = await tools.registry.get('exec_command').handler({
       workspace_handle: first.workspace_handle,
       cmd: 'Write-Output FULL_ACCESS_ESCALATED',
@@ -438,21 +436,13 @@ test('full-access Controller enters registered workspaces without approval', asy
     assert.equal((await fs.stat(newRoot)).isDirectory(), true);
     assert.equal(worker.workspaceRegistry.listRegistered().length, 2);
 
-    const nestedSelect = await tools.registry.get('exec').handler({
-      calls: [{
-        tool: 'ccm.select_workspace',
-        arguments: {
-          environment_id: 'workspace-worker',
-          workspace_id: seeded.workspace_id,
-        },
-      }],
-      yield_time_ms: 1000,
+    const peerSelect = await tools.registry.get('select_workspace').handler({
+      environment_id: 'workspace-worker',
+      workspace_id: seeded.workspace_id,
     });
-    const nestedSelected =
-      nestedSelect.structuredContent.calls[0].result.structured_content;
-    assert.equal(nestedSelected.workspace_kind, 'registered');
-    assert.equal(Object.hasOwn(nestedSelected, 'approval_required'), false);
-    assert.equal(Object.hasOwn(nestedSelected, 'approval_id'), false);
+    assert.equal(peerSelect.structuredContent.workspace_kind, 'registered');
+    assert.equal(Object.hasOwn(peerSelect.structuredContent, 'approval_required'), false);
+    assert.equal(Object.hasOwn(peerSelect.structuredContent, 'approval_id'), false);
 
     const oldContext = selected.structuredContent.workspace_handle;
     const oldProjectlessContext = first.workspace_handle;
@@ -610,7 +600,6 @@ test('full-access Controller enters registered workspaces without approval', asy
     assert.equal(worker.workspaceRegistry.listRegistered().some(
       (workspace) => workspace.workspace_id === 'gone-project'), false);
   } finally {
-    codeModeManager?.close();
     await client?.close().catch(() => {});
     worker.close();
     await controller.close();
