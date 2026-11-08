@@ -124,10 +124,11 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const listed = await client.listTools();
     const names = listed.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, registry.list().map((tool) => tool.name).sort());
-    assert.equal(names.length, 27);
+    assert.equal(names.length, 31);
     for (const name of ['list_projects','claim_full_access','select_workspace','register_workspace','unregister_workspace',
       'plan_patch','plan_read','restart','import_chatgpt_file','conversation','quark_upload',
-      'transfer_path','transfer_status','transfer_cancel']) {
+      'transfer_path','transfer_status','transfer_cancel',
+      'qq','wechat','transcribe','sjtu_mail']) {
       assert.ok(names.includes(name), name + ' must be a top-level MCP tool');
     }
     const commandTool = listed.tools.find((tool) => tool.name === 'exec_command');

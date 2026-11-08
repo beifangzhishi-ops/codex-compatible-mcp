@@ -157,7 +157,7 @@ persisted plan     -> may outlive MCP session lifetime
 When adding stateful features, choose an identity according to the feature's real lifecycle. Do not key durable intent solely by `Mcp-Session-Id` merely because it is convenient at the transport layer.
 
 ## MCP tools
-All 30 registered tools are equal peers in MCP `tools/list`. The Host controls discovery, selection, ordering, and parallel invocation. The public MCP wire names omit the namespace; the table below uses the qualified names for clarity. All can be invoked directly without a CCM discovery/dispatch wrapper.
+All 31 registered tools are equal peers in MCP `tools/list`. The Host controls discovery, selection, ordering, and parallel invocation. The public MCP wire names omit the namespace; the table below uses the qualified names for clarity. All can be invoked directly without a CCM discovery/dispatch wrapper.
 
 | Function | Tools |
 | --- | --- |
@@ -167,11 +167,28 @@ All 30 registered tools are equal peers in MCP `tools/list`. The Host controls d
 | Verification | `ccm.request_verification_input`, `ccm.get_verification_input_status`, `ccm.submit_verification_input` |
 | Plans and restarts | `ccm.plan_patch`, `ccm.plan_read`, `ccm.restart` |
 | File transfer and publishing | `ccm-extra.transfer_path`, `ccm-extra.transfer_status`, `ccm-extra.transfer_cancel`, `ccm-extra.publish`, `ccm-extra.import_chatgpt_file` |
-| External workflows | `ccm-extra.conversation`, `ccm-extra.quark_upload`, `ccm-extra.bilibili_download_dash` |
+| External workflows | `ccm-extra.conversation`, `ccm-extra.quark_upload`, `ccm-extra.bilibili_download_dash`, `ccm-extra.qq`, `ccm-extra.wechat`, `ccm-extra.transcribe`, `ccm-extra.sjtu_mail` |
 
 The approval-status/resolution and verification-status/submission bridges are registered in the same MCP list but marked `ui.visibility=["app"]`, so only their corresponding MCP Apps should invoke them. `request_approval` and `request_verification_input` are model-callable tools that present those Apps. The tools themselves retain their original authorization, argument validation and file-safety contracts.
 
 Ordinary repository inspection, search, Git, builds, tests, and diagnostics should use `exec_command`.
+
+### Local CLI passthrough (QQ, WeChat, transcription, SJTU email)
+
+Four dedicated top-level tools expose the local application CLIs without asking the model to construct PowerShell:
+
+| MCP tool | Target | Arguments and routing |
+| --- | --- | --- |
+| `qq` | 6v `C:\\Users\\Songjx\\Documents\\ChatGPT\\QQBridge\\qq.exe` | `args: ["recent", "count=10"]`, or any documented QQBridge CLI tokens |
+| `wechat` | 6v `C:\\Users\\Songjx\\Documents\\ChatGPT\\WXBridge\\WXBridge.exe` | `args: ["chats"]` or `["messages", "--chat", "name"]`; read-only Bridge |
+| `sjtu_mail` | 6v `C:\\Users\\Songjx\\AppData\\Local\\Programs\\himalaya\\himalaya.exe` | `args: ["envelope", "list"]`; no Gmail proxy/fallback |
+| `transcribe` | Windows Worker Python 3.9 Faster Whisper | `args: ["D:\\\\audio.wav", "--language", "ja"]`; 6v default, `environment_id` may select another installed Worker |
+
+`transcribe` uses only a minimal bundled command-line entry (`tools/faster-whisper/transcribe.py`), defaults to the `large-v3-turbo` model, and writes JSON segments with `start`, `end`, and `text` to stdout. The caller provides an existing local audio file; neither the tool nor this shim downloads media. Normal Python/Faster Whisper traceback text remains on stderr.
+
+Each integration pins its executable: the model passes an **array of argument tokens**, not a shell command, executable path or script. The Worker starts that process with `shell=false`, captures its stdout and stderr without parsing, and returns them as separate MCP text blocks plus the original exit code in structured content. Nonzero exits are errors; if the executable (or the transcription entry file) is absent, the result is exactly `不存在`. The Worker does not retry sends or mutate the output. There is a 20 MiB aggregate capture limit and caller-controlled timeout; larger MCP responses are additionally subject to the Controller/Host result-size limits.
+
+These are explicit, owner-authorized application adapters: **they use Worker-side subprocess execution rather than the `exec_command` workspace sandbox and approval flow**. They accept only the fixed programs above, strip `CCM_*` bootstrap environment variables, and do not permit an arbitrary executable. The three messaging/mail adapters are routed to 6v only; the transcription adapter needs Python 3.9 with `faster_whisper` installed on the selected Windows Worker. Refresh ChatGPT's tool list after deploying these new MCP peers. A disconnected Worker cannot be validated or used until it reconnects.
 
 ### Verification input card
 
