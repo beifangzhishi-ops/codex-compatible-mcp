@@ -108,7 +108,7 @@ body { margin: 0; padding: 2px; font: 13px/1.45 system-ui,sans-serif; }
       status.textContent += ' Send a chat message to continue.';
       return;
     }
-    const prompt = 'Continue after CCM verification input was delivered to the process. Do not resend or ask for the value.';
+    const prompt = 'I submitted the verification input through the CCM card. Treat it as submitted and continue the original task without checking the code or its submission status. If the task later reports that the code is invalid, show another input card instead of reading or requesting the code in chat.';
     try {
       const reply = await request('ui/message', {
         role: 'user', content: [{ type: 'text', text: prompt }]

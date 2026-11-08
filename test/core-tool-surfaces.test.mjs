@@ -186,7 +186,7 @@ function runtimeStub() {
   };
 }
 
-test('core tool surface separates successful workspace handle rendering from approval cards', async () => {
+test('core tool surface returns workspace handles while retaining approval cards', async () => {
   const registry = registerCoreTools(new ToolRegistry(), runtimeStub());
 
   const direct = registry.list().map((tool) => tool.name).sort();
@@ -203,7 +203,6 @@ test('core tool surface separates successful workspace handle rendering from app
     'request_verification_input',
     'resolve_pending_action',
     'select_workspace',
-    'show_workspace_handle',
     'submit_verification_input',
     'unregister_workspace',
     'view_image',
@@ -250,7 +249,7 @@ test('core tool surface separates successful workspace handle rendering from app
   );
   assert.match(
     registry.get('select_workspace').description,
-    /On full-access success, call show_workspace_handle/i,
+    /On full-access success, return the workspace_handle/i,
   );
   assert.match(
     registry.get('register_workspace').description,
@@ -271,7 +270,7 @@ test('core tool surface separates successful workspace handle rendering from app
   );
   assert.match(
     registry.get('register_workspace').description,
-    /On full-access success, call show_workspace_handle/i,
+    /On full-access success, return the workspace_handle/i,
   );
   const unregisterTool = registry.get('unregister_workspace');
   assert.match(unregisterTool.description, /Always requires a one-shot CCM approval card/);
@@ -303,13 +302,8 @@ test('core tool surface separates successful workspace handle rendering from app
     const tool = registry.get(name);
     assert.equal(tool.mcpMeta?.ui?.resourceUri, undefined, name + ' must not render an empty card before approval');
   }
-  const projectlessTool = registry.get('create_projectless_handle');
-  const showHandle = registry.get('show_workspace_handle');
-  assert.equal(showHandle.mcpMeta.ui.resourceUri, 'ui://ccm/workspace-handle-v1.html');
-  const displayed = await showHandle.handler({ workspace_handle: '00000000-0000-4000-8000-000000000009' });
-  assert.equal(displayed.structuredContent.workspace_kind, 'registered');
-  const unknown = await showHandle.handler({ workspace_handle: '00000000-0000-4000-8000-000000000099' });
-  assert.equal(unknown.isError, true);
+  assert.match(registry.get('request_verification_input').description, /wait for its automatic code-free follow-up/i);
+  assert.match(registry.get('request_verification_input').description, /Do NOT inspect or request the code/i);
   assert.deepEqual(
     Object.keys(registry.get('request_approval').inputSchema),
     ['approval_id'],

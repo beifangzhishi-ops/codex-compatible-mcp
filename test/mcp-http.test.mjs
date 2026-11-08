@@ -18,7 +18,6 @@ import {
   LEGACY_APPROVAL_UI_URI,
   PREVIOUS_APPROVAL_UI_URI,
 } from '../src/ui/approval-app.mjs';
-import { WORKSPACE_HANDLE_UI_HTML, WORKSPACE_HANDLE_UI_URI } from '../src/ui/workspace-handle-app.mjs';
 import {
   PUBLISHED_FILE_UI_HTML,
   PUBLISHED_FILE_UI_URI,
@@ -114,6 +113,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(client.getInstructions(), /Always reuse an existing workspace_handle/);
     assert.match(client.getInstructions(), /Host owns tool discovery/);
     assert.match(client.getInstructions(), /Call list_projects directly/);
+    assert.match(client.getInstructions(), /After the user submits|card, which automatically sends a code-free follow-up/);
     assert.match(client.getInstructions(), /call claim_full_access directly/);
     assert.match(client.getInstructions(), /plan_patch \/ plan_read directly/);
     assert.match(client.getInstructions(), /call ccm-extra.conversation directly/);
@@ -124,9 +124,9 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const listed = await client.listTools();
     const names = listed.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, registry.list().map((tool) => tool.name).sort());
-    assert.equal(names.length, 30);
+    assert.equal(names.length, 27);
     for (const name of ['list_projects','claim_full_access','select_workspace','register_workspace','unregister_workspace',
-      'plan_patch','plan_read','restart','restart_status','import_chatgpt_file','conversation','quark_upload',
+      'plan_patch','plan_read','restart','import_chatgpt_file','conversation','quark_upload',
       'transfer_path','transfer_status','transfer_cancel']) {
       assert.ok(names.includes(name), name + ' must be a top-level MCP tool');
     }
@@ -142,11 +142,11 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     }
     assert.equal(listed.tools.find((tool) => tool.name === 'request_approval')?._meta?.ui?.resourceUri, APPROVAL_UI_URI);
     assert.equal(listed.tools.find((tool) => tool.name === 'publish')?._meta?.ui?.resourceUri, PUBLISHED_FILE_UI_URI);
-    assert.equal(listed.tools.find((tool) => tool.name === 'show_workspace_handle')?._meta?.ui?.resourceUri, WORKSPACE_HANDLE_UI_URI);
     const discovered = await client.callTool({name:'list_projects', arguments:{}});
     assert.equal(discovered.isError, undefined);
     assert.equal(discovered.structuredContent.default_environment_id, 'mcp-worker');
     assert.equal(discovered.structuredContent.environments[0].id, 'mcp-worker');
+    assert.match(discovered.structuredContent.environments[0].connected_at, /^\d{4}-\d{2}-\d{2}T/);
     assert.equal(discovered.structuredContent.environments[0].projects.length, 1);
     const approvalResource = await client.readResource({ uri: APPROVAL_UI_URI });
     assert.equal(approvalResource.contents[0].text, APPROVAL_UI_HTML);

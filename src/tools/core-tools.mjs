@@ -1,6 +1,5 @@
 import * as z from 'zod/v4';
 import { APPROVAL_UI_URI } from '../ui/approval-app.mjs';
-import { WORKSPACE_HANDLE_UI_URI } from '../ui/workspace-handle-app.mjs';
 import { VERIFICATION_INPUT_UI_URI } from '../ui/verification-input-app.mjs';
 
 const UNIFIED_EXEC_OUTPUT_SCHEMA = {
@@ -425,6 +424,7 @@ export function registerCoreTools(registry, runtime) {
     description: [
       'Show a CCM verification-input card for an existing live process session. The user types the code in the card, which submits through an App-only tool directly to the same CCM session; do not request the code in chat or pass it through exec_command or write_stdin.',
       'Call only when the running process is waiting for interactive verification input. Reuse the exact workspace_handle and session_id from exec_command. The card sends the input and Enter; the model receives only the delivery status, never the code. No separate model tool call is needed for submission.',
+      'After showing the card, wait for its automatic code-free follow-up when the user clicks Submit; do not proactively check whether input occurred. On that follow-up, assume the code has been submitted and continue the original task. Do NOT inspect or request the code, query card/submission status, or poll process output specifically to verify code entry; the Host may block such attempts. Ordinary task execution may continue. Only if the task later explicitly reports invalid verification should you present another card for a live session.',
       'Do not call for a process that has already exited. If no interactive session exists, start a suitable interactive command first.',
     ].join('\n\n'),
     inputSchema: {
@@ -443,7 +443,10 @@ export function registerCoreTools(registry, runtime) {
         return {
           content: [{ type: 'text', text:
             'CCM verification input card is ready for the live process session. ' +
-            'The user submits directly in the card; do not request or transmit the code in model tool arguments.' }],
+            'The user submits directly in the card; do not request or transmit the code in model tool arguments. ' +
+            'Wait for the card\'s automatic code-free continuation after the user clicks Submit. ' +
+            'Then assume verification input was submitted and continue the original task without checking the code or its submission status. ' +
+            'If ordinary task execution later reports an invalid code, request another card for the live session.' }],
           structuredContent: prepared,
         };
       } catch (error) {
@@ -510,6 +513,7 @@ export function registerCoreTools(registry, runtime) {
       'Registered projects are returned by default. Set all=true only when existing projectless workspaces also need to be inspected.',
       'Discovery is isolated per environment: an abnormal or stale Worker is reported on that environment without blocking healthy Workers. Explicit environment_id calls remain strict.',
       'Each environment includes platform/shell metadata, capabilities, independent effective sandbox_read_scope and sandbox_write_scope values, backend, and default selection. Internal bootstrap directories, raw permission profiles, and filesystem permission topology are intentionally not exposed.',
+      'Connected remote environments include connected_at, the current Worker connection time. After restart, compare it with the pre-restart value and verify the environment returns state=normal; an unchanged connection does not prove a restart.',
     ].join('\n\n'),
     inputSchema: {
       environment_id: z.string().optional().describe('Optional environment id. Omit to list projects across every connected environment.'),
@@ -550,6 +554,7 @@ export function registerCoreTools(registry, runtime) {
             return {
               ...environment,
               state: 'normal',
+              ...(currentStatus.connected_at ? { connected_at: currentStatus.connected_at } : {}),
               projects: result.projects || [],
               ...(includeAll
                 ? { projectless_workspaces: result.projectless_workspaces || [] }
@@ -624,7 +629,7 @@ export function registerCoreTools(registry, runtime) {
       'Enter one registered workspace. Full-access environments return the workspace_handle directly; restricted environments return a frozen approval request.',
       'An active webpage-issued full_access_grant_id (or the same ID obtained through fallback claim_full_access) enables Full Access entry without changing the Worker baseline.',
       'Requires an explicit user request to enter/switch workspaces AND no usable workspace_handle. Reading, inspecting, editing, or working on a project is not an entry request.',
-      'On full-access success, call show_workspace_handle with the returned workspace_handle to display the copyable handle card. On restricted Workers, call request_approval when approval_required=true; the completed approval card displays the handle. Never show a handle for pending/failed actions, retry pending entry, or bypass its approval with projectless execution.',
+      'On full-access success, return the workspace_handle in the tool result for the user to copy. On restricted Workers, call request_approval when approval_required=true; the completed approval card displays the handle. Never show a handle for pending/failed actions, retry pending entry, or bypass its approval with projectless execution.',
       'Full-access skips user approval but keeps workspace identity validation, Worker routing, and workspace-handle boundaries.',
     ].join('\n\n'),
     inputSchema: {
@@ -691,7 +696,7 @@ export function registerCoreTools(registry, runtime) {
       'Register and enter one exact project directory. Full-access environments return the workspace_handle directly; restricted environments return a frozen approval request.',
       'An active webpage-issued full_access_grant_id (or the same ID obtained through fallback claim_full_access) enables Full Access registration without changing the Worker baseline.',
       'Requires an explicit user request to register a workspace AND no usable workspace_handle for that project. Reading, inspecting, editing, or working on a project is not a registration request.',
-      'On full-access success, call show_workspace_handle with the returned workspace_handle to display the copyable handle card. On restricted Workers, call request_approval when approval_required=true; the completed approval card displays the handle. Never show a handle for pending/failed actions, retry pending registration, or bypass its approval with projectless execution.',
+      'On full-access success, return the workspace_handle in the tool result for the user to copy. On restricted Workers, call request_approval when approval_required=true; the completed approval card displays the handle. Never show a handle for pending/failed actions, retry pending registration, or bypass its approval with projectless execution.',
       'With create_if_missing=true, registration may create the exact missing directory before entry. Full-access skips user approval but keeps target revalidation and workspace-handle boundaries.',
     ].join('\n\n'),
     inputSchema: {
@@ -750,36 +755,6 @@ export function registerCoreTools(registry, runtime) {
             'Changing projects alone does not authorize new entry; request a handle or an explicit entry/registration instruction. ' +
             'A separately authorized new workspace action does not require denying this older pending approval.',
         });
-      } catch (error) {
-        return toolError(error);
-      }
-    },
-  });
-
-  registry.register({
-    name: 'show_workspace_handle',
-    provider: 'ccm-core',
-
-    mcpMeta: {
-      ui: { resourceUri: WORKSPACE_HANDLE_UI_URI },
-      'openai/outputTemplate': WORKSPACE_HANDLE_UI_URI,
-    },
-    tags: ['workspace', 'handle', 'ui'],
-    description: [
-      'Display a copyable CCM workspace_handle card after a successful full-access select_workspace or register_workspace call.',
-      'Pass the exact registered workspace_handle returned by that successful call. Do not call for approval_required, failed, denied, or projectless results; restricted approval cards already display the approved handle.',
-      'This is read-only: it validates the existing registered handle and does not enter a workspace, request approval, or create a new handle.',
-    ].join('\n\n'),
-    inputSchema: {
-      workspace_handle: z.string().uuid().describe('Exact handle returned by a successful registered workspace entry.'),
-    },
-    handler: async ({ workspace_handle }) => {
-      try {
-        const value = runtime.workspaceHandleManager.resolve(workspace_handle);
-        if (value.workspace_kind !== 'registered') {
-          throw new Error('Only registered workspace handles can be displayed.');
-        }
-        return jsonResult(value);
       } catch (error) {
         return toolError(error);
       }

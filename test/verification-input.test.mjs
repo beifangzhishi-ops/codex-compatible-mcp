@@ -183,6 +183,9 @@ test('verification card delivers value via app-only call, but context and chat n
   handlers.get('value:input')();
   handlers.get('form:submit')({ preventDefault() {} });
   await until(() => calls.some((c) => c.method === 'ui/message'));
+  const continuation = calls.find((c) => c.method === 'ui/message');
+  assert.match(continuation.params.content[0].text, /I submitted the verification input through the CCM card/);
+  assert.match(continuation.params.content[0].text, /without checking the code or its submission status/);
   const submit = calls.filter((c) => c.params?.name === 'submit_verification_input');
   assert.equal(submit.length, 1);
   assert.deepEqual(JSON.parse(JSON.stringify(submit[0].params.arguments)), {
@@ -203,6 +206,8 @@ test('verification tool metadata hides submitted values from the model-facing su
     workspace_handle: HANDLE, session_id: SESSION_ID,
   });
   assert.equal(request.structuredContent.state, 'pending');
+  assert.match(request.content[0].text, /Wait for the card's automatic code-free continuation/);
+  assert.match(registry.get('request_verification_input').description, /On that follow-up, assume the code has been submitted/);
   const submitTool = registry.get('submit_verification_input');
   assert.deepEqual(submitTool.mcpMeta.ui.visibility, ['app']);
   assert.deepEqual(registry.get('get_verification_input_status').mcpMeta.ui.visibility, ['app']);

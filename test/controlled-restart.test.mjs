@@ -37,20 +37,20 @@ test('重启记录要求断开再健康连接，合并重复请求并报告超�
     const args = { component: 'worker', environment_id: 'worker-a' };
     const first = await restart.request(args);
     hub.emit('environment_connected', 'worker-a');
-    assert.equal(restart.status(first.operation_id).state, 'requested');
+    assert.equal(restart.operations.get(first.operation_id).state, 'requested');
     hub.emit('environment_disconnected', 'worker-a');
     assert.equal((await restart.request(args)).operation_id, first.operation_id);
     assert.equal(calls, 1);
     assert.equal(armed, 1);
     hub.emit('environment_connected', 'other');
-    assert.equal(restart.status(first.operation_id).state, 'reconnecting');
+    assert.equal(restart.operations.get(first.operation_id).state, 'reconnecting');
     hub.emit('environment_connected', 'worker-a');
-    assert.equal(restart.status(first.operation_id).state, 'recovered');
+    assert.equal(restart.operations.get(first.operation_id).state, 'recovered');
     const second = await restart.request(args);
     await new Promise((resolve) => setTimeout(resolve, 45));
-    assert.equal(restart.status(second.operation_id).state, 'failed');
+    assert.equal(restart.operations.get(second.operation_id).state, 'failed');
     assert.equal(hub.listenerCount('environment_connected'), 0);
-    assert.throws(() => restart.status('missing'), /记录不存在/);
+    assert.equal(restart.operations.has('missing'), false);
   });
 });
 

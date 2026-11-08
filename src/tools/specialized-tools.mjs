@@ -371,60 +371,6 @@ export function registerSpecializedTools(registry, runtime) {
 
   registry.register({
     namespace: 'ccm-extra',
-    name: 'gmail',
-    provider: 'ccm-specialized',
-    provenance: 'google-gmail-api',
-
-    tags: ['gmail', 'google', 'email', 'mail', 'search', 'read', 'oauth'],
-    environmentRequirements: {
-      platform: 'windows',
-      capabilities: ['exec'],
-      localSoftware: ['Python', 'Google OAuth Python libraries', 'requests'],
-    },
-    description: [
-      'Access Gmail through the official Gmail API using OAuth credentials stored on the selected CCM worker.',
-      'Supports profile lookup, message search, and message reads. Authentication material stays on the worker and is never returned by this tool.',
-      'Configure CCM_GMAIL_CREDENTIALS and CCM_GMAIL_TOKEN, or place credentials.json and token.json under %USERPROFILE%\\.ccm\\gmail.',
-      'For restricted networks, set CCM_GMAIL_PROXY or standard HTTP(S)_PROXY variables; the bundled helper can also reuse RCLONE_HTTP_PROXY as a fallback.',
-    ].join('\n\n'),
-    inputSchema: {
-      action: z.enum(['profile', 'search', 'read']),
-      query: z.string().optional().describe('Gmail search query; required for search.'),
-      message_id: z.string().optional().describe('Gmail message id; required for read.'),
-      max_results: z.number().int().min(1).max(100).optional().describe('Maximum search results. Defaults to 20.'),
-      environment_id: z.string().optional().describe('Windows Remote Worker with Gmail OAuth files.'),
-      yield_time_ms: z.number().int().min(0).max(30_000).optional(),
-      max_output_tokens: z.number().int().min(256).max(10_000).optional(),
-    },
-    handler: async (args) => {
-      try {
-        const environment = resolveWindowsEnvironment(runtime, args.environment_id);
-        if (args.action === 'search' && !args.query) throw new Error('query is required for Gmail search.');
-        if (args.action === 'read' && !args.message_id) throw new Error('message_id is required for Gmail read.');
-        const command = [
-          toolPath('tools\\gmail-api\\gmail_api.py'),
-          "$python=(Get-Command python.exe -ErrorAction SilentlyContinue | Select-Object -First 1).Source",
-          "if(-not $python){throw 'Python is required for the bundled Gmail API tool.'}",
-          "$env:PYTHONUTF8='1'",
-          '& $python $tool ' + psQuote(args.action) +
-            (args.query ? ' --query ' + psQuote(args.query) : '') +
-            (args.message_id ? ' --message-id ' + psQuote(args.message_id) : '') +
-            ' --max-results ' + Number(args.max_results || 20),
-        ].join('; ');
-        return execResult(await run(runtime, args, command), {
-          environment_id: environment.id,
-          capability: 'gmail',
-        });
-      } catch (error) {
-        return toolError(error);
-      }
-    },
-  });
-
-
-
-  registry.register({
-    namespace: 'ccm-extra',
     name: 'quark_upload',
     provider: 'ccm-specialized',
     provenance: 'ported-from-wcm/tools/quark-transfer',

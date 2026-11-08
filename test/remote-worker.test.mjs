@@ -113,10 +113,9 @@ test('Worker contract errors quarantine one Worker without disconnecting it', as
       ),
       /Unknown workspace/,
     );
-    assert.deepEqual(
-      controller.workerHub.environmentStatus('worker-quarantine'),
-      { state: 'normal' },
-    );
+    const initialConnection = controller.workerHub.environmentStatus('worker-quarantine');
+    assert.equal(initialConnection.state, 'normal');
+    assert.match(initialConnection.connected_at, /^\d{4}-\d{2}-\d{2}T/);
 
     await assert.rejects(
       controller.workerHub.call('worker-quarantine', 'not_a_real_method'),
@@ -140,10 +139,7 @@ test('Worker contract errors quarantine one Worker without disconnecting it', as
       await controller.workerHub.waitForEnvironment('worker-quarantine'),
       true,
     );
-    assert.deepEqual(
-      controller.workerHub.environmentStatus('worker-quarantine'),
-      { state: 'normal' },
-    );
+    assert.equal(controller.workerHub.environmentStatus('worker-quarantine').state, 'normal');
     assert.deepEqual(
       await controller.workerHub.call('worker-quarantine', 'ping'),
       { ok: true, worker_id: 'worker-quarantine' },
@@ -181,10 +177,7 @@ test('Worker errors not configured for quarantine leave the Worker normal', asyn
       controller.workerHub.call('worker-no-quarantine', 'not_a_real_method'),
       (error) => error?.code === 'unknown_method',
     );
-    assert.deepEqual(
-      controller.workerHub.environmentStatus('worker-no-quarantine'),
-      { state: 'normal' },
-    );
+    assert.equal(controller.workerHub.environmentStatus('worker-no-quarantine').state, 'normal');
     assert.deepEqual(
       await controller.workerHub.call('worker-no-quarantine', 'ping'),
       { ok: true, worker_id: 'worker-no-quarantine' },
@@ -380,10 +373,7 @@ test('Fresh Worker replaces a quarantined duplicate identity without a takeover 
     }
     assert.equal(staleClient.connected, false);
     assert.equal(freshClient.connected, true);
-    assert.deepEqual(
-      controller.workerHub.environmentStatus('worker-quarantine-reconnect'),
-      { state: 'normal' },
-    );
+    assert.equal(controller.workerHub.environmentStatus('worker-quarantine-reconnect').state, 'normal');
     assert.deepEqual(
       await controller.workerHub.call('worker-quarantine-reconnect', 'ping'),
       { ok: true, worker_id: 'worker-quarantine-reconnect' },

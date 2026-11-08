@@ -337,6 +337,7 @@ export class WorkerHub extends EventEmitter {
     }
 
     connection.workerId = workerId;
+    connection.connectedAt = new Date().toISOString();
     this.connections.set(workerId, connection);
 
     try {
@@ -390,9 +391,10 @@ export class WorkerHub extends EventEmitter {
   }
 
   #connectionStatus(connection) {
-    if (!connection?.quarantine) return { state: 'normal' };
+    if (!connection?.quarantine) return { state: 'normal', connected_at: connection.connectedAt };
     return {
       state: 'abnormal',
+      connected_at: connection.connectedAt,
       abnormal_code: connection.quarantine.code,
       abnormal_reason: connection.quarantine.reason,
       abnormal_since: connection.quarantine.since,

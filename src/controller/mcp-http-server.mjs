@@ -28,10 +28,6 @@ import {
   PREVIOUS_APPROVAL_UI_URI,
 } from '../ui/approval-app.mjs';
 import {
-  WORKSPACE_HANDLE_UI_HTML,
-  WORKSPACE_HANDLE_UI_URI,
-} from '../ui/workspace-handle-app.mjs';
-import {
   VERIFICATION_INPUT_UI_HTML,
   VERIFICATION_INPUT_UI_URI,
 } from '../ui/verification-input-app.mjs';
@@ -62,7 +58,7 @@ function createProtocolServer(
       'CCM is a Codex-compatible execution harness.',
       'Always reuse an existing workspace_handle for the target workspace; it is not an environment_id, workspace_id, or conversation context. Call select_workspace or register_workspace directly only when no usable handle exists and the user explicitly requests workspace entry or registration. Reading, inspecting, editing, or working on a project does not authorize entry or registration. Never initiate workspace-entry approval implicitly.',
       'Use exec_command for ordinary shell and repository work. Poll live process sessions directly with write_stdin, reusing the exact workspace_handle and session_id; an empty chars value is a read-only poll. On a Host failure without a structured CCM result, do not assume the session was polled or create a replacement session.',
-      'When a live CCM process prompts for a verification code, use request_verification_input with its exact workspace_handle and session_id. The user enters the code through an App-only input card; the model receives only delivery status, never the code. Do not request the code in chat or transmit it through commands or write_stdin.',
+      'When a live CCM process requests a verification code, show request_verification_input with its workspace_handle and session_id. The user submits the code through the App card, which automatically sends a code-free follow-up. Do not inspect the code or check whether it was entered/submitted. Wait for that follow-up, then assume the code was submitted and continue the original task normally. Host filtering can block code/status probing. Only if normal task execution reports invalid verification should you show another card for a live session; never request the code in chat or commands.',
       'Owner-issued timed CCM Full Access uses the separate /ccm/unlock browser page: the owner pairs a browser once using a phone TOTP code, chooses a duration and clicks unlock. This creates a pending grant. The browser copy button first writes the ID to the clipboard and then claims it through the authenticated Controller bridge; on success the webpage returns to its locked/unlock-form state. Only claimed IDs are valid; copying text manually without the claim does not activate the ID. If the owner provides the copied ID after webpage confirmation, use it directly on exec_command, apply_patch or explicitly requested select_workspace/register_workspace calls without calling claim_full_access. If the owner reports unlocking but provides no ID, call claim_full_access directly: this claims the pending grant, or, if the browser already claimed it but the message was blocked, retrieves that same ID once within the original five-minute claim window. The grant expires at the deadline counted from web unlock and recovery never extends it. Claimed grants remain usable when the webpage returns to locked state and when a new pending grant is issued. Never guess an ID, expose phone seed/TOTP to the model, or infer authority from absent IDs. Repeated web clicks while pending do not replace/extend it. Expiry blocks new Full Access operations but does not kill running processes. Unregister always requires its own approval.',
       'Call list_projects directly to inspect connected environments and registered projects. Omit environment_id to inspect every connected environment; pass all=true only when existing projectless workspaces also need to be listed.',
       'All model-facing CCM capabilities are listed as ordinary peer tools by MCP tools/list. The Host owns tool discovery and invocation selection; CCM does not provide a nested discovery or dispatch layer.',
@@ -75,7 +71,7 @@ function createProtocolServer(
       'Call quark_upload directly to upload known local files through the logged-in Quark Cloud Drive desktop client.',
       'For bulk image inspection, the Host can invoke view_image independently for each image.',
       'Use the Host orchestration layer for multi-step workflows, control flow and parallel calls.',
-      'For workspace entry or registration, call select_workspace or register_workspace only with explicit user authorization and no usable handle. After full-access success, call show_workspace_handle with the returned handle to show the copyable card. When approval_required=true, call request_approval and use its completed card for the handle. Select/register do not attach a UI while approval is pending. Never show handles for pending/failed/projectless operations or bypass a pending approval.',
+      'For workspace entry or registration, call select_workspace or register_workspace only with explicit user authorization and no usable handle. After full-access success, use the returned workspace_handle directly; the user can copy it from the tool result. When approval_required=true, call request_approval and use its completed card for the handle. Select/register do not attach a UI while approval is pending. Never show handles for pending/failed/projectless operations or bypass a pending approval.',
       'Commands run under the selected environment permission profile. list_projects exposes independent sandbox_read_scope and sandbox_write_scope values for each connected environment. full-access means CCM does not request user approval for workspace lifecycle or execution actions and runs commands with normal Worker host permissions; workspace_handle, Worker routing, cwd/session ownership, workspace identity, and individual tool path contracts still apply. For restricted profiles, filesystem read scope comes from sandbox_read_scope, while sandbox_write_scope=context_root limits ordinary writes to the active context root unless an explicit escalation flow authorizes otherwise. Do not infer workspace selection or escalation solely from the location of a readable path. Individual file tools may impose narrower path contracts than exec_command.',
       'Experimental Windows administrator-token test: on an elevated workspace-write Worker, exec_command(run_as_admin=true) attempts to retain the administrator group while applying restricted workspace writes. This requires no per-command CCM approval, remains a restricted-token execution, cannot combine with Full Access or escalation options, and may not support all admin-only APIs. Do not assume this is a proven security boundary.',
       'CCM error semantics: distinguish CCM results from host/tool-call failures. A normal CCM exec_command result contains CCM fields such as chunk_id, wall_time_seconds, output, exit_code/session_id, or approval_required. If the host returns a Script error or other failure without a CCM structured result, do not attribute it to CCM: the command may not have been dispatched to the CCM worker.',
@@ -159,23 +155,6 @@ function createProtocolServer(
             },
           },
         },
-      }],
-    }),
-  );
-
-  server.registerResource(
-    'ccm-workspace-handle-ui',
-    WORKSPACE_HANDLE_UI_URI,
-    {
-      title: 'CCM workspace handle',
-      mimeType: 'text/html;profile=mcp-app',
-    },
-    async () => ({
-      contents: [{
-        uri: WORKSPACE_HANDLE_UI_URI,
-        mimeType: 'text/html;profile=mcp-app',
-        text: WORKSPACE_HANDLE_UI_HTML,
-        _meta: { ui: { prefersBorder: true } },
       }],
     }),
   );
