@@ -59,7 +59,8 @@ try {
     try {
         # Failure recovery only: restore the existing service immediately.
         $existing=Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
-        $principal=New-ScheduledTaskPrincipal -UserId $existing.Principal.UserId -LogonType Interactive -RunLevel Highest
+        $qualifiedUser=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+        $principal=New-ScheduledTaskPrincipal -UserId $qualifiedUser -LogonType Interactive -RunLevel Highest
         Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
         Set-ScheduledTask -TaskName $taskName -Principal $principal -ErrorAction Stop | Out-Null
         Start-Sleep -Seconds 4

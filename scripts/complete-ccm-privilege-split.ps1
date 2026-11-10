@@ -29,7 +29,10 @@ $arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $switc
 $action=New-ScheduledTaskAction -Execute "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -Argument $arguments
 $trigger=New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(3)
 $settings=New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 6) -StartWhenAvailable
-$principal=New-ScheduledTaskPrincipal -UserId $task.Principal.UserId -LogonType Interactive -RunLevel Highest
-Register-ScheduledTask -TaskName $switchName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
-Start-ScheduledTask -TaskName $switchName
+$qualifiedUser=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+$principal=New-ScheduledTaskPrincipal -UserId $qualifiedUser -LogonType Interactive -RunLevel Highest
+Register-ScheduledTask -TaskName $switchName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force -ErrorAction Stop | Out-Null
+Start-ScheduledTask -TaskName $switchName -ErrorAction Stop
+$started=Get-ScheduledTask -TaskName $switchName -ErrorAction Stop
+if($started.State -eq 'Disabled'){ throw 'Privilege switch task is disabled.' }
 Write-Output "Administrator agent verified; $taskName saved Limited; independent switch task started."
