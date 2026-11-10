@@ -16,7 +16,16 @@ for (const installer of [
 test('only the administrator agent is scheduled with Highest privilege', async () => {
   const script = await fs.readFile(new URL('../scripts/install-ccm-admin-agent.ps1', import.meta.url), 'utf8');
   assert.match(script, /New-ScheduledTaskPrincipal[^\r\n]*-RunLevel Highest/);
-  assert.match(script, /Register-ScheduledTask -TaskName 'CCM Administrator Agent'/);
+  assert.match(script, /Register-ScheduledTask -TaskName \$taskName/);
+});
+
+test('administrator agent reinstall stops only its own task and stale process before verification', async () => {
+  const script = await fs.readFile(new URL('../scripts/install-ccm-admin-agent.ps1', import.meta.url), 'utf8');
+  assert.match(script, /Stop-ScheduledTask -TaskName \$taskName -ErrorAction Stop/);
+  assert.match(script, /\$command\.IndexOf\(\$agentModule,\[System\.StringComparison\]::OrdinalIgnoreCase\)/);
+  assert.match(script, /Stop-Process -Id \$process\.ProcessId -Force -ErrorAction Stop/);
+  assert.match(script, /Start-ScheduledTask -TaskName \$taskName -ErrorAction Stop/);
+  assert.match(script, /if\(-not \$verified\)\{throw 'CCM Administrator Agent task did not provide verified elevated IPC/);
 });
 
 test('privilege migration independently schedules a fully-qualified elevated switch task', async () => {

@@ -427,6 +427,17 @@ combine with `sandbox_permissions=require_escalated`, `prefix_rule` or
 authorization to request administrator execution: this is a usability policy,
 not a boundary against an intentionally hostile tool client.
 
+To repair or upgrade an administrator agent that cannot be reached through
+`run_as_admin=true`, execute `scripts/install-ccm-admin-agent.ps1` **from an
+independent, elevated Windows PowerShell on that machine**. The installer
+stops the registered task, removes only stale agent Node processes launched
+from this installation, replaces the task, and verifies the new elevated
+loopback endpoint before reporting success. Do **not** run this recovery
+installer through the administrator agent itself: stopping the agent would
+also terminate the command connection. A CCM ordinary-command sandbox
+approval does not elevate the Windows account token and cannot repair an
+inaccessible `Highest` task.
+
 **Deployment order (both 6v and noha):** Install and test the separate elevated
 agent **before** replacing the currently scheduled CCM tasks; then run the
 relevant normal-task installer, restart that scheduled task and check that its
