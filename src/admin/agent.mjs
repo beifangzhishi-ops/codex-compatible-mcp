@@ -3,7 +3,10 @@ import net from 'node:net';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { ADMIN_KEY_FILE, adminPipeName, compareAdminKey, pipeFrames, sendPipeFrame } from '../runtime/admin/pipe-protocol.mjs';
+import {
+  ADMIN_KEY_FILE, ADMIN_ENDPOINT_FILE, ADMIN_LOOPBACK_HOST,
+  compareAdminKey, decodeFrames, sendFrame,
+} from '../runtime/admin/ipc-protocol.mjs';
 
 function terminateTree(child) {
   if (!child || child.exitCode !== null) return;
@@ -18,7 +21,6 @@ function terminateTree(child) {
 
 export function createAdministratorServer({
   key,
-  pipeName = adminPipeName(),
   spawnProcess = spawn,
   terminate = terminateTree,
 } = {}) {
@@ -32,10 +34,10 @@ export function createAdministratorServer({
     let started = false;
     let exited = false;
     const fail = (message) => {
-      sendPipeFrame(socket, { type: 'error', message });
+      sendFrame(socket, { type: 'error', message });
       socket.end();
     };
-    socket.on('data', pipeFrames((frame) => {
+    socket.on('data', decodeFrames((frame) => {
       if (!started) {
         if (frame?.type !== 'start' || !compareAdminKey(key, frame.key)) {
           fail('Administrator IPC authentication failed.');
@@ -60,8 +62,8 @@ export function createAdministratorServer({
           return fail(String(error.message));
         }
         active.add(child);
-        sendPipeFrame(socket, { type: 'started' });
-        const output = (data) => sendPipeFrame(socket, { type: 'output', data: Buffer.from(data).toString('base64') });
+        sendFrame(socket, { type: 'started' });
+        const output = (data) => sendFrame(socket, { type: 'output', data: Buffer.from(data).toString('base64') });
         child.stdout?.on('data', output);
         child.stderr?.on('data', output);
         child.on('error', (error) => {
@@ -70,7 +72,7 @@ export function createAdministratorServer({
         child.on('close', (code) => {
           exited = true;
           active.delete(child);
-          sendPipeFrame(socket, { type: 'exit', code });
+          sendFrame(socket, { type: 'exit', code });
           socket.end();
         });
       } else if (frame?.type === 'input' && typeof frame.data === 'string') {
@@ -102,5 +104,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   ensureAdministrator();
   const key = fs.readFileSync(ADMIN_KEY_FILE, 'utf8').trim();
   const server = createAdministratorServer({ key });
-  server.listen(adminPipeName());
+  server.listen(0, ADMIN_LOOPBACK_HOST, () => {
+    const addr = server.address();
+    if (!addr || typeof addr === 'string' || addr.address !== ADMIN_LOOPBACK_HOST) {
+      throw new Error('Administrator agent must listen on IPv4 loopback only.');
+    }
+    fs.writeFileSync(ADMIN_ENDPOINT_FILE, JSON.stringify({
+      host: ADMIN_LOOPBACK_HOST, port: addr.port,
+    }), 'utf8');
+  });
 }

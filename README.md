@@ -409,8 +409,10 @@ on each Windows Worker machine. The installer creates a random private IPC key
 under `.state`, restricts its file ACL to the account, Administrators and SYSTEM,
 registers a separate `CCM Administrator Agent` Task Scheduler job with `RunLevel
 Highest`, and starts it. The agent checks that its own token is elevated before
-opening the machine-local named pipe. The ordinary Worker uses authenticated
-IPC to forward precisely a command invocation and its environment; the agent
+opening a random-port local TCP listener bound **only to 127.0.0.1**. Its
+endpoint file is stored under `.state` and the ordinary Worker uses the
+existing 256-bit secret to authenticate every IPC connection before forwarding
+precisely a command invocation and its environment; the agent
 streams stdout/stderr, handles stdin and cancellation, and returns an exit code.
 The Worker never receives the administrator token. Missing agents, invalid keys
 or broken connections fail closed rather than running as a different user.

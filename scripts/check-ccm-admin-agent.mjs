@@ -1,5 +1,5 @@
 import { AdministratorProcessClient } from '../src/runtime/admin/admin-process-client.mjs';
-import { CCM_ROOT } from '../src/runtime/admin/pipe-protocol.mjs';
+import { CCM_ROOT } from '../src/runtime/admin/ipc-protocol.mjs';
 
 if (process.platform !== 'win32') {
   throw new Error('CCM administrator agent verification requires Windows.');

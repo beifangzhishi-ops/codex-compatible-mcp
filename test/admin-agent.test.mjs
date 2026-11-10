@@ -6,27 +6,26 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { createAdministratorServer } from '../src/admin/agent.mjs';
 import { AdministratorProcessClient } from '../src/runtime/admin/admin-process-client.mjs';
-import { adminPipeName } from '../src/runtime/admin/pipe-protocol.mjs';
+import { ADMIN_LOOPBACK_HOST, validateAdminEndpoint } from '../src/runtime/admin/ipc-protocol.mjs';
 
 test('local administrator agent authenticates, streams output, accepts stdin, and hides Worker secrets', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-admin-ipc-'));
-  const pipeName = process.platform === 'win32'
-    ? `\\\\.\\pipe\\ccm-admin-test-${crypto.randomUUID()}`
-    : path.join(root, 'admin.sock');
   const keyFile = path.join(root, 'agent.key');
   const key = crypto.randomBytes(32).toString('hex');
   fs.writeFileSync(keyFile, key);
-  const server = createAdministratorServer({ pipeName, key });
+  const server = createAdministratorServer({ key });
+  let endpoint;
   try {
     await new Promise((resolve, reject) => {
       server.once('error', reject);
-      server.listen(pipeName, resolve);
+      server.listen(0, ADMIN_LOOPBACK_HOST, resolve);
     });
-    const client = new AdministratorProcessClient({ keyFile, pipeName });
+    endpoint = { host: ADMIN_LOOPBACK_HOST, port: server.address().port };
+    const client = new AdministratorProcessClient({ keyFile, endpoint });
     const run = (contents, tokenFile = keyFile) => new Promise((resolve, reject) => {
       let output = '';
       const timer = setTimeout(() => reject(new Error('administrator IPC test timed out')), 10_000);
-      const child = new AdministratorProcessClient({ keyFile: tokenFile, pipeName }).startProcess({
+      const child = new AdministratorProcessClient({ keyFile: tokenFile, endpoint }).startProcess({
         file: process.execPath,
         args: ['-e', contents],
         cwd: root,
@@ -54,16 +53,22 @@ test('local administrator agent authenticates, streams output, accepts stdin, an
     assert.equal(denied.code, 125);
     assert.match(denied.output, /authentication failed/i);
     assert.doesNotMatch(denied.output, /must-never-start/);
-    assert.equal(client.pipeName, pipeName);
+    assert.deepEqual(client.endpoint, endpoint);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('administrator IPC names are stable for one installation and isolated by root', () => {
-  assert.equal(adminPipeName('C:\\one'), adminPipeName('C:\\one'));
-  assert.notEqual(adminPipeName('C:\\one'), adminPipeName('C:\\two'));
+test('administrator IPC accepts loopback endpoints only', () => {
+  assert.deepEqual(validateAdminEndpoint({ host: '127.0.0.1', port: 40001 }),
+    { host: '127.0.0.1', port: 40001 });
+  for (const invalid of [
+    { host: '0.0.0.0', port: 40001 }, { host: '192.168.1.10', port: 40001 },
+    { host: 'localhost', port: 40001 }, { host: '127.0.0.1', port: 0 },
+  ]) {
+    assert.throws(() => validateAdminEndpoint(invalid), /Invalid CCM/);
+  }
 });
 
 test('uninstalled administrator agent fails without fallback to ordinary privileges', () => {
