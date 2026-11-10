@@ -360,14 +360,14 @@ export class RemoteProcessManager {
     const environment = this.environmentRegistry.resolve(
       workspaceHandle.environment_id,
     );
-    const experimentalAdmin = args.run_as_admin === true;
-    if (experimentalAdmin && (
+    const administratorRequested = args.run_as_admin === true;
+    if (administratorRequested && (
       environment.platform !== 'windows' ||
       environment.permissionProfile !== 'workspace-write'
     )) {
-      throw new Error('run_as_admin requires a Windows workspace-write Worker.');
+      throw new Error('run_as_admin requires a Windows workspace-write Worker with an installed administrator agent.');
     }
-    if (experimentalAdmin && (
+    if (administratorRequested && (
       (args.sandbox_permissions && args.sandbox_permissions !== 'use_default') ||
       args.prefix_rule !== undefined || args.full_access_grant_id !== undefined
     )) {
@@ -384,8 +384,8 @@ export class RemoteProcessManager {
     delete forwardedArgs.prefix_rule;
     delete forwardedArgs.full_access_grant_id;
     delete forwardedArgs.run_as_admin;
-    if (experimentalAdmin) {
-      forwardedArgs.sandbox_permissions = 'experimental_admin_restricted';
+    if (administratorRequested) {
+      forwardedArgs.sandbox_permissions = 'admin_elevated';
       delete forwardedArgs.justification;
     }
     const requestedYieldMs = clampInitialExecYield(args.yield_time_ms);
@@ -403,7 +403,7 @@ export class RemoteProcessManager {
         'prefix_rule is only valid with sandbox_permissions=require_escalated.',
       );
     }
-    const parsedCommand = this.#parseCommand(args, environment);
+    const parsedCommand = administratorRequested ? null : this.#parseCommand(args, environment);
     let explicitPolicyProposal = null;
     if (args.prefix_rule !== undefined) {
       explicitPolicyProposal = this.#persistentPolicyProposal(
@@ -415,17 +415,17 @@ export class RemoteProcessManager {
     const windowsWorkspaceWrite =
       environment.permissionProfile === 'workspace-write' &&
       environment.platform === 'windows';
-    const trustedConfiguration = windowsWorkspaceWrite && !experimentalAdmin
+    const trustedConfiguration = windowsWorkspaceWrite && !administratorRequested
       ? loadTrustedCommands(this.trustedCommandsFile) : null;
-    const trustedCommand = windowsWorkspaceWrite && !experimentalAdmin
+    const trustedCommand = windowsWorkspaceWrite && !administratorRequested
       ? evaluateTrustedCommand(args.cmd, args.shell, environment, {
           snapshot: trustedConfiguration,
         })
       : null;
-    const trustedPackageScriptRule = experimentalAdmin ? null :
+    const trustedPackageScriptRule = administratorRequested ? null :
       await this.#matchTrustedPackageScript(args, workspaceHandle, environment);
     const trustedPackageScript = Boolean(trustedPackageScriptRule);
-    const policyRule = !experimentalAdmin && !timedFullAccess &&
+    const policyRule = !administratorRequested && !timedFullAccess &&
       environment.permissionProfile !== 'full-access' &&
       !trustedCommand?.matched &&
       !trustedPackageScript
@@ -582,7 +582,7 @@ export class RemoteProcessManager {
       });
       throw error;
     }
-    const diagnosticContext = !experimentalAdmin && windowsWorkspaceWrite && !trustedCommand?.matched &&
+    const diagnosticContext = !administratorRequested && windowsWorkspaceWrite && !trustedCommand?.matched &&
       forwardedArgs.sandbox_permissions !== 'approved_escalated' &&
       /\btailscale(?:\.exe)?\b/i.test(args.cmd)
       ? { command: args.cmd, environment, trusted: false }
@@ -597,13 +597,13 @@ export class RemoteProcessManager {
       diagnosticContext,
       Boolean(args.tty),
     );
-    if (experimentalAdmin) {
-      this.#emit('experimental_admin_restricted_dispatch', {
+    if (administratorRequested) {
+      this.#emit('administrator_agent_dispatch', {
         operation_id: operationId,
         environment_id: environment.id,
         workspace_handle: workspaceHandle.workspace_handle,
       });
-      return { ...recorded, experimental_admin_restricted: true };
+      return { ...recorded, administrator_agent: true };
     }
     if (trustedPackageScriptRule) {
       return {

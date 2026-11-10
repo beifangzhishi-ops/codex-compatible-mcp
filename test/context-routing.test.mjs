@@ -108,7 +108,7 @@ test('RemoteProcessManager requires context and rejects environment routing', as
   }
 });
 
-test('experimental administrator command stays sandboxed and cannot inherit trust or full-access grants', async () => {
+test('explicit administrator command bypasses ordinary command policy but not option validation', async () => {
   const workerHub = new FakeWorkerHub();
   const registry = {
     resolve(id) {
@@ -128,9 +128,9 @@ test('experimental administrator command stays sandboxed and cannot inherit trus
   const base = { workspace_handle: CONTEXT_ID, cmd: 'whoami /groups' };
   try {
     const result = await manager.execCommand({ ...base, run_as_admin: true });
-    assert.equal(result.experimental_admin_restricted, true);
+    assert.equal(result.administrator_agent, true);
     assert.equal(workerHub.calls.length, 1);
-    assert.equal(workerHub.calls[0].params.sandbox_permissions, 'experimental_admin_restricted');
+    assert.equal(workerHub.calls[0].params.sandbox_permissions, 'admin_elevated');
     assert.equal('run_as_admin' in workerHub.calls[0].params, false);
     await assert.rejects(manager.execCommand({
       ...base, run_as_admin: true, sandbox_permissions: 'require_escalated',
@@ -147,15 +147,15 @@ test('experimental administrator command stays sandboxed and cannot inherit trus
   }
 });
 
-test('Worker rejects experimental restricted admin on non-Windows and non-workspace-write profiles', () => {
-  assert.equal(resolvePermissionProfile({ platform: 'windows', permissionProfile: 'workspace-write' }, 'experimental_admin_restricted'), 'admin-workspace-write');
+test('Worker routes administrator commands only on Windows workspace-write profiles', () => {
+  assert.equal(resolvePermissionProfile({ platform: 'windows', permissionProfile: 'workspace-write' }, 'admin_elevated'), 'admin-elevated');
   for (const environment of [
     { platform: 'linux', permissionProfile: 'workspace-write' },
     { platform: 'windows', permissionProfile: 'full-access' },
     { platform: 'windows', permissionProfile: 'read-only' },
   ]) {
     assert.throws(
-      () => resolvePermissionProfile(environment, 'experimental_admin_restricted'),
+      () => resolvePermissionProfile(environment, 'admin_elevated'),
       /requires Windows workspace-write/,
     );
   }

@@ -62,7 +62,7 @@ export class NativeSandboxBackend {
       };
     }
 
-    if (!['read-only', 'workspace-write', 'admin-workspace-write'].includes(permissionProfile)) {
+    if (!['read-only', 'workspace-write'].includes(permissionProfile)) {
       throw new Error('Unsupported CCM permission profile: ' + permissionProfile);
     }
     if (environment.platform !== 'windows') {

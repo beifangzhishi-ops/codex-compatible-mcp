@@ -149,52 +149,6 @@ test('read-only blocks writes inside the workspace', async () => {
   }
 });
 
-test('experimental admin restricted token retains admin SID and refuses external file writes', async (t) => {
-  if (process.platform !== 'win32') return t.skip('Windows restricted token only');
-  async function settled(runtime, cmd) {
-    let next = await runtime.processManager.execCommand({
-      cmd, sandbox_permissions: 'experimental_admin_restricted', yield_time_ms: 5000,
-    });
-    let output = next.output;
-    for (let i = 0; next.session_id !== undefined && i < 10; i++) {
-      next = await runtime.processManager.writeStdin({
-        session_id: next.session_id, chars: '', yield_time_ms: 5000,
-      });
-      output += next.output;
-    }
-    return { ...next, output };
-  }
-  const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-admin-restricted-'));
-  const outsidePath = path.join(outsideDir, 'outside.txt');
-  const insidePath = path.join(stateDir, 'admin-restricted-test.txt');
-  fs.mkdirSync(stateDir, { recursive: true });
-  fs.writeFileSync(outsidePath, 'original', 'utf8');
-  const literal = outsidePath.replaceAll("'", "''");
-  const runtime = runtimeFor('workspace-write');
-  try {
-    const result = await settled(runtime, 'whoami /groups; whoami /priv');
-    assert.equal(result.exit_code, 0, result.output);
-    assert.match(result.output, /S-1-5-32-544/);
-    assert.match(result.output, /SeDebugPrivilege/, 'expected retained administrator privileges');
-    assert.doesNotMatch(result.output,
-      /SeRestorePrivilege|SeBackupPrivilege|SeTakeOwnershipPrivilege|SeSecurityPrivilege|SeManageVolumePrivilege/,
-      'restricted administrator token must not retain file access-bypass privileges');
-    const inside = await settled(runtime,
-      "Set-Content -LiteralPath '.state/admin-restricted-test.txt' -Value ok -ErrorAction Stop"
-    );
-    assert.equal(inside.exit_code, 0, inside.output);
-    assert.equal(fs.readFileSync(insidePath, 'utf8').trim(), 'ok');
-    const outside = await settled(runtime,
-      "Set-Content -LiteralPath '" + literal + "' -Value bypass -ErrorAction Stop"
-    );
-    assert.notEqual(outside.exit_code, 0, 'outside write unexpectedly succeeded');
-    assert.equal(fs.readFileSync(outsidePath, 'utf8'), 'original');
-  } finally {
-    runtime.close();
-    fs.rmSync(insidePath, { force: true });
-    fs.rmSync(outsideDir, { recursive: true, force: true });
-  }
-});
 test('long commands yield an integer session id and resume with write_stdin', async () => {
   const runtime = runtimeFor();
   try {

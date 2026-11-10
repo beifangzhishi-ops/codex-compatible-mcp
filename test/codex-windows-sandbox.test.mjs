@@ -72,7 +72,7 @@ test('Codex adapter preserves commands with semicolons and shell metacharacters 
 test('Codex adapter rejects workdir escape, external home and unsupported CCM profiles', () => {
   assert.throws(() => invocation({ cwd: 'C:\\other' }), /outside the registered workspace/);
   assert.throws(() => invocation({ cwd: path.win32.join(ROOT, '..', 'other') }), /outside the registered workspace/);
-  assert.throws(() => invocation({ permissionProfile: 'admin-workspace-write' }), /cannot accept/);
+  assert.throws(() => invocation({ permissionProfile: 'admin-elevated' }), /cannot accept/);
   assert.throws(() => invocation({ environment: { platform: 'linux', cwd: ROOT, workspaceRoots: [ROOT] } }), /Windows-only/);
   const unsafe = new CodexWindowsSandboxBackend({
     resolveRuntime: () => EXE, codexHome: path.win32.join(ROOT, '.codex'),

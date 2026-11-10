@@ -10,6 +10,8 @@ import { readCurrentCommandEnvironment } from '../windows-command-env.mjs';
 import { readCodexShellEnvironmentPolicy } from '../shell-environment-config.mjs';
 import { createShellEnvironment } from '../shell-environment.mjs';
 import { DEFAULT_CCM_CONFIG_FILE, readWorkerCaBundle } from '../ccm-config.mjs';
+import { AdministratorProcessClient } from '../admin/admin-process-client.mjs';
+import { directShellInvocation } from '../sandbox/native-sandbox.mjs';
 
 const DEFAULT_PTY_PROXY_PATH = fileURLToPath(
   new URL('../../../native/bin/ccm-pty-proxy.exe', import.meta.url),
@@ -78,6 +80,7 @@ export class NativeEnvironmentExecutor {
     shellEnvironmentPolicy = readCodexShellEnvironmentPolicy(),
     spawnProcess = spawnChild,
     fileExists = fs.existsSync,
+    administratorClient = new AdministratorProcessClient(),
   }) {
     this.sandboxBackend = sandboxBackend;
     this.childProxyPolicy = childProxyPolicy;
@@ -88,6 +91,7 @@ export class NativeEnvironmentExecutor {
     this.shellEnvironmentPolicy = shellEnvironmentPolicy;
     this.spawnProcess = spawnProcess;
     this.fileExists = fileExists;
+    this.administratorClient = administratorClient;
   }
 
   startProcess({
@@ -107,6 +111,26 @@ export class NativeEnvironmentExecutor {
     const childEnv = createShellEnvironment(commandEnv, this.shellEnvironmentPolicy, {
       platform: environment.platform,
     });
+    if (permissionProfile === 'admin-elevated') {
+      if (environment.platform !== 'windows') {
+        throw new Error('Administrator execution is supported only on Windows.');
+      }
+      const invocation = directShellInvocation({
+        platform: environment.platform,
+        shell,
+        command,
+        useProfile: this.shellEnvironmentPolicy.use_profile === true,
+      });
+      if (tty && !this.fileExists(this.ptyProxyPath)) {
+        throw new Error('CCM PTY proxy is missing; run npm run build:native.');
+      }
+      return this.administratorClient.startProcess({
+        file: tty ? this.ptyProxyPath : invocation.file,
+        args: tty ? ['--cwd', cwd, '--cols', '120', '--rows', '30', '--',
+          invocation.file, ...invocation.args] : invocation.args,
+        cwd, env: childEnv, onData, onExit,
+      });
+    }
     const invocation = this.sandboxBackend.buildInvocation({
       environment,
       command,

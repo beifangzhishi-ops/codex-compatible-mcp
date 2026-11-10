@@ -330,7 +330,8 @@ Worker default.
 **Not deployed:** CCM still uses its existing Windows native sandbox and approval
 logic. Neither Worker has been switched to the upstream Codex runtime. Until
 the entire decision chain is integrated and tested, do not call the CCM sandbox
-Codex-equivalent or assume experimental `run_as_admin` is safe.
+Codex-equivalent. The owner-approved local administrator agent is a separate
+CCM execution path; it is not claimed to reproduce Codex sandbox semantics.
 
 The native Codex CLI adapter has unit tests and opt-in privileged Windows
 integration tests. Its merged implementation is covered by the CCM Node test
@@ -393,17 +394,47 @@ platforms continue using the Worker's inherited environment. The Windows registr
 must be readable when starting a new command; errors are reported rather than
 silently executing with an outdated environment.
 
-CCM includes public Task Scheduler helpers for both Controller hosts and standalone Remote Workers. They run hidden under the current Windows user, start at logon, use `IgnoreNew` to avoid duplicate instances, and configure Task Scheduler restart-on-failure behavior. Each supervisor also restarts its own child process if that child exits unexpectedly. Both installers register their tasks with `RunLevel Highest` (elevated administrator token for an administrator account). Run the installers once from an **elevated PowerShell** to create or update the existing tasks; changing the installer source does not update an already registered task or elevate an already running Supervisor. Restart the task through Task Scheduler after updating it. Normal `ccm.restart` only restarts Supervisor-owned child processes and preserves the existing Supervisor token; it does not perform UAC elevation.
+CCM runs as the signed-in **ordinary Windows user**, not as an administrator.
+`scripts/install-ccm-autostart.ps1` and `scripts/install-ccm-worker-autostart.ps1`
+register the Controller group and Remote Worker scheduled tasks with `RunLevel
+Limited`. They start at logon, retry on failure and supervise their own child
+processes. Keep `CCM_PERMISSION_PROFILE=workspace-write` to restrict ordinary
+command writes to the selected project. Explicit Full Access grants and trusted
+unsandboxed commands use the **ordinary Worker's** Windows identity; they do not
+acquire administrator rights automatically.
 
-Keep `CCM_PERMISSION_PROFILE=workspace-write` when using an elevated Supervisor to retain the normal restricted-token execution path. The Controller host's task elevates the Controller, local Worker, and OAuth sidecar together; the standalone Remote Worker task elevates its Worker. A successfully elevated parent is not itself proof that the Windows restricted sandbox still denies writes outside the selected workspace: validate the boundary on the actual host before relying on it. Approved/escalated and separately trusted full-access commands inherit the Worker's administrator token.
+**Administrator execution (owner-approved CCM adaptation):** Run
+`scripts/install-ccm-admin-agent.ps1` **once from an already elevated PowerShell**
+on each Windows Worker machine. The installer creates a random private IPC key
+under `.state`, restricts its file ACL to the account, Administrators and SYSTEM,
+registers a separate `CCM Administrator Agent` Task Scheduler job with `RunLevel
+Highest`, and starts it. The agent checks that its own token is elevated before
+opening the machine-local named pipe. The ordinary Worker uses authenticated
+IPC to forward precisely a command invocation and its environment; the agent
+streams stdout/stderr, handles stdin and cancellation, and returns an exit code.
+The Worker never receives the administrator token. Missing agents, invalid keys
+or broken connections fail closed rather than running as a different user.
 
-**Experimental per-command administrator restriction:** On a Windows Worker launched with an elevated administrator token and `CCM_PERMISSION_PROFILE=workspace-write`, `exec_command` accepts `run_as_admin: true` to construct an `admin-workspace-write` restricted token without a CCM approval card. Omitting the parameter uses the unchanged default sandbox. This is an invocation option, not a Worker permission profile or a per-conversation grant: other calls or conversations can also request it if they have tool access. It cannot be combined with `sandbox_permissions=require_escalated`, `prefix_rule`, or `full_access_grant_id`, and does not apply to `apply_patch`. The native helper retains the Administrators SID, applies the original workspace write-restricting SIDs, and drops selected filesystem-bypass privileges (backup, restore, take ownership, security and manage-volume). Other administrator capabilities can bypass access checks or fail on service/process objects; do not treat this experiment as a robust boundary without host-specific tests. Tested separately from ordinary Full Access approvals.
+To explicitly invoke it, set `run_as_admin=true` on `exec_command` with a valid
+`workspace_handle`. This does **not** show a per-command CCM approval card.
+It runs with full administrator permissions and **no workspace write boundary**.
+Only explicit parameter use selects the agent; no command matching or sandbox
+failure should trigger an automatic administrator retry. The option cannot
+combine with `sandbox_permissions=require_escalated`, `prefix_rule` or
+`full_access_grant_id`; `apply_patch` is not privileged. Treat tool access as
+authorization to request administrator execution: this is a usability policy,
+not a boundary against an intentionally hostile tool client.
 
-6v experimental findings (2026-11-05): the helper retained the Administrators SID and `SeDebugPrivilege`, allowed a file write in the workspace, and denied overwriting a test file under a separate temporary directory. A non-mutating `OpenSCManager(SC_MANAGER_CREATE_SERVICE)` probe succeeded with the unrestricted parent token but returned no handle (Win32 error 2) under the experimental token. Therefore administrator group membership does **not** establish usable service administration for this profile; do not use it in place of Full Access for service control or claim general isolation from privileged Windows bypasses. The helper explicitly refuses this mode if its parent Worker does not have an enabled administrator role.
-
-**Full-privilege follow-up (2026-11-05):** Temporarily retaining all administrator privileges in the experimental token did **not** preserve the outside-workspace write boundary. Ordinary `Set-Content` and `icacls /grant` against a standalone temporary file outside the workspace were denied, but a Win32 test program enabled `SeRestorePrivilege`, opened the same file with `FILE_FLAG_BACKUP_SEMANTICS`, and successfully overwrote it. `OpenSCManager(SC_MANAGER_CREATE_SERVICE)` was still denied by the restricting SID, while even an in-workspace `icacls /grant` failed because the capability SID currently lacks `WRITE_DAC`. The test changed only temporary test files. This full-privilege variant was rolled back and the 6v native helper rebuilt; the original privilege-limited experimental mode remains. `WRITE_RESTRICTED` alone cannot guarantee both unrestricted administrator actions and strict outside-workspace write confinement. Achieving that combination requires enforcement independent of the administrator token, not merely changing CreateRestrictedToken flags.
-
-At Windows Worker startup, `ccm-worker-token-owner.exe` sets the Worker's **default file owner** (`TokenOwner`) to the actual user SID from its Windows token, instead of the Administrators group that an elevated token can use as its default owner. This leaves the Worker elevated and keeps the restricted-token sandbox unchanged, but newly created folders and child-process Git clones normally belong to the signed-in user (avoiding Git `dubious ownership` on later restricted commands). The helper only changes the immediate parent Worker's token and verifies the same token user; no Windows username or SID is hardcoded. Both launchers build this native helper with `npm run build:native` before Worker startup; when deploying only a Worker restart, build it on each updated host **before** requesting `ccm.restart`. A missing or failing helper stops that Worker from starting, rather than silently recreating Administrators-owned project folders. Existing folder owners are not modified; repair those separately if needed. This change does not fix Git Bash/MSYS `sh.exe` signal-pipe failures inside the Windows restricted sandbox; a Git invocation matched by `ccm.config.json` (`trusted_commands`) uses the Controller-authorized unsandboxed route.
+**Deployment order (both 6v and noha):** Install and test the separate elevated
+agent **before** replacing the currently scheduled CCM tasks; then run the
+relevant normal-task installer, restart that scheduled task and check that its
+actual principal is `Limited`. Test ordinary Git/Node/Python, a denied
+outside-project write and an explicitly elevated command. Reinstalling the
+scheduled tasks changes their saved principal; editing the scripts or using
+`ccm.restart` alone does not. Keep a recoverable session on each machine until
+the normal Worker reconnects. A Task Scheduler administrator authorization may
+be required for one-time installation; individual administrator commands do
+not require CCM approval afterward.
 
 For an assistant-operated restart use `ccm.restart` rather than `exec_command`/`taskkill` or any command-prefix authorization. Its input is restricted to `{ "component": "controller_service_group" | "worker", "environment_id": "<registered id>" }`. The Controller checks `ccm.config.json` (`restart_allowlist`) on **every request**, requiring exact environment IDs in `controller_service_groups` or `workers` (no wildcard). The Controller group may only target the locally supervised Controller identity; a Worker request may only target an actively connected, healthy registered Worker. Neither action accepts an executable, shell, script, PID, path, nor arbitrary arguments; no `exec_command` or approval-policy permissions are created. Add new Worker identities by updating the allowlist, without changing code or restarting the Controller. Invalid/missing configuration fails closed.
 
