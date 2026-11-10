@@ -40,10 +40,8 @@ test('PowerShell parser splits real executable boundaries outside quotes', () =>
 
 test('PowerShell parser fails closed on unsupported execution syntax', () => {
   for (const command of [
-    '& git push origin main',
     '& $program status',
     '& (Get-Command tailscale.exe) status',
-    'Write-Output okay; & tailscale.exe status',
     "& 'C:\\Program Files\\Tailscale\\tailscale.exe'$(whoami)",
     'Write-Output $(whoami)',
     'Write-Output "$(whoami)"',
@@ -54,12 +52,64 @@ test('PowerShell parser fails closed on unsupported execution syntax', () => {
   }
 });
 
-test('Codex keeps PowerShell invocation operators opaque even with absolute literal paths', () => {
+test('CCM extends Codex policy matching to static PowerShell invocation operators', () => {
   const fullPath = 'C:\\Program Files\\Tailscale\\tailscale.exe';
-  assert.equal(parseShellCommand(`& '${fullPath}' status`, { shell: 'powershell.exe' }), null);
-  assert.equal(parseShellCommand(`& "${fullPath}" status`, { shell: 'powershell.exe' }), null);
-  assert.equal(parseShellCommand(`Write-Output okay; & '${fullPath}' status`,
-    { shell: 'pwsh.exe' }), null);
+  for (const shell of ['powershell.exe', 'pwsh.exe']) {
+    for (const quote of ["'", '"']) {
+      const parsed = parseShellCommand(`& ${quote}${fullPath}${quote} status`, { shell });
+      assert.deepEqual(parsed?.segments.map((segment) => segment.tokens), [
+        [fullPath, 'status'],
+      ]);
+      assert.equal(parsed?.sourceBound, false);
+    }
+    assert.deepEqual(parseShellCommand('Write-Output okay; & git status',
+      { shell })?.segments.map((segment) => segment.tokens), [
+      ['Write-Output', 'okay'], ['git', 'status'],
+    ]);
+    assert.deepEqual(parseShellCommand("& '.\\build tools\\tool.exe' -v",
+      { shell })?.segments.map((segment) => segment.tokens), [
+      ['.\\build tools\\tool.exe', '-v'],
+    ]);
+    assert.deepEqual(parseShellCommand('& .\\tools\\build.ps1 -Verbose',
+      { shell })?.segments.map((segment) => segment.tokens), [
+      ['.\\tools\\build.ps1', '-Verbose'],
+    ]);
+  }
+});
+
+test('CCM allows literal environment prefixes and safely decomposes mixed compounds', () => {
+  const fullPath = 'C:\\Program Files\\Tailscale\\tailscale.exe';
+  const cases = [
+    [`$env:TEXMFHOME='C:\\texmf'; & '${fullPath}' status`, [[fullPath, 'status']]],
+    [`$env:MODE='x;y'; $env:TEST="simple"; & "${fullPath}" status`,
+      [[fullPath, 'status']]],
+    [`git status; $env:MODE='x'; & '${fullPath}' status | Measure-Object`,
+      [['git', 'status'], [fullPath, 'status'], ['Measure-Object']]],
+    ["$env:MODE='x'; git status && git log -1",
+      [['git', 'status'], ['git', 'log', '-1']]],
+  ];
+  for (const [script, expected] of cases) {
+    const parsed = parseShellCommand(script, { shell: 'powershell.exe' });
+    assert.deepEqual(parsed?.segments.map((segment) => segment.tokens),
+      expected, script);
+  }
+});
+
+test('CCM wrapper extension leaves dynamic and trailing PowerShell statements opaque', () => {
+  for (const script of [
+    '$env:MODE=$other; git status',
+    '$env:MODE="$(whoami)"; git status',
+    '$env:MODE="hello $variable"; git status',
+    '$env:MODE=(Get-Date); git status',
+    "$env:MODE='x'; & $program status",
+    "$env:MODE='x'; & (Get-Command git) status",
+    "git status; $env:MODE='x'",
+    "git status | $env:MODE='x'; git log -1",
+    "git status && $env:MODE='x'; git log -1",
+  ]) {
+    assert.equal(parseShellCommand(script, { shell: 'powershell.exe' }),
+      null, script);
+  }
 });
 
 test('cmd parser respects caret-escaped metacharacters', () => {

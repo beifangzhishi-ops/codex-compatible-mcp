@@ -226,9 +226,9 @@ export class RemoteProcessManager {
       }
       const matches = command.segments.filter((segment) =>
         tokenPrefixMatches(prefix, segment.tokens));
-      if (matches.length !== 1) {
+      if (!matches.length) {
         throw new Error(
-          'prefix_rule must match exactly one executable segment of the frozen command.',
+          'prefix_rule must match at least one executable segment of the frozen command.',
         );
       }
       return {
@@ -239,12 +239,50 @@ export class RemoteProcessManager {
       };
     }
 
-    if (command.segments.length === 1) {
+    // A repeated identical command needs only one reusable Allow prefix.
+    // Do not silently choose a broader prefix for differing segments.
+    if (command.segments.every((segment) =>
+      segment.tokens.length === command.segments[0].tokens.length &&
+      segment.tokens.every((token, index) =>
+        token === command.segments[0].tokens[index]))) {
       return {
         parsed: command,
         policy_kind: 'prefix',
         policy_persistable: true,
         prefix_rule: [...command.segments[0].tokens],
+      };
+    }
+
+    // A partially authorized compound command should offer an Allow prefix
+    // for its sole remaining distinct command. Requiring the model to
+    // re-propose an already-identifiable prefix causes repeat approvals.
+    const trustedConfig = environment.platform === 'windows' &&
+      environment.permissionProfile === 'workspace-write'
+      ? loadTrustedCommands(this.trustedCommandsFile) : null;
+    const unmatched = command.segments.filter((segment) => {
+      const builtIn = segment.source && trustedConfig && !trustedConfig.error &&
+        evaluateTrustedCommand(segment.source, args.shell, environment, {
+          snapshot: trustedConfig,
+        });
+      if (builtIn?.matched && builtIn.cmd === segment.source && !builtIn.shell) {
+        return false;
+      }
+      return !this.execPolicyStore?.matchSegment?.({
+        environment,
+        tokens: segment.tokens,
+        emit: false,
+      });
+    });
+    if (unmatched.length && unmatched.length < command.segments.length &&
+        unmatched.every((segment) =>
+          segment.tokens.length === unmatched[0].tokens.length &&
+          segment.tokens.every((token, index) =>
+            token === unmatched[0].tokens[index]))) {
+      return {
+        parsed: command,
+        policy_kind: 'prefix',
+        policy_persistable: true,
+        prefix_rule: [...unmatched[0].tokens],
       };
     }
 

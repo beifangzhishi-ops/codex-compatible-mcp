@@ -56,7 +56,7 @@ test('Codex parser failures cannot fall back to guessable tokens', () => {
   }), null);
 });
 
-test('a single saved exe prefix does not authorize any preceding PowerShell assignment', {
+test('CCM reuses one saved exe prefix for literal environment and invocation wrappers', {
   skip: skipNative && 'Build native helpers first: npm run build:native',
 }, () => {
   const exe = 'C:\\texlive\\2026\\bin\\windows\\xdvipdfmx.exe';
@@ -66,9 +66,12 @@ test('a single saved exe prefix does not authorize any preceding PowerShell assi
   const args = (cmd) => ({ cmd, shell: 'powershell.exe' });
   assert.equal(store.match({ environment, args: args(
     `$env:TEXMFHOME='C:\\texmf'; & '${exe}' output.xdv`),
-  }), null);
+  })?.decision, 'allow');
   assert.equal(store.match({ environment, args: args(
     `& '${exe}' output.xdv`),
+  })?.decision, 'allow');
+  assert.equal(store.match({ environment, args: args(
+    `$env:TEXMFHOME=$dynamic; & '${exe}' output.xdv`),
   }), null);
   assert.equal(parseShellCommand('git status | git log -1')?.segments.length, 2);
 });

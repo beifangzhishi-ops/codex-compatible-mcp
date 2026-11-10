@@ -1074,7 +1074,7 @@ test('invalid explicit prefix_rule is rejected before approval creation', async 
         sandbox_permissions: 'require_escalated',
         prefix_rule: ['git'],
       }),
-      /match exactly one executable segment/i,
+      /match at least one executable segment/i,
     );
     assert.equal(approvals, 0);
     assert.equal(workerHub.calls.length, 0);
@@ -1101,6 +1101,91 @@ test('compound command without explicit prefix is not persistable', async () => 
     });
     assert.equal(pending.policy_persistable, false);
     assert.equal(pending.prefix_rule, null);
+  } finally {
+    await manager.close();
+  }
+});
+
+test('repeated identical compound segments can save and reuse one prefix', async () => {
+  const workerHub = new FakeWorkerHub();
+  const approvalManager = new ApprovalManager();
+  const execPolicyStore = new ExecPolicyStore();
+  const manager = new RemoteProcessManager({
+    environmentRegistry: restrictedRegistry(),
+    workerHub,
+    approvalManager,
+    workspaceHandleManager: fakeWorkspaceHandleManager(),
+    execPolicyStore,
+  });
+  const workspace_handle = '00000000-0000-4000-8000-000000000001';
+  try {
+    const pending = await manager.execCommand({
+      workspace_handle,
+      cmd: 'git status --short; git status --short',
+      sandbox_permissions: 'require_escalated',
+    });
+    assert.equal(pending.policy_persistable, true);
+    assert.deepEqual(pending.prefix_rule, ['git', 'status', '--short']);
+    const explicit = await manager.execCommand({
+      workspace_handle,
+      cmd: 'git status --short && git status --short',
+      sandbox_permissions: 'require_escalated',
+      prefix_rule: ['git', 'status'],
+    });
+    assert.equal(explicit.policy_persistable, true);
+    assert.deepEqual(explicit.prefix_rule, ['git', 'status']);
+
+    const frozen = approvalManager.prepareAppApproval(pending.approval_id);
+    const saved = await manager.resolvePendingExecution({
+      approval_id: pending.approval_id,
+      approval_nonce: frozen.approvalNonce,
+      decision: 'approve_always',
+    });
+    assert.equal(saved.policy_saved, true);
+    const automatic = await manager.execCommand({
+      workspace_handle,
+      cmd: 'git status --short && git status --short',
+    });
+    assert.equal(automatic.policy_auto_approved, true);
+    assert.deepEqual(execPolicyStore.list()[0].prefix_tokens,
+      ['git', 'status', '--short']);
+  } finally {
+    await manager.close();
+  }
+});
+
+test('a partially allowed compound proposes the sole missing command prefix', async () => {
+  const workerHub = new FakeWorkerHub();
+  const approvalManager = new ApprovalManager();
+  const execPolicyStore = new ExecPolicyStore();
+  execPolicyStore.allow({ prefixTokens: ['git', 'status', '--short'] });
+  const manager = new RemoteProcessManager({
+    environmentRegistry: restrictedRegistry(),
+    workerHub,
+    approvalManager,
+    workspaceHandleManager: fakeWorkspaceHandleManager(),
+    execPolicyStore,
+  });
+  const workspace_handle = '00000000-0000-4000-8000-000000000001';
+  const cmd = 'git status --short && git log -1';
+  try {
+    const pending = await manager.execCommand({
+      workspace_handle,
+      cmd,
+      sandbox_permissions: 'require_escalated',
+    });
+    assert.equal(pending.policy_persistable, true);
+    assert.deepEqual(pending.prefix_rule, ['git', 'log', '-1']);
+    const frozen = approvalManager.prepareAppApproval(pending.approval_id);
+    const saved = await manager.resolvePendingExecution({
+      approval_id: pending.approval_id,
+      approval_nonce: frozen.approvalNonce,
+      decision: 'approve_always',
+    });
+    assert.equal(saved.policy_saved, true);
+    const automatic = await manager.execCommand({ workspace_handle, cmd });
+    assert.equal(automatic.policy_auto_approved, true);
+    assert.equal(execPolicyStore.list().length, 2);
   } finally {
     await manager.close();
   }

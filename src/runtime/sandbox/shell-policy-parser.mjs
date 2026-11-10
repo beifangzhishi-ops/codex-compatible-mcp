@@ -141,10 +141,16 @@ function unsupportedOutsideQuote(command, index, shellKind) {
   return false;
 }
 
-// PowerShell needs the call operator to invoke an executable whose absolute
-// path contains spaces. Accept only a literal quoted drive-absolute
-// executable at the beginning of a segment; never accept computed targets.
-const literalCall = /^&\s+(?:'[A-Za-z]:[\\/][^']+'|"[A-Za-z]:[\\/][^"$`]+")(?=\s|$)/;
+// PowerShell uses & for both quoted paths and bare executable names. These
+// are static invocation targets; expressions, variables and concatenations
+// are not. This is a CCM-approved extension to the upstream lowering subset.
+const literalCall = /^&\s+(?:'(?:[^']|'')+'|"[^"$`]+"|[A-Za-z_.][A-Za-z0-9_.:\\/-]*)(?=\s|$)/;
+
+// An environment assignment is a policy-neutral prefix only when its entire
+// value is a non-expanding literal. Do not evaluate environment variables or
+// infer the target of a dynamic invocation.
+const literalEnvironmentAssignment =
+  /^\$env:[A-Za-z_][A-Za-z0-9_]*\s*=\s*(?:'(?:[^']|'')*'|"[^"$`]*")$/i;
 
 function parseLocalCommandSources(command, { shell = 'powershell' } = {}) {
   if (typeof command !== 'string' || !command.trim()) return null;
@@ -254,6 +260,54 @@ function parseLocalCommandSources(command, { shell = 'powershell' } = {}) {
   return { shell: shellKind, segments, operators };
 }
 
+// The pinned Codex parser deliberately leaves PowerShell assignments and &
+// calls opaque. When it rejects the complete script, recognize only literal
+// env statements between statements and static call targets, then ask the
+// unchanged Codex parser to validate every remaining ordinary command.
+// This does not rewrite or execute the submitted script.
+function parseLiteralPowerShellWrappers(command, shellKind) {
+  const local = parseLocalCommandSources(command, { shell: shellKind });
+  if (!local) return null;
+  const segments = [];
+  let recognizedWrapper = false;
+  for (let i = 0; i < local.segments.length; i += 1) {
+    const segment = local.segments[i];
+    if (literalEnvironmentAssignment.test(segment.source)) {
+      // A prefix must lead to a command. Assignments cannot be pipeline or
+      // conditional-chain operands, nor can a trailing assignment inherit
+      // the preceding command's Allow decision.
+      if (i === local.segments.length - 1 ||
+          (i > 0 && ![';', 'newline'].includes(local.operators[i - 1])) ||
+          ![';', 'newline'].includes(local.operators[i])) return null;
+      recognizedWrapper = true;
+      continue;
+    }
+    const isCall = literalCall.test(segment.source);
+    if (isCall) {
+      recognizedWrapper = true;
+    } else {
+      const lowered = parseCodexPowerShellScript(segment.source);
+      if (!lowered || lowered.length !== 1 ||
+          lowered[0].length !== segment.tokens.length ||
+          !lowered[0].every((token, index) => token === segment.tokens[index])) {
+        return null;
+      }
+    }
+    segments.push({
+      // Only the independently validated ordinary command may participate
+      // in built-in trust. A static & call has no rewritable source binding.
+      source: isCall ? '' : segment.source,
+      start: isCall ? null : segment.start,
+      end: isCall ? null : segment.end,
+      tokens: segment.tokens,
+    });
+  }
+  if (!recognizedWrapper || !segments.length) return null;
+  // Built-in executable rewrites require verified original source bindings.
+  // They must never inherit trust merely from this policy-only extension.
+  return { shell: shellKind, segments, operators: [], sourceBound: false };
+}
+
 export function parseShellCommand(command, { shell = 'powershell' } = {}) {
   const shellKind = canonicalShell(shell) || 'powershell';
   if (shellKind === 'cmd') return parseLocalCommandSources(command, { shell });
@@ -262,7 +316,7 @@ export function parseShellCommand(command, { shell = 'powershell' } = {}) {
   // The Codex native parser is the sole authority for lowering PowerShell
   // syntax into commands that may receive an Allow decision.
   const lowered = parseCodexPowerShellScript(command);
-  if (!lowered) return null;
+  if (!lowered) return parseLiteralPowerShellWrappers(command, shellKind);
 
   // Source slices are only used for CCM's separate built-in command rewrite.
   // Preserve them when their independently parsed tokens agree exactly with
