@@ -444,6 +444,9 @@ For a host where the administrator agent is already installed, run
 preflights the elevated agent and delegates the actual service restart to an
 independent temporary scheduled task, which records its recovery/rollback in
 `logs/ccm-privilege-switch.log`.
+The switch verifies that the old scheduled task has exited before starting the
+new instance; the Controller Supervisor also waits for the previous global
+mutex owner to exit and logs native-build failures before the main loop.
 
 For an assistant-operated restart use `ccm.restart` rather than `exec_command`/`taskkill` or any command-prefix authorization. Its input is restricted to `{ "component": "controller_service_group" | "worker", "environment_id": "<registered id>" }`. The Controller checks `ccm.config.json` (`restart_allowlist`) on **every request**, requiring exact environment IDs in `controller_service_groups` or `workers` (no wildcard). The Controller group may only target the locally supervised Controller identity; a Worker request may only target an actively connected, healthy registered Worker. Neither action accepts an executable, shell, script, PID, path, nor arbitrary arguments; no `exec_command` or approval-policy permissions are created. Add new Worker identities by updating the allowlist, without changing code or restarting the Controller. Invalid/missing configuration fails closed.
 

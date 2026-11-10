@@ -12,15 +12,38 @@ New-Item -ItemType Directory -Force -Path $stateDir,$logDir | Out-Null
 foreach($required in @($publicScript,$buildScript)){
     if(-not (Test-Path $required)){ throw "Missing runtime file: $required" }
 }
-& $node $buildScript
-if($LASTEXITCODE -ne 0){ throw 'CCM native build failed.' }
+try {
+    & $node $buildScript
+    if($LASTEXITCODE -ne 0){ throw "CCM native build failed, exit=$LASTEXITCODE." }
+} catch {
+    "[$(Get-Date -Format s)] bootstrap error: $($_.Exception.Message)" |
+        Out-File -LiteralPath $supervisorLog -Encoding utf8 -Append
+    throw
+}
 
 $profile=[Environment]::GetEnvironmentVariable('CCM_PERMISSION_PROFILE','User')
 if($profile){ $env:CCM_PERMISSION_PROFILE=$profile }
 
 $createdNew=$false
 $mutex=New-Object System.Threading.Mutex($true,'Global\CcmSelfhostGateway',[ref]$createdNew)
-if(-not $createdNew){ $mutex.Dispose(); exit 0 }
+if(-not $createdNew){
+    # On a Highest -> Limited migration the old elevated Supervisor may still
+    # be releasing its mutex after Task Scheduler has stopped its launcher.
+    # Wait for release rather than exiting successfully and preventing the
+    # configured restart-on-failure policy from recovering the service.
+    $acquired=$false
+    try {
+        $acquired=$mutex.WaitOne(60000)
+    } catch [System.Threading.AbandonedMutexException] {
+        $acquired=$true
+    }
+    if(-not $acquired){
+        $mutex.Dispose()
+        "[$(Get-Date -Format s)] bootstrap error: Supervisor mutex was not released within 60 seconds" |
+            Out-File -LiteralPath $supervisorLog -Encoding utf8 -Append
+        throw 'CCM supervisor mutex is still owned by another process.'
+    }
+}
 
 $selfInfo=Get-CimInstance Win32_Process -Filter "ProcessId=$PID"
 $launcherPid=[int]$selfInfo.ParentProcessId

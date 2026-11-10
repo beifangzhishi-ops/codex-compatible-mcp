@@ -44,7 +44,17 @@ try {
     Start-Sleep -Seconds 8
     Log "stopping $taskName before Limited restart"
     Stop-ScheduledTask -TaskName $taskName -ErrorAction Stop
-    Start-Sleep -Seconds 6
+    # Task Scheduler's IgnoreNew mode silently drops a Start request while the
+    # old task is still Running. Stop-ScheduledTask can return before that
+    # transition completes, so confirm it instead of using a fixed delay.
+    $stopped=$false
+    for($i=0;$i -lt 60;$i++){
+        $current=Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+        if($current.State -ne 'Running'){ $stopped=$true; break }
+        Start-Sleep -Seconds 1
+    }
+    if(-not $stopped){ throw "Old $taskName task did not finish stopping." }
+    Log "confirmed $taskName stopped before Limited restart"
     Log "starting $taskName with Limited principal"
     Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
     $ok=$false

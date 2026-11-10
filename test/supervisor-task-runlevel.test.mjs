@@ -28,4 +28,14 @@ test('privilege migration independently schedules a fully-qualified elevated swi
   assert.match(finish, /Start-ScheduledTask[^\r\n]*-ErrorAction Stop/);
   assert.match(worker, /WindowsIdentity\]::GetCurrent\(\)\.Name/);
   assert.match(switchScript, /WindowsIdentity\]::GetCurrent\(\)\.Name/);
+  assert.match(switchScript, /confirmed \$taskName stopped before Limited restart/);
+  assert.match(switchScript, /\$current.State -ne 'Running'/);
+});
+
+test('Controller Supervisor waits on the prior instance mutex during privilege migration', async () => {
+  const script = await fs.readFile(new URL('../scripts/ccm-supervisor.ps1', import.meta.url), 'utf8');
+  assert.match(script, /\$mutex\.WaitOne\(60000\)/);
+  assert.match(script, /bootstrap error: CCM native build failed|bootstrap error: \$\(\$_\.Exception\.Message\)/);
+  const installer = await fs.readFile(new URL('../scripts/install-ccm-autostart.ps1', import.meta.url), 'utf8');
+  assert.match(installer, /WindowsIdentity\]::GetCurrent\(\)\.Name/);
 });
