@@ -436,6 +436,13 @@ the normal Worker reconnects. A Task Scheduler administrator authorization may
 be required for one-time installation; individual administrator commands do
 not require CCM approval afterward.
 
+For a host where the administrator agent is already installed, run
+`scripts/complete-ccm-privilege-split.ps1 -Role RemoteWorker` or
+`-Role Controller` through `exec_command(run_as_admin=true)`. The script
+preflights the elevated agent and delegates the actual service restart to an
+independent temporary scheduled task, which records its recovery/rollback in
+`logs/ccm-privilege-switch.log`.
+
 For an assistant-operated restart use `ccm.restart` rather than `exec_command`/`taskkill` or any command-prefix authorization. Its input is restricted to `{ "component": "controller_service_group" | "worker", "environment_id": "<registered id>" }`. The Controller checks `ccm.config.json` (`restart_allowlist`) on **every request**, requiring exact environment IDs in `controller_service_groups` or `workers` (no wildcard). The Controller group may only target the locally supervised Controller identity; a Worker request may only target an actively connected, healthy registered Worker. Neither action accepts an executable, shell, script, PID, path, nor arbitrary arguments; no `exec_command` or approval-policy permissions are created. Add new Worker identities by updating the allowlist, without changing code or restarting the Controller. Invalid/missing configuration fails closed.
 
 The dedicated restart RPC makes the supervised target exit after acknowledging the request. `ccm-supervisor.ps1` restarts the Controller, local Worker and OAuth sidecar as a group; `ccm-worker-supervisor.ps1` or `LocalWorkerSupervisor` restores an individual Worker. Controller service-group restart checks the existing Supervisor-owned gateway parent PID; remote-Worker restart checks the Supervisor-owned Worker PID; the local Worker uses its Supervisor launch marker. Processes without verified supervision reject restart. An accepted response means **requested, not recovered**: after the relevant reconnect, independently verify Controller health, Worker normal state, and OAuth sidecar health. The Controller connection will be interrupted when restarting its service group. The installer scripts manage startup, not routine restart; do not alter Task Scheduler configuration just to issue a restart.
