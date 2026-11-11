@@ -24,13 +24,14 @@ The original action must stay bound to its frozen command, arguments, Worker and
 ## Verified observations
 
 - CPA `GET /v1/models` returned `codex-auto-review`.
-- CPA `POST /v1/responses` returned a valid first function call with `call_id`.
-- An HTTP `previous_response_id` continuation using `function_call_output` returned HTTP 400, `No tool call found for function call output`. This is an outstanding **tool-side continuation/adapter** test; it does not demonstrate a problem with the model generating function calls. No successful multi-round CPA tool-result continuation has been recorded for this target yet.
+- On 2026-11-11, the real CPA `POST /v1/responses` **stateless full-history replay path passed twice**. The model requested `inspect_example_action`, consumed its simulated result, then requested `inspect_example_authorization`, consumed that result, and returned a valid JSON decision with `outcome: "allow"`. All three inference requests completed successfully; no actual execution or filesystem approval was performed.
+- The alternate HTTP `previous_response_id` continuation using `function_call_output` **still fails** with HTTP 400, `No tool call found for function call output`. Thus the currently verified adapter route is **full input history replay**, explicitly including the preceding assistant function calls and tool result messages. This is a **tool-side continuation/adapter** distinction, not a model-generation defect. Root cause of server-state continuation has not been established.
+- Reproducible opt-in live probe: `scripts/probe-cpa-auto-review.mjs`. It reads the actual local CPA client key from the sibling CPA project's ignored `config.yaml` (or `CPA_CONFIG`), uses only mock tool results, never prints credentials and never dispatches the action under review. It checks both continuation styles and validates the final decision JSON.
 - The separate Codex Core MCP project recorded a native Guardian MCP end-to-end approval PASS on 2026-11-10. That result does not imply the current CCM Controller supports Guardian already.
 
 ## Acceptance before implementation is called complete
 
-1. Exercise a real CPA review with at least two tool-call/result exchanges and a final structured decision. Resolve the actual HTTP/WebSocket tool continuation contract in the adapter.
+1. **Live model/tool protocol probe passed via stateless replay (2026-11-11).** Two tool-call/result exchanges and a valid structured final decision are verified. Use explicit input history replay in the future adapter unless another continuation protocol passes its own acceptance; the server-state `previous_response_id` route is not functional in this test. Real CCM integration is still pending.
 2. Demonstrate the Reviewer has the same effective tool permissions as the main model, including an authorized non-read-only tool action; no dedicated read-only ceiling and no reviewer privilege inflation.
 3. Demonstrate the reviewer accepts the main model's account of user instructions and authorization without independently fetching the original Host conversation.
 4. Cover allow/deny, failed JSON, timeout, cancelled review, tool-call failures and denial-limit behavior. On an unavailable or malformed reviewer result, no reviewed command may run; the existing human approval route may be offered.
