@@ -25,6 +25,27 @@ function metadata() {
   };
 }
 
+// Windows may allocate test-only ephemeral ports that Fetch forbids even for
+// loopback. Use the HTTP client directly when testing the sidecar's wire API.
+function httpRequestLocal(url, options = {}) {
+  return new Promise((resolve, reject) => {
+    const request = http.request(url, {
+      method: options.method || 'GET',
+      headers: options.headers,
+    }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('error', reject);
+      response.on('end', () => resolve(new Response(Buffer.concat(chunks), {
+        status: response.statusCode,
+        headers: response.headers,
+      })));
+    });
+    request.on('error', reject);
+    request.end(options.body);
+  });
+}
+
 test('OAuth config exposes CCM protected-resource identities', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-oauth-config-'));
   try {
@@ -127,7 +148,7 @@ test('OAuth sidecar serves metadata and bearer challenge', async () => {
     const address = runtime.server.address();
     const base = 'http://127.0.0.1:' + address.port;
 
-    const metadataResponse = await fetch(
+    const metadataResponse = await httpRequestLocal(
       base + '/.well-known/oauth-authorization-server/ccm',
     );
     assert.equal(metadataResponse.status, 200);
@@ -135,7 +156,7 @@ test('OAuth sidecar serves metadata and bearer challenge', async () => {
     assert.equal(metadataBody.issuer, 'https://example.test/ccm');
     assert.equal(metadataBody.code_challenge_methods_supported[0], 'S256');
 
-    const protectedResponse = await fetch(base + '/ccm/mcp', {
+    const protectedResponse = await httpRequestLocal(base + '/ccm/mcp', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: '{}',
