@@ -1,6 +1,16 @@
 {
   "version": 1,
   "controller": {
+    "guardian": {
+      "enabled": false,
+      "model": "codex-auto-review",
+      "base_url": "http://127.0.0.1:8317/v1",
+      "api_key_config": null,
+      "timeout_ms": 90000,
+      "max_attempts": 2,
+      "max_turns": 8,
+      "max_tool_calls": 16
+    },
     "env": {
       "CCM_SIDECAR_HOST": "127.0.0.1",
       "CCM_SIDECAR_PORT": "18208",

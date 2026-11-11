@@ -22,6 +22,7 @@ import { TransferTaskManager } from './transfer-task-manager.mjs';
 import { ApprovalReceiptStore } from './approval-receipt-store.mjs';
 import { VerificationInputManager } from './verification-input-manager.mjs';
 import { WebFullAccess } from './web-full-access.mjs';
+import { GuardianReviewer } from './guardian-reviewer.mjs';
 
 const installRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -91,6 +92,7 @@ export function createControllerRuntime(options = {}) {
       workerHub,
       stateFile: options.workspaceHandleStateFile,
     });
+  const guardianReviewer = options.guardianReviewer || new GuardianReviewer({ audit });
   const processManager = options.processManager || new RemoteProcessManager({
     environmentRegistry,
     workerHub,
@@ -101,6 +103,7 @@ export function createControllerRuntime(options = {}) {
     trustedPackageScriptStore,
     audit,
     webFullAccess,
+    guardianReviewer,
   });
   const verificationInputManager = options.verificationInputManager ||
     new VerificationInputManager({ processManager });
@@ -140,6 +143,7 @@ export function createControllerRuntime(options = {}) {
     environmentRegistry,
     workerHub,
     approvalManager,
+    guardianReviewer,
     webFullAccess,
     codexPolicy,
     trustedPackageScriptStore,

@@ -83,6 +83,7 @@ if (spawnLocalWorker) {
 }
 
 const { registry: toolRegistry } = createToolRegistry(runtime);
+runtime.guardianReviewer?.attachToolRegistry(toolRegistry);
 const controller = createHttpController({
   toolRegistry,
   runtime,

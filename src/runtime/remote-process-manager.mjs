@@ -9,6 +9,7 @@ import {
   hashPackageScript,
   parsePackageScriptCommand,
 } from '../controller/package-script-policy.mjs';
+import { isReviewerTool } from '../controller/guardian-tool-context.mjs';
 
 const DEFAULT_EXEC_YIELD_TIME_MS = 2_000;
 const MAX_INITIAL_EXEC_YIELD_TIME_MS = 5_000;
@@ -28,6 +29,7 @@ export class RemoteProcessManager {
     codexPolicy = null,
     trustedPackageScriptStore = null,
     webFullAccess = null,
+    guardianReviewer = null,
     audit = null,
   }) {
     if (!environmentRegistry || !workerHub) {
@@ -40,6 +42,7 @@ export class RemoteProcessManager {
     this.codexPolicy = codexPolicy;
     this.trustedPackageScriptStore = trustedPackageScriptStore;
     this.webFullAccess = webFullAccess;
+    this.guardianReviewer = guardianReviewer;
     this.audit = typeof audit === 'function' ? audit : null;
     this.sessions = new Map();
     this.nextSessionId = 1000;
@@ -361,6 +364,7 @@ export class RemoteProcessManager {
     delete forwardedArgs.prefix_rule;
     delete forwardedArgs.full_access_grant_id;
     delete forwardedArgs.run_as_admin;
+    delete forwardedArgs.review_context;
     if (administratorRequested) {
       forwardedArgs.sandbox_permissions = 'admin_elevated';
       delete forwardedArgs.justification;
@@ -470,6 +474,63 @@ export class RemoteProcessManager {
         environment.id,
         { workspace: workspaceHandle },
       );
+      if (!isReviewerTool() && this.guardianReviewer?.isEnabled?.()) {
+        let assessment;
+        try {
+          assessment = await this.guardianReviewer.review({
+            approval,
+            action: {
+              cmd: approval.command,
+              workdir: approval.workdir,
+              shell: approval.shell,
+              environment_id: approval.environment_id,
+              workspace_id: approval.workspace_id,
+              workspace_root: approval.workspace_root,
+              workspace_handle: approval.workspace_handle,
+              justification: approval.justification,
+            },
+            reviewContext: args.review_context || args.justification || '',
+          });
+        } catch (error) {
+          this.#emit('review_fallback_human', {
+            approval_id: approval.approval_id,
+            intent_sha256: approval.intent_sha256,
+            error_name: error?.name || 'Error',
+          });
+          return {
+            chunk_id: 'approval', wall_time_seconds: 0,
+            output: 'Guardian review could not be completed; human approval is required.',
+            approval_required: true, ...approval, ...workspaceHandle,
+            review_source: 'guardian', review_outcome: 'error',
+          };
+        }
+        if (assessment?.outcome === 'deny') {
+          const denied = this.approvalManager.denyReviewerExecution(
+            approval.approval_id, approval.intent_sha256,
+          );
+          return {
+            chunk_id: 'approval', wall_time_seconds: 0,
+            output: 'Guardian reviewer denied this command: ' + assessment.rationale,
+            approval_required: false, ...denied, ...workspaceHandle,
+            review_source: 'guardian', review_outcome: 'deny',
+            review_risk_level: assessment.risk_level,
+          };
+        }
+        if (assessment?.outcome === 'allow') {
+          const claimed = this.approvalManager.claimReviewerExecution(
+            approval.approval_id, approval.intent_sha256,
+          );
+          const result = await this.#dispatchClaimedExecution({
+            approvalId: approval.approval_id, claimed, decision: 'approve',
+          });
+          return {
+            ...result, review_source: 'guardian',
+            review_outcome: result.approval_required ? 'error' : 'allow',
+            review_risk_level: assessment.risk_level,
+          };
+        }
+        throw new Error('Guardian returned an invalid review outcome');
+      }
       return {
         chunk_id: 'approval',
         wall_time_seconds: 0,
@@ -596,6 +657,10 @@ export class RemoteProcessManager {
       approvalNonce,
       hostSession,
     );
+    return this.#dispatchClaimedExecution({ approvalId, claimed, decision });
+  }
+
+  async #dispatchClaimedExecution({ approvalId, claimed, decision }) {
     const action = claimed.action;
     let workspaceHandle;
     let environment;
@@ -633,9 +698,9 @@ export class RemoteProcessManager {
         }
       }
     } catch (error) {
-      const retryable = this.approvalManager.markAppExecutionRetryable(
-        approvalId,
-      );
+      const retryable = claimed.reviewerSource
+        ? this.approvalManager.returnReviewerToHuman(approvalId)
+        : this.approvalManager.markAppExecutionRetryable(approvalId);
       this.#emit('approval_dispatch_failed_prestart', {
         approval_id: approvalId,
         operation_id: claimed.request.operation_id,
@@ -691,9 +756,9 @@ export class RemoteProcessManager {
         { timeoutMs },
       );
     } catch (error) {
-      const retryable = this.approvalManager.markAppExecutionRetryable(
-        approvalId,
-      );
+      const retryable = claimed.reviewerSource
+        ? this.approvalManager.returnReviewerToHuman(approvalId)
+        : this.approvalManager.markAppExecutionRetryable(approvalId);
       this.#emit('approval_dispatch_failed_prestart', {
         approval_id: approvalId,
         operation_id: claimed.request.operation_id,

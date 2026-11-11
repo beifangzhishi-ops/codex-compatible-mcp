@@ -319,6 +319,59 @@ export class ApprovalManager {
     };
   }
 
+  claimReviewerExecution(approvalId, expectedIntentHash) {
+    this.#prune();
+    const request = this.requests.get(String(approvalId));
+    if (!request || request.kind !== 'execution' ||
+        request.state !== 'pending' ||
+        request.approvalNonceHash ||
+        request.intentHash !== expectedIntentHash) {
+      throw new Error('Guardian frozen approval identity or state is invalid.');
+    }
+    request.state = 'dispatching';
+    request.decisionSource = 'reviewer';
+    request.approvedAt = this.now();
+    request.dispatchStartedAt = this.now();
+    this.#emit('dispatching', request, { decision_source: 'reviewer' });
+    return {
+      request: this.#publicRequest(request),
+      action: { ...request.action },
+      reviewerSource: true,
+    };
+  }
+
+  denyReviewerExecution(approvalId, expectedIntentHash) {
+    this.#prune();
+    const request = this.requests.get(String(approvalId));
+    if (!request || request.kind !== 'execution' ||
+        request.state !== 'pending' || request.approvalNonceHash ||
+        request.intentHash !== expectedIntentHash) {
+      throw new Error('Guardian frozen approval identity or state is invalid.');
+    }
+    request.state = 'denied';
+    request.decisionSource = 'reviewer';
+    request.respondedAt = this.now();
+    this.#emit('responded', request, { decision: 'deny', decision_source: 'reviewer' });
+    return this.#publicRequest(request);
+  }
+
+  returnReviewerToHuman(approvalId) {
+    this.#prune();
+    const request = this.requests.get(String(approvalId));
+    if (!request || request.kind !== 'execution' ||
+        request.decisionSource !== 'reviewer' ||
+        request.state !== 'dispatching' || request.approvalNonceHash) {
+      throw new Error('Guardian dispatch cannot safely return to human approval.');
+    }
+    // This method is only callable before any Worker dispatch is attempted.
+    request.state = 'pending';
+    request.decisionSource = null;
+    request.approvedAt = null;
+    request.dispatchStartedAt = null;
+    this.#emit('review_fallback_human', request);
+    return this.#publicRequest(request);
+  }
+
   denyAppExecution(approvalId, approvalNonce, hostSession = null) {
     this.#prune();
     const request = this.requests.get(String(approvalId));
@@ -435,7 +488,8 @@ export class ApprovalManager {
     this.#prune();
     const request = this.requests.get(String(approvalId));
     if (!request) throw new Error('Unknown or expired approval_id.');
-    if (request.kind !== 'execution' || !request.approvalNonceHash) {
+    if (request.kind !== 'execution' ||
+        (!request.approvalNonceHash && request.decisionSource !== 'reviewer')) {
       throw new Error('Approval request is not an app execution approval.');
     }
     if (request.state !== 'dispatching') {
