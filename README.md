@@ -34,6 +34,14 @@ Saved Always allow prefixes compare exact tokens as in Codex non-canonical Prefi
 
 **Remaining alignment boundary:** the upstream Starlark rule parser, matcher, decision severity and file-locked prefix persistence are live. CCM maps those decisions into its existing sandbox and approval-card lifecycle. Codex core heuristics and its full approval/reviewer orchestration have not been imported; an unmatched command therefore follows CCM normal sandbox behavior.
 
+### Guardian auto-review: agreed design, not implemented
+
+The planned reviewer is based on the Codex Guardian source in the separate Codex Core MCP project and CPA model `codex-auto-review`. The owner has explicitly decided to **trust the main Host model's description of user intent, authorization and task constraints**. The reviewer must not require a second lookup or independent authentication of the original Host conversation.
+
+The reviewer will use **the same tool availability and effective permissions as the main model**, not a forced read-only reviewer sandbox. The existing sandbox, approval and policy rules still apply to each tool call; being the reviewer grants no additional authority.
+
+CPA exposes `codex-auto-review`, and a first `/v1/responses` function-call request succeeded. A subsequent `previous_response_id` tool-result continuation returned a missing-`call_id` error. Per the owner's decision, treat this as **tool/transport integration work**, not a model-side issue. This does not mean that the CPA continuation path has already been repaired. The Guardian reviewer is **not connected to the CCM Controller yet**; normal policy, sandbox and approval-card behavior remains unchanged. Implementation details and acceptance requirements are in [docs/auto-review.md](docs/auto-review.md).
+
 ### Codex shell environment policy: first integrated subsystem
 
 **Upstream pinned source:** `ed8eac40832e6a79f30eaeb3c521912f231d43eb`: `codex-rs/protocol/src/{shell_environment.rs,config_types.rs}`, `codex-rs/config/src/shell_environment_policy.rs`, `codex-rs/core/src/exec_env.rs`, and upstream `shell_environment_tests.rs`.
