@@ -7,7 +7,7 @@ export const DEFAULT_CCM_CONFIG_FILE = fileURLToPath(
 );
 
 const SECTIONS = [
-  'controller', 'worker', 'trusted_commands', 'restart_allowlist',
+  'controller', 'worker', 'restart_allowlist',
   'worker_quarantine_errors', 'codex',
 ];
 

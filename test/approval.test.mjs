@@ -1,13 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   ApprovalManager,
   DEFAULT_APPROVAL_TTL_MS,
   DEFAULT_TERMINAL_RETENTION_MS,
 } from '../src/controller/approval-manager.mjs';
 import { EnvironmentRegistry } from '../src/runtime/environment-registry.mjs';
-import { ExecPolicyStore } from '../src/controller/exec-policy-store.mjs';
+import { CodexExecPolicy } from '../src/controller/codex-execpolicy.mjs';
 import { RemoteProcessManager } from '../src/runtime/remote-process-manager.mjs';
 import { resolvePermissionProfile } from '../src/runtime/sandbox/sandbox-policy.mjs';
 
@@ -22,6 +25,16 @@ function restrictedRegistry() {
     backend: 'remote-worker',
   });
   return registry;
+}
+
+function testCodexPolicy(t, prefixes = []) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-approval-policy-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const policy = new CodexExecPolicy({
+    stateFile: path.join(directory, 'default.rules'),
+  });
+  for (const prefixTokens of prefixes) policy.allow({ prefixTokens });
+  return policy;
 }
 
 class FakeWorkerHub extends EventEmitter {
@@ -710,14 +723,16 @@ test('Worker sandbox policy maps an approved escalation to full-access', () => {
   );
 });
 
-test('RemoteProcessManager does not request approval for trusted remote Git', async () => {
+test('RemoteProcessManager applies native Codex Allow rules to remote Git', async (t) => {
   const environmentRegistry = restrictedRegistry();
   const workerHub = new FakeWorkerHub();
   const approvalManager = new ApprovalManager();
+  const codexPolicy = testCodexPolicy(t, [['git', 'push']]);
   const manager = new RemoteProcessManager({
     environmentRegistry,
     workerHub,
     approvalManager,
+    codexPolicy,
     workspaceHandleManager: fakeWorkspaceHandleManager(),
   });
 
@@ -732,7 +747,8 @@ test('RemoteProcessManager does not request approval for trusted remote Git', as
     assert.equal(result.exit_code, 0);
     assert.equal(workerHub.calls.length, 1);
     assert.equal(workerHub.calls[0].params.sandbox_permissions, 'approved_escalated');
-    assert.deepEqual(result.trusted_command_rule_ids, ['git-remote']);
+    assert.equal(result.policy_auto_approved, true);
+    assert.deepEqual(result.policy_prefix_tokens, ['git', 'push']);
     assert.equal(Object.hasOwn(workerHub.calls[0].params, 'approval_id'), false);
     assert.equal(Object.hasOwn(workerHub.calls[0].params, 'justification'), false);
   } finally {
@@ -740,12 +756,14 @@ test('RemoteProcessManager does not request approval for trusted remote Git', as
   }
 });
 
-test('RemoteProcessManager runs direct node --test through built-in Windows trust', async () => {
+test('RemoteProcessManager runs node --test through native Codex ExecPolicy', async (t) => {
   const environmentRegistry = restrictedRegistry();
   const workerHub = new FakeWorkerHub();
+  const codexPolicy = testCodexPolicy(t, [['node', '--test']]);
   const manager = new RemoteProcessManager({
     environmentRegistry,
     workerHub,
+    codexPolicy,
     approvalManager: {
       requestExecution() {
         throw new Error('approval must not be requested');
@@ -759,7 +777,8 @@ test('RemoteProcessManager runs direct node --test through built-in Windows trus
       cmd: 'node --test test/approval.test.mjs',
     });
     assert.equal(result.exit_code, 0);
-    assert.deepEqual(result.trusted_command_rule_ids, ['node-test']);
+    assert.equal(result.policy_auto_approved, true);
+    assert.deepEqual(result.policy_prefix_tokens, ['node', '--test']);
     assert.equal(workerHub.calls.length, 1);
     assert.equal(
       workerHub.calls[0].params.sandbox_permissions,
@@ -770,12 +789,14 @@ test('RemoteProcessManager runs direct node --test through built-in Windows trus
   }
 });
 
-test('built-in node --test trust does not apply through an explicit cmd shell', async () => {
+test('native Codex command prefixes are consistent across shell choices', async (t) => {
   const environmentRegistry = restrictedRegistry();
   const workerHub = new FakeWorkerHub();
+  const codexPolicy = testCodexPolicy(t, [['node', '--test']]);
   const manager = new RemoteProcessManager({
     environmentRegistry,
     workerHub,
+    codexPolicy,
     workspaceHandleManager: fakeWorkspaceHandleManager(),
   });
   try {
@@ -784,151 +805,70 @@ test('built-in node --test trust does not apply through an explicit cmd shell', 
       cmd: 'node --test test/approval.test.mjs',
       shell: 'cmd.exe',
     });
-    assert.equal(result.trusted_command_rule_ids, undefined);
+    assert.equal(result.policy_auto_approved, true);
     assert.equal(workerHub.calls.length, 1);
-    assert.equal(workerHub.calls[0].params.sandbox_permissions, undefined);
+    assert.equal(workerHub.calls[0].params.sandbox_permissions, 'approved_escalated');
   } finally {
     await manager.close();
   }
 });
 
-test('Codex-literal Tailscale aliases run through the pinned binary without approval', async () => {
-  const environmentRegistry = restrictedRegistry();
+test('native Codex policy authorizes the exact pinned Tailscale executable', async (t) => {
   const workerHub = new FakeWorkerHub();
+  const executable = 'C:\\Program Files\\Tailscale\\tailscale.exe';
+  const codexPolicy = testCodexPolicy(t, [[executable]]);
   const manager = new RemoteProcessManager({
-    environmentRegistry,
-    workerHub,
-    approvalManager: {
-      requestExecution() {
-        throw new Error('Tailscale must not request approval');
-      },
-    },
-    workspaceHandleManager: fakeWorkspaceHandleManager(),
-  });
-  const path = 'C:\\Program Files\\Tailscale\\tailscale.exe';
-  try {
-    for (const args of [
-      { cmd: 'tailscale version' },
-      { cmd: `"${path}" version`, shell: 'cmd.exe' },
-      { cmd: 'tailscale.exe version', shell: 'cmd.exe' },
-    ]) {
-      const result = await manager.execCommand({
-        workspace_handle: '00000000-0000-4000-8000-000000000001',
-        ...args,
-      });
-      assert.equal(result.exit_code, 0);
-      assert.deepEqual(result.trusted_command_rule_ids, ['tailscale']);
-      const forwarded = workerHub.calls.at(-1).params;
-      assert.equal(forwarded.sandbox_permissions, 'approved_escalated');
-      assert.equal(
-        forwarded.cmd,
-        `& '${path}' ${args.cmd.includes('status') ? 'status' : 'version'}`,
-      );
-      if (args.shell === 'cmd.exe') {
-        assert.equal(forwarded.shell, 'powershell.exe');
-      }
-    }
-  } finally {
-    await manager.close();
-  }
-});
-
-test('Tailscale with an untrusted segment returns the config hint when its pipe is denied', async () => {
-  const workerHub = new FakeWorkerHub();
-  workerHub.call = async () => ({
-    chunk_id: 'fake',
-    wall_time_seconds: 0.01,
-    exit_code: 0,
-    output: 'failed to connect to local tailscaled: Access is denied.\nprobe\n',
-  });
-  const manager = new RemoteProcessManager({
-    environmentRegistry: restrictedRegistry(),
-    workerHub,
+    environmentRegistry: restrictedRegistry(), workerHub, codexPolicy,
     workspaceHandleManager: fakeWorkspaceHandleManager(),
   });
   try {
-    const denied = await manager.execCommand({
+    const result = await manager.execCommand({
       workspace_handle: '00000000-0000-4000-8000-000000000001',
-      cmd: 'tailscale status; Write-Output probe',
+      cmd: '"' + executable + '" version', shell: 'cmd.exe',
     });
-    assert.equal(denied.exit_code, 0);
-    assert.match(denied.output, /failed to connect to local tailscaled/);
-    assert.match(denied.output, /ccm\.config\.json trusted_commands/);
-    assert.doesNotMatch(denied.output, /separate calls/);
-
-    const unrelated = await manager.execCommand({
-      workspace_handle: '00000000-0000-4000-8000-000000000001',
-      cmd: 'Write-Output something',
-    });
-    assert.doesNotMatch(unrelated.output, /ccm\.config\.json trusted_commands/);
-  } finally {
-    await manager.close();
-  }
+    assert.equal(result.policy_auto_approved, true);
+    assert.deepEqual(result.policy_prefix_tokens, [executable]);
+    assert.equal(workerHub.calls[0].params.sandbox_permissions, 'approved_escalated');
+    assert.equal(workerHub.calls[0].params.cmd, '"' + executable + '" version');
+  } finally { await manager.close(); }
 });
 
-test('Tailscale denial during write_stdin polling also includes the config hint', async () => {
+test('a pinned Tailscale path rule does not authorize a bare alias or mixed command', async (t) => {
   const workerHub = new FakeWorkerHub();
-  workerHub.call = async (_environment, method) => method === 'exec_command'
-    ? { chunk_id: 'fake', wall_time_seconds: 0.01, output: '', session_id: 456 }
-    : {
-      chunk_id: 'fake-next',
-      wall_time_seconds: 0.05,
-      exit_code: 0,
-      output: 'failed to connect to local tailscaled: Access is denied',
-    };
+  const approvalManager = new ApprovalManager();
+  const executable = 'C:\\Program Files\\Tailscale\\tailscale.exe';
+  const codexPolicy = testCodexPolicy(t, [[executable]]);
   const manager = new RemoteProcessManager({
-    environmentRegistry: restrictedRegistry(),
-    workerHub,
+    environmentRegistry: restrictedRegistry(), workerHub, approvalManager, codexPolicy,
     workspaceHandleManager: fakeWorkspaceHandleManager(),
   });
   try {
-    const started = await manager.execCommand({
+    const alias = await manager.execCommand({
       workspace_handle: '00000000-0000-4000-8000-000000000001',
-      cmd: 'tailscale status; Write-Output probe',
+      cmd: 'tailscale.exe status', shell: 'cmd.exe',
     });
-    assert.ok(started.session_id);
-    const finished = await manager.writeStdin({
-      workspace_handle: started.workspace_handle,
-      session_id: started.session_id,
-      chars: '',
+    assert.equal(alias.policy_auto_approved, undefined);
+    assert.equal(workerHub.calls.at(-1).params.sandbox_permissions, undefined);
+    const mixed = await manager.execCommand({
+      workspace_handle: '00000000-0000-4000-8000-000000000001',
+      cmd: '"' + executable + '" status && echo probe', shell: 'cmd.exe',
+      sandbox_permissions: 'require_escalated',
     });
-    assert.equal(finished.exit_code, 0);
-    assert.match(finished.output, /ccm\.config\.json trusted_commands/);
-  } finally {
-    await manager.close();
-  }
+    assert.equal(mixed.approval_required, true);
+    assert.equal(workerHub.calls.at(-1).params.cmd, 'tailscale.exe status');
+  } finally { await manager.close(); }
 });
-
-test('approval persists a global token-prefix allow rule and ordinary calls reuse it', async () => {
+test('approval persists a native Codex prefix rule and ordinary calls reuse it', async (t) => {
   const environmentRegistry = restrictedRegistry();
   const workerHub = new FakeWorkerHub();
   const approvalManager = new ApprovalManager();
-  let allowed = false;
-  const execPolicyStore = {
-    matchSegment({ tokens }) {
-      if (!allowed || tokens[0] !== 'wsl.exe') return null;
-      return {
-        rule_id: '11111111-1111-4111-8111-111111111111',
-        decision: 'allow',
-        prefix_tokens: ['wsl.exe'],
-      };
-    },
-    allow({ prefixTokens }) {
-      assert.deepEqual(prefixTokens, ['wsl.exe']);
-      allowed = true;
-      return {
-        rule_id: '11111111-1111-4111-8111-111111111111',
-        decision: 'allow',
-        prefix_tokens: ['wsl.exe'],
-      };
-    },
-  };
+  const codexPolicy = testCodexPolicy(t);
   const manager = new RemoteProcessManager({
     environmentRegistry,
     workerHub,
     approvalManager,
     workspaceHandleManager: fakeWorkspaceHandleManager(),
-    execPolicyStore,
+    codexPolicy,
   });
   const args = {
     workspace_handle: '00000000-0000-4000-8000-000000000001',
@@ -952,7 +892,7 @@ test('approval persists a global token-prefix allow rule and ordinary calls reus
     });
     assert.equal(resolved.state, 'consumed');
     assert.equal(resolved.policy_saved, true);
-    assert.equal(allowed, true);
+    assert.equal(codexPolicy.matchSegment({ tokens: ['wsl.exe', '--status'] }).decision, 'allow');
     assert.equal(workerHub.calls.length, 1);
     assert.equal(
       workerHub.calls[0].params.sandbox_permissions,
@@ -964,10 +904,7 @@ test('approval persists a global token-prefix allow rule and ordinary calls reus
       cmd: 'wsl.exe --help',
     });
     assert.equal(automatic.policy_auto_approved, true);
-    assert.equal(
-      automatic.policy_rule_id,
-      '11111111-1111-4111-8111-111111111111',
-    );
+    assert.match(automatic.policy_rule_id, /^[a-f0-9]{16}$/);
     assert.equal(workerHub.calls.length, 2);
     assert.equal(
       workerHub.calls[1].params.sandbox_permissions,
@@ -979,7 +916,7 @@ test('approval persists a global token-prefix allow rule and ordinary calls reus
   }
 });
 
-test('one Always allow decision auto-authorizes both Workers and mixed command sequences', async () => {
+test('one native Always allow rule auto-authorizes both Workers and mixed command sequences', async (t) => {
   const registry = restrictedRegistry();
   registry.register({
     id: 'second-worker',
@@ -993,12 +930,12 @@ test('one Always allow decision auto-authorizes both Workers and mixed command s
   const second = '00000000-0000-4000-8000-000000000002';
   const workerHub = new FakeWorkerHub();
   const approvalManager = new ApprovalManager();
-  const execPolicyStore = new ExecPolicyStore();
+  const codexPolicy = testCodexPolicy(t);
   const manager = new RemoteProcessManager({
     environmentRegistry: registry,
     workerHub,
     approvalManager,
-    execPolicyStore,
+    codexPolicy,
     workspaceHandleManager: {
       resolve(handleId) {
         return {
@@ -1026,8 +963,9 @@ test('one Always allow decision auto-authorizes both Workers and mixed command s
       decision: 'approve_always',
     });
     assert.equal(saved.policy_saved, true);
-    assert.deepEqual(execPolicyStore.list()[0].prefix_tokens, ['wsl.exe']);
-    assert.equal(Object.hasOwn(execPolicyStore.list()[0], 'workspace_id'), false);
+    assert.equal(codexPolicy.matchSegment({ tokens: ['wsl.exe', '--status'] }).decision, 'allow');
+    assert.match(fs.readFileSync(codexPolicy.stateFile, 'utf8'), /prefix_rule/);
+    assert.doesNotMatch(fs.readFileSync(codexPolicy.stateFile, 'utf8'), /workspace_id/);
 
     const result = await manager.execCommand({
       workspace_handle: second,
@@ -1106,16 +1044,16 @@ test('compound command without explicit prefix is not persistable', async () => 
   }
 });
 
-test('repeated identical compound segments can save and reuse one prefix', async () => {
+test('repeated identical compound segments save and reuse one native prefix', async (t) => {
   const workerHub = new FakeWorkerHub();
   const approvalManager = new ApprovalManager();
-  const execPolicyStore = new ExecPolicyStore();
+  const codexPolicy = testCodexPolicy(t);
   const manager = new RemoteProcessManager({
     environmentRegistry: restrictedRegistry(),
     workerHub,
     approvalManager,
     workspaceHandleManager: fakeWorkspaceHandleManager(),
-    execPolicyStore,
+    codexPolicy,
   });
   const workspace_handle = '00000000-0000-4000-8000-000000000001';
   try {
@@ -1147,24 +1085,24 @@ test('repeated identical compound segments can save and reuse one prefix', async
       cmd: 'git status --short && git status --short',
     });
     assert.equal(automatic.policy_auto_approved, true);
-    assert.deepEqual(execPolicyStore.list()[0].prefix_tokens,
-      ['git', 'status', '--short']);
+    assert.equal(codexPolicy.matchSegment({
+      tokens: ['git', 'status', '--short'],
+    }).decision, 'allow');
   } finally {
     await manager.close();
   }
 });
 
-test('a partially allowed compound proposes the sole missing command prefix', async () => {
+test('a partially allowed compound proposes the sole missing native command prefix', async (t) => {
   const workerHub = new FakeWorkerHub();
   const approvalManager = new ApprovalManager();
-  const execPolicyStore = new ExecPolicyStore();
-  execPolicyStore.allow({ prefixTokens: ['git', 'status', '--short'] });
+  const codexPolicy = testCodexPolicy(t, [['git', 'status', '--short']]);
   const manager = new RemoteProcessManager({
     environmentRegistry: restrictedRegistry(),
     workerHub,
     approvalManager,
     workspaceHandleManager: fakeWorkspaceHandleManager(),
-    execPolicyStore,
+    codexPolicy,
   });
   const workspace_handle = '00000000-0000-4000-8000-000000000001';
   const cmd = 'git status --short && git log -1';
@@ -1185,15 +1123,16 @@ test('a partially allowed compound proposes the sole missing command prefix', as
     assert.equal(saved.policy_saved, true);
     const automatic = await manager.execCommand({ workspace_handle, cmd });
     assert.equal(automatic.policy_auto_approved, true);
-    assert.equal(execPolicyStore.list().length, 2);
+    assert.equal(codexPolicy.matchSegment({ tokens: ['git', 'log', '-1'] }).decision, 'allow');
   } finally {
     await manager.close();
   }
 });
 
-test('escalated compound command can mix trusted Git and a saved prefix', async () => {
+test('escalated compound command is allowed only when every native segment matches', async (t) => {
   const environmentRegistry = restrictedRegistry();
   const workerHub = new FakeWorkerHub();
+  const codexPolicy = testCodexPolicy(t, [['git', 'fetch'], ['wsl.exe']]);
   const manager = new RemoteProcessManager({
     environmentRegistry,
     workerHub,
@@ -1203,16 +1142,7 @@ test('escalated compound command can mix trusted Git and a saved prefix', async 
       },
     },
     workspaceHandleManager: fakeWorkspaceHandleManager(),
-    execPolicyStore: {
-      matchSegment({ tokens }) {
-        if (tokens[0] !== 'wsl.exe') return null;
-        return {
-          rule_id: '33333333-3333-4333-8333-333333333333',
-          decision: 'allow',
-          prefix_tokens: ['wsl.exe'],
-        };
-      },
-    },
+    codexPolicy,
   });
   try {
     const result = await manager.execCommand({
@@ -1221,10 +1151,7 @@ test('escalated compound command can mix trusted Git and a saved prefix', async 
       sandbox_permissions: 'require_escalated',
     });
     assert.equal(result.policy_auto_approved, true);
-    assert.equal(
-      result.policy_rule_id,
-      '33333333-3333-4333-8333-333333333333',
-    );
+    assert.equal(result.policy_rule_ids.length, 2);
     assert.equal(workerHub.calls.length, 1);
     assert.equal(
       workerHub.calls[0].params.sandbox_permissions,
@@ -1235,7 +1162,7 @@ test('escalated compound command can mix trusted Git and a saved prefix', async 
   }
 });
 
-test('Linux workspace-write does not inherit built-in Git trust in mixed escalation', async () => {
+test('native policy does not implicitly allow an unmatched Git segment on Linux', async (t) => {
   const environmentRegistry = new EnvironmentRegistry({ resolvePaths: false });
   environmentRegistry.register({
     id: 'approval-worker',
@@ -1247,6 +1174,7 @@ test('Linux workspace-write does not inherit built-in Git trust in mixed escalat
   });
   const workerHub = new FakeWorkerHub();
   const approvalManager = new ApprovalManager();
+  const codexPolicy = testCodexPolicy(t, [['echo']]);
   const manager = new RemoteProcessManager({
     environmentRegistry,
     workerHub,
@@ -1262,16 +1190,7 @@ test('Linux workspace-write does not inherit built-in Git trust in mixed escalat
         };
       },
     },
-    execPolicyStore: {
-      matchSegment({ tokens }) {
-        if (tokens[0] !== 'echo') return null;
-        return {
-          rule_id: '44444444-4444-4444-8444-444444444444',
-          decision: 'allow',
-          prefix_tokens: ['echo'],
-        };
-      },
-    },
+    codexPolicy,
   });
   try {
     const result = await manager.execCommand({
@@ -1287,11 +1206,58 @@ test('Linux workspace-write does not inherit built-in Git trust in mixed escalat
   }
 });
 
-test('post-dispatch policy save failure is surfaced without redispatch', async () => {
+test('native Prompt requests approval while Forbidden rejects before dispatch', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-codex-decisions-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const stateFile = path.join(directory, 'default.rules');
+  fs.writeFileSync(stateFile, [
+    'prefix_rule(pattern=["needs-review"], decision="prompt")',
+    'prefix_rule(pattern=["blocked-command"], decision="forbidden")',
+    '',
+  ].join('\n'));
+  const codexPolicy = new CodexExecPolicy({ stateFile });
+  const workerHub = new FakeWorkerHub();
+  const approvalManager = new ApprovalManager();
+  const manager = new RemoteProcessManager({
+    environmentRegistry: restrictedRegistry(),
+    workerHub,
+    approvalManager,
+    codexPolicy,
+    workspaceHandleManager: fakeWorkspaceHandleManager(),
+  });
+  try {
+    const prompt = await manager.execCommand({
+      workspace_handle: '00000000-0000-4000-8000-000000000001',
+      cmd: 'needs-review --run',
+    });
+    assert.equal(prompt.approval_required, true);
+    assert.equal(workerHub.calls.length, 0);
+
+    await assert.rejects(manager.execCommand({
+      workspace_handle: '00000000-0000-4000-8000-000000000001',
+      cmd: 'blocked-command --run',
+    }), /Native Codex ExecPolicy forbids/);
+    assert.equal(workerHub.calls.length, 0);
+
+    const prepared = approvalManager.prepareAppApproval(prompt.approval_id);
+    const approved = await manager.resolvePendingExecution({
+      approval_id: prompt.approval_id,
+      approval_nonce: prepared.approvalNonce,
+      decision: 'approve',
+    });
+    assert.equal(approved.state, 'consumed');
+    assert.equal(workerHub.calls.length, 1);
+    assert.equal(workerHub.calls[0].params.cmd, 'needs-review --run');
+  } finally {
+    await manager.close();
+  }
+});
+
+test('post-dispatch native policy save failure is surfaced without redispatch', async () => {
   const environmentRegistry = restrictedRegistry();
   const workerHub = new FakeWorkerHub();
   const approvalManager = new ApprovalManager();
-  const execPolicyStore = {
+  const codexPolicy = {
     match() {
       return null;
     },
@@ -1304,7 +1270,7 @@ test('post-dispatch policy save failure is surfaced without redispatch', async (
     workerHub,
     approvalManager,
     workspaceHandleManager: fakeWorkspaceHandleManager(),
-    execPolicyStore,
+    codexPolicy,
   });
   try {
     const pending = await manager.execCommand({
@@ -1335,7 +1301,7 @@ test('post-dispatch policy save failure is surfaced without redispatch', async (
   }
 });
 
-test('Always allow saves a global npm prefix without package-script hash probing', async () => {
+test('Always allow saves a native global npm prefix without package-script hash probing', async () => {
   const environmentRegistry = restrictedRegistry();
   const approvalManager = new ApprovalManager();
   const calls = [];
@@ -1350,7 +1316,8 @@ test('Always allow saves a global npm prefix without package-script hash probing
       };
   };
   let savedPrefix = null;
-  const execPolicyStore = {
+  const codexPolicy = {
+    match() { return null; },
     allow({ prefixTokens }) {
       savedPrefix = prefixTokens;
       return {
@@ -1372,7 +1339,7 @@ test('Always allow saves a global npm prefix without package-script hash probing
     workerHub,
     approvalManager,
     workspaceHandleManager: fakeWorkspaceHandleManager(),
-    execPolicyStore,
+    codexPolicy,
     trustedPackageScriptStore,
   });
 
@@ -1419,7 +1386,8 @@ test('Always allow npm does not require package-script probing even if command f
     workerHub,
     approvalManager,
     workspaceHandleManager: fakeWorkspaceHandleManager(),
-    execPolicyStore: {
+    codexPolicy: {
+      match() { return null; },
       allow({ prefixTokens }) {
         return { rule_id: '33333333-3333-4333-8333-333333333333', prefix_tokens: prefixTokens };
       },

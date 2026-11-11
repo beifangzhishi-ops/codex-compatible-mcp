@@ -26,7 +26,7 @@
 | Command runner, IPC, stdout/stdin and cancellation | `codex-rs/windows-sandbox-rs/src/elevated_impl.rs`; `src/elevated/`; `src/bin/command_runner/`; `src/process.rs`; `src/stdio_bridge.rs` | `src/runtime/sandbox/native-sandbox.mjs`; `src/runtime/executors/native-executor.mjs`; PTY/process sessions |
 | Online/offline network enforcement | `codex-rs/windows-sandbox-rs/src/wfp.rs`; `src/wfp_setup.rs`; `src/setup_provisioning.rs` | CCM's child proxy environment and no equivalent Windows identity-based network sandbox |
 | Direct command sandbox CLI and metadata | `codex-rs/cli/src/debug_sandbox.rs`; `codex-rs/codex-mcp/src/sandbox_metadata.rs` | CCM's `exec_command` Controller-to-Worker adapter |
-| Approval and persistent allow/deny semantics | `codex-rs/core/src/exec_policy.rs`; `codex-rs/protocol/src/models.rs` | CCM `exec-policy-store`, trusted-command policy and approval workflow |
+| Approval and persistent allow/deny semantics | codex-rs/core/src/exec_policy.rs; codex-rs/protocol/src/models.rs | native/codex-execpolicy bridge, src/controller/codex-execpolicy.mjs, src/controller/approval-manager.mjs | Upstream rule evaluation and file-locked prefix persistence are live. CCM retains its Host-specific frozen approval-card state machine; Codex core reviewer orchestration remains a documented difference. |
 
 Only GPT Host/MCP transport adaptation is exempted from matching Codex. A matching-looking token flag or isolated ACL patch does not satisfy the upstream parity rule.
 

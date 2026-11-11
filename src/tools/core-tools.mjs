@@ -51,8 +51,6 @@ const UNIFIED_EXEC_OUTPUT_SCHEMA = {
   prefix_rule: z.array(z.string()).nullable().optional(),
   policy_save_failed: z.boolean().optional(),
   policy_save_error: z.string().optional(),
-  trusted_command_rule_ids: z.array(z.string()).optional(),
-  trusted_command_diagnostic: z.string().optional(),
   trusted_package_script: z.boolean().optional(),
   trusted_package_script_rule_id: z.string().optional(),
   administrator_agent: z.boolean().optional(),
@@ -95,12 +93,6 @@ function execResult(value) {
   if (value.session_id !== undefined) lines.push(`Process running with session ID ${value.session_id}`);
   if (value.original_token_count !== undefined) lines.push(`Original token count: ${value.original_token_count}`);
   if (value.administrator_agent) lines.push('Execution: unrestricted Windows administrator agent');
-  if (value.trusted_command_rule_ids?.length) {
-    lines.push('Trusted commands: ' + value.trusted_command_rule_ids.join(', '));
-  }
-  if (value.trusted_command_diagnostic) {
-    lines.push('Trusted-command configuration: ' + value.trusted_command_diagnostic);
-  }
   lines.push('Output:');
   if (value.output) lines.push(value.output);
   return {
@@ -824,10 +816,10 @@ export function registerCoreTools(registry, runtime) {
       'When the owner has clicked the CCM webpage copy button and the page returned to locked state, use the provided claimed full_access_grant_id directly for timed Full Access. If no ID was provided (for example the message was blocked), call claim_full_access directly to claim the pending grant or recover the same already-claimed ID once within the original five-minute claim window. The fallback never extends expiry. Include full_access_grant_id in each privileged command. This bypasses the sandbox for that dispatch on any Worker until expiration, without permanent shell rules or Worker configuration changes. Missing grants follow existing sandbox/approval behavior; unclaimed, unknown or expired grants fail closed.',
       'workspace_handle is required and determines the Worker, cwd/session ownership, and restricted-write root. It does not narrow filesystem reads below the environment\'s sandbox_read_scope. Do not pass or infer a separate environment for this command.',
       'Reuse a supplied workspace_handle directly. Without one, create_projectless_handle may support projectless work and permitted absolute-path reads; do not select/register merely to inspect a project. For registered-project writes without a handle, ask the user for a handle or explicit entry instruction. Never bypass a pending explicit workspace approval.',
-      'Built-in command trust comes from ccm.config.json trusted_commands and is reloaded for every exec_command. Supported compound commands are matched one segment at a time; only fully trusted commands execute without approval. Unrecognized syntax falls back to the normal sandbox or escalation path.',
+      'The Controller evaluates all statically parsed command segments through the native Codex ExecPolicy engine using its standard .rules file. An Allow authorizes unsandboxed execution, Prompt asks for approval and Forbidden rejects the command; ambiguous shell syntax never inherits an Allow. Use absolute executable paths for rules targeting specific installed applications.',
       'Controller-trusted package scripts such as a specifically trusted workspace npm test are also handled automatically through exec_command. Trust is bound to the workspace and current package.json script hash; if the script changes it stops matching and must not be treated as trusted.',
       'For a command that genuinely requires full-access outside a workspace-write sandbox without a matching saved rule, set sandbox_permissions=require_escalated and include an optional justification. You may also provide prefix_rule as ordered command tokens to propose a reusable global Allow rule. CCM freezes the exact command and the validated rule before returning approval_required=true; then call request_approval with the returned approval_id.',
-      'A user-saved Always allow token prefix auto-authorizes matching ordinary exec_command calls on any Worker or workspace without require_escalated. Additional suffix arguments are authorized. For WSL, prefix_rule=["wsl.exe"] intentionally authorizes arbitrary later WSL suffix operations. Each safely parsed segment of a compound command must qualify.',
+      'Always allow persists an upstream Codex prefix_rule in the same native .rules policy as preauthorized commands. It automatically authorizes matching ordinary exec_command calls on any Worker or workspace without require_escalated. Additional suffix arguments are authorized; every safely parsed executable segment must qualify.',
       'Windows: run_as_admin=true uses the separately installed elevated CCM administrator agent, without per-command approval. The normal Worker stays unelevated. Administrator commands are unrestricted by the workspace-write sandbox, and cannot combine with a Full Access grant, escalation or prefix_rule. The administrator agent must already be installed and running on that Worker machine.',
       'For recurring build, test, and development commands that need an approval, proactively supply a practical prefix_rule: keep stable program, subcommand, script path and invariant options, but leave out arguments expected to vary. Example: npm run build:native -> ["npm","run","build:native"]. Never use a bare general-purpose shell or interpreter (powershell, pwsh, cmd, node) as the prefix. Always allow is global across Workers and workspaces, so the user must see the precise proposed prefix and choose whether to persist it. Do not send prefix_rule on ordinary commands; it is only valid with require_escalated.',
       'A CCM-originated result is identifiable by its structured CCM fields. If a host reports a Script error or safety/policy/tool-call failure without this tool returning a structured result, do not attribute that failure to CCM or claim CCM blocked the command.',

@@ -73,7 +73,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
   const runtime = createControllerRuntime({
     workerPort: 0,
     auditLogFile: path.join(tempRoot, 'audit.jsonl'),
-    execPolicyStateFile: path.join(tempRoot, 'exec-allowlist.json'),
+    codexPolicyStateFile: path.join(tempRoot, 'rules', 'default.rules'),
     trustedPackageScriptStateFile: path.join(tempRoot, 'trusted-package-scripts.json'),
     workspaceHandleStateFile: path.join(tempRoot, 'workspace-handles.json'),
     transferTaskStateFile: path.join(tempRoot, 'transfer-tasks.json'),

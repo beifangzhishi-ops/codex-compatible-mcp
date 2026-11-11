@@ -123,7 +123,7 @@ test('explicit administrator command bypasses ordinary command policy but not op
     environmentRegistry: registry,
     workerHub,
     workspaceHandleManager: workspaceHandleManager(),
-    execPolicyStore: { match() { throw new Error('must not consult Full Access allow rules'); } },
+    codexPolicy: { match() { throw new Error('must not consult Full Access allow rules'); } },
   });
   const base = { workspace_handle: CONTEXT_ID, cmd: 'whoami /groups' };
   try {

@@ -293,24 +293,22 @@ function parseLiteralPowerShellWrappers(command, shellKind) {
         return null;
       }
     }
-    segments.push({
-      // Only the independently validated ordinary command may participate
-      // in built-in trust. A static & call has no rewritable source binding.
-      source: isCall ? '' : segment.source,
-      start: isCall ? null : segment.start,
-      end: isCall ? null : segment.end,
-      tokens: segment.tokens,
-    });
+    segments.push({ tokens: segment.tokens });
   }
   if (!recognizedWrapper || !segments.length) return null;
-  // Built-in executable rewrites require verified original source bindings.
-  // They must never inherit trust merely from this policy-only extension.
-  return { shell: shellKind, segments, operators: [], sourceBound: false };
+  return { shell: shellKind, segments, operators: [] };
 }
 
 export function parseShellCommand(command, { shell = 'powershell' } = {}) {
   const shellKind = canonicalShell(shell) || 'powershell';
-  if (shellKind === 'cmd') return parseLocalCommandSources(command, { shell });
+  if (shellKind === 'cmd') {
+    const local = parseLocalCommandSources(command, { shell });
+    return local ? {
+      shell: shellKind,
+      segments: local.segments.map(({ tokens }) => ({ tokens })),
+      operators: local.operators,
+    } : null;
+  }
   if (shellKind !== 'powershell' && shellKind !== 'pwsh') return null;
 
   // The Codex native parser is the sole authority for lowering PowerShell
@@ -318,25 +316,18 @@ export function parseShellCommand(command, { shell = 'powershell' } = {}) {
   const lowered = parseCodexPowerShellScript(command);
   if (!lowered) return parseLiteralPowerShellWrappers(command, shellKind);
 
-  // Source slices are only used for CCM's separate built-in command rewrite.
-  // Preserve them when their independently parsed tokens agree exactly with
-  // Codex; otherwise withhold source binding rather than changing behavior.
+  // Preserve local statement boundaries only when their tokens agree exactly
+  // with the upstream lowering. The source text is never rewritten.
   const local = parseLocalCommandSources(command, { shell });
-  const sourceBound = Boolean(local &&
+  const boundariesMatch = Boolean(local &&
     local.segments.length === lowered.length &&
     local.segments.every((segment, i) =>
       segment.tokens.length === lowered[i].length &&
       segment.tokens.every((word, j) => word === lowered[i][j])));
   return {
     shell: shellKind,
-    segments: lowered.map((tokens, i) => ({
-      source: sourceBound ? local.segments[i].source : '',
-      start: sourceBound ? local.segments[i].start : null,
-      end: sourceBound ? local.segments[i].end : null,
-      tokens,
-    })),
-    operators: sourceBound ? local.operators : [],
-    sourceBound,
+    segments: lowered.map((tokens) => ({ tokens })),
+    operators: boundariesMatch ? local.operators : [],
   };
 }
 

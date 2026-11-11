@@ -18,7 +18,10 @@ test('the tracked root template is a complete independent configuration sample',
   assert.equal(config.version, 1);
   assert.ok(config.controller.env.CCM_ISSUER);
   assert.ok(config.worker.env.CCM_ENVIRONMENT_ID);
-  assert.ok(Array.isArray(config.trusted_commands.rules));
+  assert.deepEqual(Object.keys(config).sort(), [
+    'codex', 'controller', 'restart_allowlist', 'version',
+    'worker', 'worker_quarantine_errors',
+  ].sort());
   assert.ok(Array.isArray(config.restart_allowlist.workers));
   assert.ok(Array.isArray(config.worker_quarantine_errors.error_codes));
   assert.match(config.codex.native_sandbox_toml, /\[windows\]/);

@@ -1,11 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import {
-  DEFAULT_TRUSTED_COMMANDS_FILE,
-  evaluateTrustedCommand,
-  loadTrustedCommands,
-  trustedCommandDenialHint,
-} from './sandbox/trusted-commands.mjs';
-import {
   effectiveShell,
   parseShellCommand,
   tokenPrefixMatches,
@@ -31,9 +25,8 @@ export class RemoteProcessManager {
     workerHub,
     approvalManager = null,
     workspaceHandleManager = null,
-    execPolicyStore = null,
+    codexPolicy = null,
     trustedPackageScriptStore = null,
-    trustedCommandsFile = DEFAULT_TRUSTED_COMMANDS_FILE,
     webFullAccess = null,
     audit = null,
   }) {
@@ -44,9 +37,8 @@ export class RemoteProcessManager {
     this.workerHub = workerHub;
     this.approvalManager = approvalManager;
     this.workspaceHandleManager = workspaceHandleManager;
-    this.execPolicyStore = execPolicyStore;
+    this.codexPolicy = codexPolicy;
     this.trustedPackageScriptStore = trustedPackageScriptStore;
-    this.trustedCommandsFile = trustedCommandsFile;
     this.webFullAccess = webFullAccess;
     this.audit = typeof audit === 'function' ? audit : null;
     this.sessions = new Map();
@@ -77,7 +69,7 @@ export class RemoteProcessManager {
     this.audit({ component: 'process', event, ...fields });
   }
 
-  #recordExecResult(result, environment, workspaceHandle, operationId = null, sessionHint = null, tty = false) {
+  #recordExecResult(result, environment, workspaceHandle, operationId = null, tty = false) {
     if (result?.session_id !== undefined) {
       const publicSessionId = this.#allocateSessionId();
       this.sessions.set(publicSessionId, {
@@ -86,7 +78,6 @@ export class RemoteProcessManager {
         workspaceHandle: workspaceHandle.workspace_handle,
         workspace: { ...workspaceHandle },
         operationId,
-        trustedCommandHint: sessionHint,
         tty,
         verificationEchoes: [],
       });
@@ -117,14 +108,6 @@ export class RemoteProcessManager {
       ...(operationId ? { operation_id: operationId } : {}),
       ...workspaceHandle,
     };
-  }
-
-  #addTrustedCommandDeniedHint(result, command, environment, trusted = false) {
-    const hint = trustedCommandDenialHint({
-      command, output: result?.output, environment, trusted,
-    });
-    if (!hint) return result;
-    return { ...result, output: String(result.output) + '\n\n' + hint + '\n' };
   }
 
   #approvalStatusResult(approval, workspaceHandle, output) {
@@ -256,22 +239,11 @@ export class RemoteProcessManager {
     // A partially authorized compound command should offer an Allow prefix
     // for its sole remaining distinct command. Requiring the model to
     // re-propose an already-identifiable prefix causes repeat approvals.
-    const trustedConfig = environment.platform === 'windows' &&
-      environment.permissionProfile === 'workspace-write'
-      ? loadTrustedCommands(this.trustedCommandsFile) : null;
     const unmatched = command.segments.filter((segment) => {
-      const builtIn = segment.source && trustedConfig && !trustedConfig.error &&
-        evaluateTrustedCommand(segment.source, args.shell, environment, {
-          snapshot: trustedConfig,
-        });
-      if (builtIn?.matched && builtIn.cmd === segment.source && !builtIn.shell) {
-        return false;
-      }
-      return !this.execPolicyStore?.matchSegment?.({
-        environment,
+      return this.codexPolicy?.matchSegment({
         tokens: segment.tokens,
         emit: false,
-      });
+      })?.decision !== 'allow';
     });
     if (unmatched.length && unmatched.length < command.segments.length &&
         unmatched.every((segment) =>
@@ -291,39 +263,6 @@ export class RemoteProcessManager {
       policy_kind: null,
       policy_persistable: false,
       prefix_rule: null,
-    };
-  }
-
-  #matchAllowlistSegments(args, environment, parsed, snapshot) {
-    if (!parsed?.segments.length) return null;
-    const genericRules = [];
-    for (const segment of parsed.segments) {
-      const builtIn = segment.source && snapshot && !snapshot.error &&
-        evaluateTrustedCommand(segment.source, args.shell, environment, { snapshot });
-      if (builtIn?.matched && builtIn.cmd === segment.source && !builtIn.shell) {
-        // Pinned targets must already be literal. Never elevate an alias in a
-        // mixed saved-prefix command without rewriting its actual executable.
-        continue;
-      }
-      const rule = this.execPolicyStore?.matchSegment?.({
-        environment,
-        tokens: segment.tokens,
-      });
-      if (!rule) return null;
-      genericRules.push(rule);
-    }
-    if (!genericRules.length) return null;
-    const unique = [...new Map(
-      genericRules.map((rule) => [rule.rule_id, rule]),
-    ).values()];
-    return {
-      decision: 'allow',
-      rule_id: unique[0].rule_id,
-      rule_ids: unique.map((rule) => rule.rule_id),
-      prefix_tokens: unique.length === 1
-        ? [...unique[0].prefix_tokens]
-        : unique.map((rule) => [...rule.prefix_tokens]),
-      rules: unique,
     };
   }
 
@@ -450,31 +389,19 @@ export class RemoteProcessManager {
         parsedCommand,
       );
     }
-    const windowsWorkspaceWrite =
-      environment.permissionProfile === 'workspace-write' &&
-      environment.platform === 'windows';
-    const trustedConfiguration = windowsWorkspaceWrite && !administratorRequested
-      ? loadTrustedCommands(this.trustedCommandsFile) : null;
-    const trustedCommand = windowsWorkspaceWrite && !administratorRequested
-      ? evaluateTrustedCommand(args.cmd, args.shell, environment, {
-          snapshot: trustedConfiguration,
-        })
-      : null;
+    // Codex's native policy is the sole general command-rule authority.
+    // It decides all parsed executable segments before the first dispatch.
+    const policyRule = administratorRequested ? null :
+      this.codexPolicy?.match({ parsed: parsedCommand }) || null;
+    if (policyRule?.decision === 'forbidden') {
+      throw new Error('Native Codex ExecPolicy forbids this command.');
+    }
     const trustedPackageScriptRule = administratorRequested ? null :
       await this.#matchTrustedPackageScript(args, workspaceHandle, environment);
     const trustedPackageScript = Boolean(trustedPackageScriptRule);
-    const policyRule = !administratorRequested && !timedFullAccess &&
-      environment.permissionProfile !== 'full-access' &&
-      !trustedCommand?.matched &&
-      !trustedPackageScript
-      ? this.#matchAllowlistSegments(
-          args, environment, parsedCommand, trustedConfiguration,
-        )
-      : null;
     const wantsEscalation =
-      requestedEscalation &&
+      (requestedEscalation || policyRule?.decision === 'prompt') &&
       !timedFullAccess &&
-      !trustedCommand?.matched &&
       !trustedPackageScript &&
       policyRule?.decision !== 'allow';
 
@@ -486,23 +413,6 @@ export class RemoteProcessManager {
       delete forwardedArgs.justification;
       this.#emit('trusted_package_script_auto_allowed', {
         rule_id: trustedPackageScriptRule.rule_id,
-        operation_id: operationId,
-        environment_id: environment.id,
-        workspace_handle: workspaceHandle.workspace_handle,
-        workspace_id: workspaceHandle.workspace_id,
-      });
-    }
-
-    if (trustedCommand?.matched) {
-      forwardedArgs = {
-        ...forwardedArgs,
-        cmd: trustedCommand.cmd,
-        ...(trustedCommand.shell ? { shell: trustedCommand.shell } : {}),
-        sandbox_permissions: 'approved_escalated',
-      };
-      delete forwardedArgs.justification;
-      this.#emit('trusted_command_auto_allowed', {
-        rule_ids: trustedCommand.rule_ids,
         operation_id: operationId,
         environment_id: environment.id,
         workspace_handle: workspaceHandle.workspace_handle,
@@ -529,7 +439,7 @@ export class RemoteProcessManager {
         sandbox_permissions: 'approved_escalated',
       };
       delete forwardedArgs.justification;
-      this.#emit('exec_policy_auto_allowed', {
+      this.#emit('codex_policy_auto_allowed', {
         rule_id: policyRule.rule_id,
         rule_ids: policyRule.rule_ids,
         prefix_tokens: policyRule.prefix_tokens,
@@ -544,31 +454,31 @@ export class RemoteProcessManager {
       if (!this.approvalManager) {
         throw new Error('Escalated execution requires an approval manager.');
       }
-        const proposal = explicitPolicyProposal || this.#persistentPolicyProposal(
-          args,
-          environment,
-          parsedCommand,
-        );
-        const approval = this.approvalManager.requestExecution(
-          {
-            ...args,
-            workspace_handle: workspaceHandle.workspace_handle,
-            prefix_rule: proposal.prefix_rule,
-            policy_kind: proposal.policy_kind,
-            policy_persistable: proposal.policy_persistable,
-          },
-          environment.id,
-          { workspace: workspaceHandle },
-        );
-        return {
-          chunk_id: 'approval',
-          wall_time_seconds: 0,
-          output:
-            'Approval required before this command can run outside the sandbox.',
-          approval_required: true,
-          ...approval,
-          ...(workspaceHandle || {}),
-        };
+      const proposal = explicitPolicyProposal || this.#persistentPolicyProposal(
+        args,
+        environment,
+        parsedCommand,
+      );
+      const approval = this.approvalManager.requestExecution(
+        {
+          ...args,
+          workspace_handle: workspaceHandle.workspace_handle,
+          prefix_rule: proposal.prefix_rule,
+          policy_kind: proposal.policy_kind,
+          policy_persistable: proposal.policy_persistable,
+        },
+        environment.id,
+        { workspace: workspaceHandle },
+      );
+      return {
+        chunk_id: 'approval',
+        wall_time_seconds: 0,
+        output:
+          'Approval required before this command can run outside the sandbox.',
+        approval_required: true,
+        ...approval,
+        ...(workspaceHandle || {}),
+      };
     } else if (wantsEscalation) {
       forwardedArgs = {
         ...forwardedArgs,
@@ -620,19 +530,11 @@ export class RemoteProcessManager {
       });
       throw error;
     }
-    const diagnosticContext = !administratorRequested && windowsWorkspaceWrite && !trustedCommand?.matched &&
-      forwardedArgs.sandbox_permissions !== 'approved_escalated' &&
-      /\btailscale(?:\.exe)?\b/i.test(args.cmd)
-      ? { command: args.cmd, environment, trusted: false }
-      : null;
     const recorded = this.#recordExecResult(
-      diagnosticContext
-        ? this.#addTrustedCommandDeniedHint(result, args.cmd, environment)
-        : result,
+      result,
       environment,
       workspaceHandle,
       operationId,
-      diagnosticContext,
       Boolean(args.tty),
     );
     if (administratorRequested) {
@@ -648,18 +550,6 @@ export class RemoteProcessManager {
         ...recorded,
         trusted_package_script: true,
         trusted_package_script_rule_id: trustedPackageScriptRule.rule_id,
-      };
-    }
-    if (trustedCommand?.matched) {
-      return {
-        ...recorded,
-        trusted_command_rule_ids: trustedCommand.rule_ids,
-      };
-    }
-    if (trustedCommand?.reason?.startsWith('Trusted-command configuration unavailable:')) {
-      return {
-        ...recorded,
-        trusted_command_diagnostic: trustedCommand.reason,
       };
     }
     return policyRule
@@ -732,8 +622,8 @@ export class RemoteProcessManager {
           );
         }
         if (action.policy_kind === 'prefix') {
-          if (!this.execPolicyStore) {
-            throw new Error('CCM exec policy store is not available.');
+          if (!this.codexPolicy) {
+            throw new Error('Native Codex ExecPolicy is not available.');
           }
           if (!validatePrefixTokens(action.prefix_rule)) {
             throw new Error('Frozen prefix policy is invalid.');
@@ -846,12 +736,11 @@ export class RemoteProcessManager {
       environment,
       workspaceHandle,
       claimed.request.operation_id,
-      null,
       Boolean(action.tty),
     );
     if (decision === 'approve_always') {
       try {
-        persistentPolicy = this.execPolicyStore.allow({
+        persistentPolicy = this.codexPolicy.allow({
           prefixTokens: action.prefix_rule,
         });
       } catch (error) {
@@ -938,13 +827,6 @@ export class RemoteProcessManager {
       throw new Error(
         'Session identity changed while write_stdin was in flight: ' +
         args.session_id + '.',
-      );
-    }
-    if (session.trustedCommandHint) {
-      result = this.#addTrustedCommandDeniedHint(
-        result,
-        session.trustedCommandHint.command,
-        session.trustedCommandHint.environment,
       );
     }
     // Short-lived echo masking applies to later ordinary model polls too.

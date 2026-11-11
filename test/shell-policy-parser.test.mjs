@@ -60,7 +60,6 @@ test('CCM extends Codex policy matching to static PowerShell invocation operator
       assert.deepEqual(parsed?.segments.map((segment) => segment.tokens), [
         [fullPath, 'status'],
       ]);
-      assert.equal(parsed?.sourceBound, false);
     }
     assert.deepEqual(parseShellCommand('Write-Output okay; & git status',
       { shell })?.segments.map((segment) => segment.tokens), [

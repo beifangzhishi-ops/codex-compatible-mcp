@@ -13,7 +13,7 @@ import { DEFAULT_CCM_CONFIG_FILE, readCcmSection } from '../runtime/ccm-config.m
 import fs from 'node:fs';
 import { PlanManager } from './plan-manager.mjs';
 import { createAuditLogger } from './audit-log.mjs';
-import { ExecPolicyStore } from './exec-policy-store.mjs';
+import { CodexExecPolicy } from './codex-execpolicy.mjs';
 import { TrustedPackageScriptStore } from './trusted-package-script-store.mjs';
 import { defaultControllerStateFile } from './controller-state.mjs';
 import { WorkerQuarantinePolicy } from './worker-quarantine-policy.mjs';
@@ -74,9 +74,9 @@ export function createControllerRuntime(options = {}) {
       }
     },
   });
-  const execPolicyStore = options.execPolicyStore || new ExecPolicyStore({
-    stateFile: options.execPolicyStateFile ||
-      defaultControllerStateFile('exec-allowlist.json'),
+  const codexPolicy = options.codexPolicy || new CodexExecPolicy({
+    stateFile: options.codexPolicyStateFile ||
+      defaultControllerStateFile('rules/default.rules'),
     audit,
   });
   const trustedPackageScriptStore = options.trustedPackageScriptStore ||
@@ -97,7 +97,7 @@ export function createControllerRuntime(options = {}) {
     approvalManager,
     approvalReceiptStore,
     workspaceHandleManager,
-    execPolicyStore,
+    codexPolicy,
     trustedPackageScriptStore,
     audit,
     webFullAccess,
@@ -141,7 +141,7 @@ export function createControllerRuntime(options = {}) {
     workerHub,
     approvalManager,
     webFullAccess,
-    execPolicyStore,
+    codexPolicy,
     trustedPackageScriptStore,
     audit,
     workspaceHandleManager,
@@ -168,7 +168,6 @@ export function createControllerRuntime(options = {}) {
         await transferTaskManager.close();
         await processManager.close();
         fileTransferStore.close();
-        execPolicyStore?.close?.();
         trustedPackageScriptStore?.close?.();
         await planManager?.close();
         workspaceHandleManager.close();

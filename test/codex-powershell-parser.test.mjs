@@ -1,13 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   DEFAULT_CODEX_POWERSHELL_PARSER_PATH,
   parseCodexPowerShellScript,
 } from '../src/runtime/sandbox/codex-powershell-parser.mjs';
 import { parseShellCommand } from '../src/runtime/sandbox/shell-policy-parser.mjs';
-import { ExecPolicyStore } from '../src/controller/exec-policy-store.mjs';
+import { CodexExecPolicy } from '../src/controller/codex-execpolicy.mjs';
 
 const fixtures = JSON.parse(fs.readFileSync(fileURLToPath(new URL(
   '../native/codex-powershell-parser/src/fixtures/powershell_lowering.json',
@@ -56,34 +58,33 @@ test('Codex parser failures cannot fall back to guessable tokens', () => {
   }), null);
 });
 
-test('CCM reuses one saved exe prefix for literal environment and invocation wrappers', {
+test('native Codex policy matches a pinned executable through validated literal wrappers', {
   skip: skipNative && 'Build native helpers first: npm run build:native',
-}, () => {
+}, (t) => {
   const exe = 'C:\\texlive\\2026\\bin\\windows\\xdvipdfmx.exe';
-  const store = new ExecPolicyStore();
-  store.allow({ prefixTokens: [exe] });
-  const environment = { platform: 'windows', shell: { path: 'powershell.exe' } };
-  const args = (cmd) => ({ cmd, shell: 'powershell.exe' });
-  assert.equal(store.match({ environment, args: args(
-    `$env:TEXMFHOME='C:\\texmf'; & '${exe}' output.xdv`),
-  })?.decision, 'allow');
-  assert.equal(store.match({ environment, args: args(
-    `& '${exe}' output.xdv`),
-  })?.decision, 'allow');
-  assert.equal(store.match({ environment, args: args(
-    `$env:TEXMFHOME=$dynamic; & '${exe}' output.xdv`),
-  }), null);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-codex-policy-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const policy = new CodexExecPolicy({ stateFile: path.join(directory, 'default.rules') });
+  policy.allow({ prefixTokens: [exe] });
+  const envCommand = "$env:TEXMFHOME='C:\\texmf'; & '" + exe + "' output.xdv";
+  const callCommand = "& '" + exe + "' output.xdv";
+  const dynamicCommand = "$env:TEXMFHOME=$dynamic; & '" + exe + "' output.xdv";
+  const parsed = (cmd) => parseShellCommand(cmd, { shell: 'powershell.exe' });
+  assert.equal(policy.match({ parsed: parsed(envCommand) })?.decision, 'allow');
+  assert.equal(policy.match({ parsed: parsed(callCommand) })?.decision, 'allow');
+  assert.equal(policy.match({ parsed: parsed(dynamicCommand) }), null);
   assert.equal(parseShellCommand('git status | git log -1')?.segments.length, 2);
 });
 
-test('upstream allows a piped command only when every parsed segment is explicitly allowed', {
+test('native Codex policy requires an Allow for every piped command segment', {
   skip: skipNative && 'Build native helpers first: npm run build:native',
-}, () => {
-  const store = new ExecPolicyStore();
-  const environment = { platform: 'windows', shell: { path: 'powershell.exe' } };
-  store.allow({ prefixTokens: ['Write-Output'] });
-  const args = { cmd: 'Write-Output hello | Measure-Object', shell: 'powershell.exe' };
-  assert.equal(store.match({ environment, args }), null);
-  store.allow({ prefixTokens: ['Measure-Object'] });
-  assert.equal(store.match({ environment, args })?.decision, 'allow');
+}, (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-codex-policy-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const policy = new CodexExecPolicy({ stateFile: path.join(directory, 'default.rules') });
+  const parsed = parseShellCommand('Write-Output hello | Measure-Object', { shell: 'powershell.exe' });
+  policy.allow({ prefixTokens: ['Write-Output'] });
+  assert.equal(policy.match({ parsed }), null);
+  policy.allow({ prefixTokens: ['Measure-Object'] });
+  assert.equal(policy.match({ parsed })?.decision, 'allow');
 });
