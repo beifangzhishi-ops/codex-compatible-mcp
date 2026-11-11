@@ -107,7 +107,10 @@ test('workspace-write can reuse an existing sandbox workspace ACL', async () => 
 });
 
 test('workspace-write can read outside the context root but cannot write there', async () => {
-  const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-host-read-'));
+  // The native sandbox explicitly grants the command's TMP/TEMP roots.
+  // Keep this fixture outside both the workspace and those temporary roots
+  // so it continues to verify the ordinary outside-write boundary.
+  const outsideDir = fs.mkdtempSync(path.join(path.dirname(root), 'ccm-host-read-'));
   const outsidePath = path.join(outsideDir, 'outside.txt');
   fs.writeFileSync(outsidePath, 'outside-readable', 'utf8');
   const literal = outsidePath.replaceAll("'", "''");

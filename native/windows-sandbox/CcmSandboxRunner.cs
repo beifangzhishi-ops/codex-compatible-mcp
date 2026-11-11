@@ -207,10 +207,10 @@ internal static class CcmSandboxRunner
         return sb.ToString();
     }
 
-    static void EnsureWorkspaceWriteAce(string workspace, SecurityIdentifier sid)
+    static void EnsureWriteAce(string directory, SecurityIdentifier sid)
     {
-        var info = new DirectoryInfo(workspace);
-        if (!info.Exists) throw new DirectoryNotFoundException(workspace);
+        var info = new DirectoryInfo(directory);
+        if (!info.Exists) throw new DirectoryNotFoundException(directory);
 
         var security = info.GetAccessControl(AccessControlSections.Access);
         var rights = FileSystemRights.Modify |
@@ -244,6 +244,68 @@ internal static class CcmSandboxRunner
             AccessControlType.Allow);
         security.AddAccessRule(rule);
         info.SetAccessControl(security);
+    }
+
+    // The child's environment block is inherited from this runner. Resolve the
+    // final workload TMP/TEMP values, not values from the registry or the
+    // Supervisor's startup environment.
+    static List<string> WritableTempRoots()
+    {
+        var paths = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string name in new string[] { "TMP", "TEMP" })
+        {
+            string value = Environment.GetEnvironmentVariable(name);
+            if (String.IsNullOrWhiteSpace(value))
+                continue;
+            if (value.Length < 3 || !Char.IsLetter(value[0]) || value[1] != ':' ||
+                (value[2] != '\\' && value[2] != '/'))
+                throw new InvalidOperationException(name + " must be an absolute local directory.");
+
+            string root = Path.GetFullPath(value.Replace('/', '\\')).TrimEnd('\\');
+            string volume = Path.GetPathRoot(root);
+            string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+            string programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+            string programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+            string windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+            string codexHome = Environment.GetEnvironmentVariable("CODEX_HOME");
+            if (String.IsNullOrEmpty(codexHome))
+                codexHome = Path.Combine(userProfile, ".codex");
+            if (root.Length <= volume.TrimEnd('\\', '/').Length ||
+                root.Equals(userProfile.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase) ||
+                root.Equals(appData.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase) ||
+                root.Equals(localAppData.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase) ||
+                AtOrBelow(root, windows) ||
+                AtOrBelow(root, programFiles) ||
+                AtOrBelow(root, programFilesX86) ||
+                AtOrBelow(root, programData) ||
+                AtOrBelow(root, codexHome))
+                throw new InvalidOperationException(name + " names a protected directory, not a writable temp root.");
+
+            var directory = new DirectoryInfo(root);
+            if (!directory.Exists)
+                throw new DirectoryNotFoundException(name + " directory does not exist: " + root);
+            for (DirectoryInfo parent = directory; parent != null; parent = parent.Parent)
+            {
+                if ((parent.Attributes & FileAttributes.ReparsePoint) != 0)
+                    throw new InvalidOperationException(name + " passes through a reparse point: " + parent.FullName);
+            }
+            if (seen.Add(root))
+                paths.Add(root);
+        }
+        return paths;
+    }
+
+    static bool AtOrBelow(string candidate, string protectedRoot)
+    {
+        if (String.IsNullOrWhiteSpace(protectedRoot))
+            return false;
+        string root = Path.GetFullPath(protectedRoot).TrimEnd('\\', '/');
+        return candidate.Equals(root, StringComparison.OrdinalIgnoreCase) ||
+            candidate.StartsWith(root + "\\", StringComparison.OrdinalIgnoreCase);
     }
 
     static IntPtr SidToNative(SecurityIdentifier sid)
@@ -410,32 +472,40 @@ internal static class CcmSandboxRunner
         cwd = Path.GetFullPath(cwd);
         var capabilitySid = new SecurityIdentifier(CapabilitySidForRoot(workspace, profile));
 
-        if (profile == "workspace-write")
-            EnsureWorkspaceWriteAce(workspace, capabilitySid);
         IntPtr baseToken = IntPtr.Zero;
         IntPtr restrictedToken = IntPtr.Zero;
-        IntPtr sidPtr = IntPtr.Zero;
-        IntPtr logonSidPtr = IntPtr.Zero;
-        IntPtr worldSidPtr = IntPtr.Zero;
+        var nativeSidPointers = new List<IntPtr>();
         PROCESS_INFORMATION pi = new PROCESS_INFORMATION();
 
         try
         {
+            if (profile == "workspace-write")
+                EnsureWriteAce(workspace, capabilitySid);
             if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ALL_ACCESS, out baseToken))
                 return Fail("OpenProcessToken failed: " + Marshal.GetLastWin32Error());
 
             var logonSid = GetLogonSid(baseToken);
             var worldSid = new SecurityIdentifier(WellKnownSidType.WorldSid, null);
-            sidPtr = SidToNative(capabilitySid);
-            logonSidPtr = SidToNative(logonSid);
-            worldSidPtr = SidToNative(worldSid);
-            var restricted = new SID_AND_ATTRIBUTES[3];
-            restricted[0].Sid = sidPtr;
-            restricted[0].Attributes = 0;
-            restricted[1].Sid = logonSidPtr;
-            restricted[1].Attributes = 0;
-            restricted[2].Sid = worldSidPtr;
-            restricted[2].Attributes = 0;
+            var allowedSids = new List<SecurityIdentifier> { capabilitySid, logonSid, worldSid };
+            if (profile == "workspace-write")
+            {
+                string userSid = WindowsIdentity.GetCurrent().User.Value;
+                foreach (string tempRoot in WritableTempRoots())
+                {
+                    var tempSid = new SecurityIdentifier(
+                        CapabilitySidForRoot(tempRoot, "temp-write|" + userSid));
+                    EnsureWriteAce(tempRoot, tempSid);
+                    allowedSids.Add(tempSid);
+                }
+            }
+            var restricted = new SID_AND_ATTRIBUTES[allowedSids.Count];
+            for (int i = 0; i < allowedSids.Count; i++)
+            {
+                IntPtr ptr = SidToNative(allowedSids[i]);
+                nativeSidPointers.Add(ptr);
+                restricted[i].Sid = ptr;
+                restricted[i].Attributes = 0;
+            }
 
             UInt32 flags = DISABLE_MAX_PRIVILEGE | LUA_TOKEN | WRITE_RESTRICTED;
             if (!CreateRestrictedToken(
@@ -443,9 +513,7 @@ internal static class CcmSandboxRunner
                 (UInt32)restricted.Length, restricted, out restrictedToken))
                 return Fail("CreateRestrictedToken failed: " + Marshal.GetLastWin32Error());
 
-            SetDefaultDacl(restrictedToken, new SecurityIdentifier[] {
-                logonSid, worldSid, capabilitySid
-            });
+            SetDefaultDacl(restrictedToken, allowedSids.ToArray());
             EnableChangeNotifyPrivilege(restrictedToken);
 
             var si = new STARTUPINFO();
@@ -480,9 +548,8 @@ internal static class CcmSandboxRunner
             if (pi.hProcess != IntPtr.Zero) CloseHandle(pi.hProcess);
             if (restrictedToken != IntPtr.Zero) CloseHandle(restrictedToken);
             if (baseToken != IntPtr.Zero) CloseHandle(baseToken);
-            if (worldSidPtr != IntPtr.Zero) Marshal.FreeHGlobal(worldSidPtr);
-            if (logonSidPtr != IntPtr.Zero) Marshal.FreeHGlobal(logonSidPtr);
-            if (sidPtr != IntPtr.Zero) Marshal.FreeHGlobal(sidPtr);
+            foreach (IntPtr ptr in nativeSidPointers)
+                Marshal.FreeHGlobal(ptr);
         }
     }
 }
