@@ -128,9 +128,9 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const listed = await client.listTools();
     const names = listed.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, registry.list().map((tool) => tool.name).sort());
-    assert.equal(names.length, 31);
+    assert.equal(names.length, 32);
     for (const name of ['list_projects','claim_full_access','select_workspace','register_workspace','unregister_workspace',
-      'plan_patch','plan_read','restart','import_chatgpt_file','conversation','quark_upload',
+      'plan_patch','plan_read','restart','import_chatgpt_file','conversation','quark_upload','publish','publish_card',
       'transfer_path','transfer_status','transfer_cancel',
       'qq','wechat','transcribe','sjtu_mail']) {
       assert.ok(names.includes(name), name + ' must be a top-level MCP tool');
@@ -150,9 +150,11 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(toolDescription('request_verification_input'), /Do NOT inspect or request the code/);
     assert.match(toolDescription('claim_full_access'), /Never request or expose phone enrollment secrets/);
     assert.match(toolDescription('plan_patch'), /implementation authorization/);
-    assert.match(toolDescription('plan_patch'), /summarize without pasting the Plan/);
+    assert.match(toolDescription('plan_patch'), /Summarize, do not paste the Plan/);
     assert.match(toolDescription('plan_read'), /lifecycle-neutral/);
-    assert.match(toolDescription('publish'), /Inspect screenshots before claiming visual verification/);
+    assert.match(toolDescription('publish'), /inspect actual screenshots/);
+    assert.match(toolDescription('publish'), /withhold all links/);
+    assert.match(toolDescription('publish_card'), /existing immutable publication_id/);
     assert.match(toolDescription('conversation'), /chatgpt\.com\/share/);
     assert.match(toolDescription('conversation'), /聊天分享链接/);
     assert.match(toolDescription('conversation'), /Do not use web search, browsing or BMG/);
@@ -175,7 +177,9 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       assert.deepEqual(listed.tools.find((tool) => tool.name === name)?._meta?.ui?.visibility, ['app']);
     }
     assert.equal(listed.tools.find((tool) => tool.name === 'request_approval')?._meta?.ui?.resourceUri, APPROVAL_UI_URI);
-    assert.equal(listed.tools.find((tool) => tool.name === 'publish')?._meta?.ui?.resourceUri, PUBLISHED_FILE_UI_URI);
+    assert.equal(listed.tools.find((tool) => tool.name === 'publish')?._meta?.ui?.resourceUri, undefined);
+    assert.equal(listed.tools.find((tool) => tool.name === 'publish')?._meta?.['openai/outputTemplate'], undefined);
+    assert.equal(listed.tools.find((tool) => tool.name === 'publish_card')?._meta?.ui?.resourceUri, PUBLISHED_FILE_UI_URI);
     const discovered = await client.callTool({name:'list_projects', arguments:{}});
     assert.equal(discovered.isError, undefined);
     assert.equal(discovered.structuredContent.default_environment_id, 'mcp-worker');
@@ -383,6 +387,13 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(publishResult.structuredContent.preview_url, undefined);
     assert.equal(publishResult.structuredContent.byte_length, docBytes.length);
     const token = publishResult.structuredContent.download_url.split('/').at(-1);
+    assert.equal(publishResult.structuredContent.publication_id, token);
+    const cardResult = await client.callTool({
+      name: 'publish_card', arguments: { publication_id: token },
+    });
+    assert.equal(cardResult.isError, undefined);
+    assert.equal(cardResult.structuredContent.download_url, publishResult.structuredContent.download_url);
+    assert.equal(cardResult.structuredContent.sha256, publishResult.structuredContent.sha256);
     const download = await fetch('http://127.0.0.1:' + controller.address.port + '/ccm/download/' + token);
     assert.equal(download.status, 200);
     assert.deepEqual(Buffer.from(await download.arrayBuffer()), docBytes);
@@ -413,6 +424,15 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     }
     assert.match(planPublish.structuredContent.preview_url, /^https:\/\/example\.test\/ccm\/preview\//);
     const planToken = planPublish.structuredContent.download_url.split('/').at(-1);
+    assert.equal(planPublish.structuredContent.publication_id, planToken);
+    const planCard = await client.callTool({
+      name: 'publish_card', arguments: { publication_id: planToken },
+    });
+    assert.equal(planCard.isError, undefined);
+    assert.equal(planCard.structuredContent.preview_url, planPublish.structuredContent.preview_url);
+    assert.equal(planCard.structuredContent.sha256, planPublish.structuredContent.sha256);
+    assert.equal(planCard.structuredContent.markdown_preview, planPublish.structuredContent.markdown_preview);
+    assert.equal(planCard.content.filter((item) => item.type === 'image').length, 0);
     const planDownload = await fetch('http://127.0.0.1:' + controller.address.port + '/ccm/download/' + planToken);
     assert.equal(planDownload.status, 200);
     assert.deepEqual(Buffer.from(await planDownload.arrayBuffer()), await runtime.planManager.snapshot(createdPlan.plan_id));

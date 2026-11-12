@@ -80,9 +80,9 @@ export function registerPlanTools(registry, runtime) {
     description: [
       "Create/update a durable Markdown Plan using Codex-style patch text targeting only virtual plan.md: omit plan_id to Add File; pass plan_id to Update File.",
       "Use for substantive planning, not a routine progress checklist. Explore discoverable facts before asking. Ask about unresolved material preferences with 2-4 meaningful options and a recommended default; accept other answers.",
-      "Write a decision-complete but concise Plan scaled to the task: clear title and usually 3-5 short sections for summary, key changes, tests and assumptions/defaults as applicable. Group changes by behavior/subsystem rather than file inventory; name files only when needed (normally at most 3 paths). Include material interfaces and validation, but omit repeated facts, unnecessary schemas/fallbacks, speculative edge cases, and defensive prose. Expand only to prevent real implementation ambiguity.",
+      "Write a decision-complete but concise Plan with a title and 3-5 short sections for summary, changes, tests and assumptions. Group changes by behavior/subsystem rather than file inventory (normally at most 3 paths). Include material interfaces and validation; omit unnecessary schemas/fallbacks, speculative edge cases, and defensive prose. Expand only to resolve ambiguity.",
       "Planning permits inspection and non-mutating validation, not tracked implementation edits, dependency changes, deployment or commits without explicit implementation authorization. Do not assume historical compatibility.",
-      "Keep the Plan current. On completion publish plan_id alone through ccm-extra.publish, inspect returned screenshots or report unavailable coverage, and summarize without pasting the Plan. Publishing and workspace/sandbox approvals do not authorize implementation; plan_read remains lifecycle-neutral.",
+      "Keep Plan current. Use publish(plan_id) for links only. Visually inspect screenshots and diagnostics before sharing ANY Markdown link or calling publish_card. On missing/failed review, withhold links and fix/re-publish or report failure. Summarize, do not paste the Plan. Publishing/approvals never authorize implementation; plan_read remains lifecycle-neutral.",
     ].join('\n\n'),
     inputSchema: {
       plan_id: z.string().uuid().optional().describe(

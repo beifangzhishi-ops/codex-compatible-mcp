@@ -25,10 +25,10 @@ test('Plan tools are peers, carry ids explicitly, and keep reads lifecycle-neutr
     assert.match(patchTool.description, /non-mutating validation/);
     assert.match(patchTool.description, /without explicit implementation authorization/);
     assert.match(patchTool.description, /Do not assume historical compatibility/);
-    assert.match(patchTool.description, /publish plan_id alone through ccm-extra\.publish/);
-    assert.match(patchTool.description, /inspect returned screenshots/);
-    assert.match(patchTool.description, /summarize without pasting the Plan/);
-    assert.match(patchTool.description, /workspace\/sandbox approvals do not authorize implementation/);
+    assert.match(patchTool.description, /publish\(plan_id\) for links only/);
+    assert.match(patchTool.description, /Visually inspect screenshots and diagnostics before sharing ANY Markdown link/);
+    assert.match(patchTool.description, /Summarize, do not paste the Plan/);
+    assert.match(patchTool.description, /Publishing\/approvals never authorize implementation/);
     assert.match(patchTool.description, /plan_read remains lifecycle-neutral/);
     assert.ok(patchTool.description.length < 1450, 'Plan guidance should stay compact');
     assert.match(readTool.description, /lifecycle-neutral/);

@@ -37,16 +37,25 @@ function execResult(value, metadata = {}) {
   };
 }
 
-async function fileResourceResult(value, environmentId, runtime, metadata = {}) {
+async function fileResourceResult(value, environmentId, runtime, metadata = {}, options = {}) {
   const fileTransferStore = runtime.fileTransferStore;
   if (!fileTransferStore) {
     throw new Error('CCM file-transfer store is unavailable.');
   }
   const origin = runtime.fileDownloadOrigin();
   if (!/^https:\/\//.test(origin)) throw new Error('Valid HTTPS file origin is required.');
-  const transfer = fileTransferStore.put(value, { environmentId });
+  const previewKind = publishedPreviewKind(value.mime_type);
+  let markdownSource;
+  if (previewKind === 'markdown') {
+    markdownSource = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.from(value.data, 'base64'));
+    if (markdownSource.includes('\0')) throw new Error('Markdown contains NUL bytes');
+  }
+  let renderCheck = null;
+  if (markdownSource != null && !options.existingTransfer) {
+    renderCheck = await inspectMarkdownRender(markdownSource, value.filename);
+  }
+  const transfer = options.existingTransfer || fileTransferStore.put(value, { environmentId });
   const url = origin + '/ccm/download/' + transfer.token;
-  const previewKind = publishedPreviewKind(transfer.mime_type);
   const previewUrl = previewKind && previewKind !== 'text'
     ? origin + '/ccm/preview/' + transfer.token : undefined;
   const textPreview = (previewKind === 'text' || previewKind === 'markdown')
@@ -57,28 +66,17 @@ async function fileResourceResult(value, environmentId, runtime, metadata = {}) 
     ? renderMarkdownFragment(textPreview.text) : null;
   const markdownPreview = candidateMarkdown && Buffer.byteLength(candidateMarkdown, 'utf8') <= 32 * 1024
     ? candidateMarkdown : null;
-  let renderCheck = null;
-  if (previewKind === 'markdown') {
-    try {
-      const source = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.from(value.data, 'base64'));
-      if (source.includes('\0')) throw new Error('Markdown contains NUL bytes');
-      renderCheck = await inspectMarkdownRender(source, transfer.filename);
-    } catch (error) {
-      renderCheck = {
-        inspection: { status: 'unavailable', message: String(error?.message || error).slice(0, 300), visual_review_required: true },
-        screenshots: [],
-      };
-    }
-  }
   return {
     content: [
-      { type: 'text', text: 'Download ' + transfer.filename + ': ' + url +
+      { type: 'text', text: 'Publication ID: ' + transfer.token +
+        '\nDownload ' + transfer.filename + ': ' + url +
         (previewUrl ? '\nPreview: ' + previewUrl : '') +
         '\nExpires: ' + new Date(transfer.expiresAt).toISOString() +
         (renderCheck ? '\nRender inspection: ' + JSON.stringify(renderCheck.inspection) +
-          '\nModel: inspect the returned screenshots before declaring visual review complete. ' +
-          'If screenshots are unavailable, explicitly report that visual review was not possible. ' +
-          'Correct any issues and re-publish; long-document screenshots are representative rather than exhaustive.' : '') },
+          '\nModel: You MUST actually inspect the returned screenshots and diagnostics before sharing ANY Markdown download/preview link or calling publish_card. ' +
+          'If screenshots are unavailable, incomplete for required content, or show defects, DO NOT deliver the links. ' +
+          'Correct defects and re-publish; report unavailable visual review without handing off an unverified Markdown link. ' +
+          'Automated checks passing does not mean the model visually reviewed the document.' : '') },
       ...(renderCheck?.screenshots || []).flatMap((screenshot, index) => [
         { type: 'text', text: 'Rendered Markdown screenshot ' + (index + 1) + ': ' + screenshot.label },
         { type: 'image', data: screenshot.data, mimeType: screenshot.mimeType },
@@ -86,6 +84,7 @@ async function fileResourceResult(value, environmentId, runtime, metadata = {}) 
     ],
     structuredContent: {
       capability: 'publish',
+      publication_id: transfer.token,
       ...(environmentId ? { environment_id: environmentId } : {}),
       ...metadata,
       download_url: url,
@@ -108,6 +107,25 @@ async function fileResourceResult(value, environmentId, runtime, metadata = {}) 
       expires_at: new Date(transfer.expiresAt).toISOString(),
     },
   };
+}
+
+async function publishedCardResult(runtime, publicationId) {
+  const acquired = runtime.fileTransferStore?.acquire(publicationId);
+  if (!acquired) throw new Error('Publication not found or expired; call publish again.');
+  try {
+    const chunks = [];
+    for await (const chunk of acquired.stream) chunks.push(chunk);
+    const bytes = Buffer.concat(chunks);
+    if (bytes.length !== acquired.entry.byte_length) throw new Error('Published snapshot is incomplete; call publish again.');
+    return await fileResourceResult({
+      filename: acquired.entry.filename,
+      mime_type: acquired.entry.mime_type,
+      byte_length: bytes.length,
+      data: bytes.toString('base64'),
+    }, acquired.entry.environment_id, runtime, {}, { existingTransfer: acquired.entry });
+  } finally {
+    acquired.release();
+  }
 }
 
 function receivedFileResult(value, environmentId) {
@@ -238,17 +256,13 @@ export function registerSpecializedTools(registry, runtime) {
     provenance: 'ccm-https-file-publishing',
 
     tags: ['file', 'attachment', 'transfer', 'gpt'],
-    mcpMeta: {
-      ui: { resourceUri: PUBLISHED_FILE_UI_URI },
-      'openai/outputTemplate': PUBLISHED_FILE_UI_URI,
-    },
     supportsParallel: false,
     description: [
-      "Publish one immutable snapshot: plan_id alone for a Controller Plan, or workspace_handle plus path for a Worker file (never both). Returns an MCP App card and temporary HTTPS download link, not a native ChatGPT attachment. Links are bearer-accessible and expire within 72 hours.",
-      "Proactively publish finished user-facing deliverables and useful previews, not intermediate files needed only for model inspection. For decision-complete Plans use plan_id and summarize without pasting the full Plan; publication does not authorize implementation.",
-      "For user-facing Worker files, prefer publish at or below the default 12 MiB limit; for larger files proactively call quark_upload instead, even without an explicit Quark request. The user retrieves uploaded files in Quark Cloud Drive; no share link is needed. Honor an explicitly requested delivery method and report unavailable uploads rather than claiming success.",
-      "Markdown (including formulas) renders a bounded card, full safe HTML preview and model-visible browser screenshots/diagnostics. Inspect screenshots before claiming visual verification; fix issues and re-publish, or report unavailable/incomplete coverage. The original Markdown remains downloadable.",
-      "Other files get appropriate source/browser previews; Office files are download-only unless converted. Relative Worker paths resolve from its context root; reuse existing handles. Publish one resource per call.",
+      "Publish an immutable snapshot without an MCP App card: plan_id alone OR workspace_handle plus path. Returns publication_id, bearer-accessible HTTPS links (up to 72 hours), and Markdown screenshots/diagnostics.",
+      "Deliver links by default; only publish_card(publication_id) displays the same cached snapshot. Summarize Plans rather than pasting them. Publishing does not authorize implementation.",
+      "For Worker files at or below the default 12 MiB limit use publish; for larger files proactively call quark_upload even without explicit Quark request (no share link is needed). Honor an explicitly requested delivery method; report upload failures.",
+      "MANDATORY Markdown/Plan gate: inspect actual screenshots and render_inspection before sharing ANY link or calling publish_card. Check formulas, line breaks, tables, overflow and coverage. Automatic pass is insufficient. If screenshots are missing, review is incomplete or defects remain, withhold all links; fix/re-publish or report blocked review.",
+      "Non-Markdown files need no visual gate. Office files are download-only; Worker paths resolve from the context root. Not a native ChatGPT attachment.",
     ].join('\n\n'),
     inputSchema: z.object({
       plan_id: z.string().uuid().optional().describe('To publish a Controller Plan: supply only this durable Plan UUID.'),
@@ -278,6 +292,33 @@ export function registerSpecializedTools(registry, runtime) {
           value.environment_id,
           runtime,
         );
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  });
+
+  registry.register({
+    namespace: 'ccm-extra',
+    name: 'publish_card',
+    provider: 'ccm-specialized',
+    provenance: 'ccm-https-file-publishing',
+    tags: ['file', 'attachment', 'transfer', 'gpt', 'card'],
+    mcpMeta: {
+      ui: { resourceUri: PUBLISHED_FILE_UI_URI },
+      'openai/outputTemplate': PUBLISHED_FILE_UI_URI,
+    },
+    supportsParallel: false,
+    description: [
+      "Show an MCP App card for an existing immutable publication_id from publish. Reuses the cached snapshot and URLs; never re-reads the source.",
+      "For Markdown/Plans, call ONLY after actual screenshot/diagnostic review passes, including adequate coverage. If expired, re-publish and review again; never show an unreviewed Markdown card.",
+    ].join('\n\n'),
+    inputSchema: z.object({
+      publication_id: z.string().uuid().describe('Exact immutable publication_id returned by publish; expires with its cached file.'),
+    }).strict(),
+    handler: async ({ publication_id }) => {
+      try {
+        return await publishedCardResult(runtime, publication_id);
       } catch (error) {
         return toolError(error);
       }
