@@ -1,6 +1,6 @@
-# Guardian auto-review integration (implementation staged 2026-11-11)
+# Guardian auto-review integration (deployed on 6v Controller)
 
-**Status: integrated in the old CCM Controller and tested locally, disabled by default.** Real CPA adapter has passed but production Worker auto-approval and double-host rollout are separate acceptance gates. Do not call the feature deployed or end-to-end verified until actual running Controller/Worker tests pass.
+**Status: integrated, deployed and enabled on the 6v Controller.** The 6v-local and noha-remote Worker approval paths both passed real CPA Guardian allow-and-execute tests on 2026-11-12. New installations retain `controller.guardian.enabled=false` in the example config; the active 6v Controller is configured separately in its ignored `ccm.config.json`.
 
 ## Owner-approved decisions
 
@@ -40,17 +40,17 @@ The original action must stay bound to its frozen command, arguments, Worker and
 
 **Test evidence:** `scripts/probe-cpa-guardian-adapter.mjs` completed the real CPA `codex-auto-review` round trip with two function calls, two actual local mock-tool handler executions, three model responses and an accepted `allow` decision. `test/guardian-reviewer.test.mjs` exercises semantic mapping and frozen App/Reviewer state transitions. The existing approval and Codex ExecPolicy suites remained green (42 targeted regression tests on 6v). No protected user command or permanent policy was modified by these probes.
 
-The full serial 6v Node suite passed after implementation: **357 tests, 351 passed, six opt-in skips, zero failures** (`node --test --test-concurrency=1 --test-isolation=none --test-timeout=60000`). This does not yet establish live Controller/Worker automatic approval, or real CPA image-result handling. The parent-turn scoped Codex Guardian denial circuit and async evidence reuse are not present without an authenticated Host turn identity.
+The full serial 6v Node suite passed after implementation: **357 tests, 351 passed, six opt-in skips, zero failures** (`node --test --test-concurrency=1 --test-isolation=none --test-timeout=60000`). All 13 Guardian-specific tests also passed on noha after deployment. Real Controller/Worker CPA review and execution have now been verified on both Workers; real CPA image-result handling is not yet verified. The parent-turn scoped Codex Guardian denial circuit and async evidence reuse are not present without an authenticated Host turn identity.
 
-## Acceptance before implementation is called complete
+## Verification matrix
 
-1. **CPA/tool adapter test passed via stateless replay (2026-11-11).** Two actual mock tool handlers executed through the new production transport. Full running Controller/Worker approval still needs its deployment acceptance.
-2. Demonstrate the Reviewer has the same effective tool permissions as the main model, including an authorized non-read-only tool action; no dedicated read-only ceiling and no reviewer privilege inflation.
-3. Demonstrate the reviewer accepts the main model's account of user instructions and authorization without independently fetching the original Host conversation.
-4. Cover allow/deny, failed JSON, timeout, cancelled review, tool-call failures and denial-limit behavior. On an unavailable or malformed reviewer result, no reviewed command may run; the existing human approval route may be offered.
-5. Revalidate frozen command, args, Worker/Workspace and one-shot execution identity at dispatch; never turn a single model allow into persistent `Always allow` or duplicate execution.
-6. Run focused Node/Controller/Worker tests and a real disposable end-to-end CPA approval scenario before deployment; update README, AGENTS.md and the upstream parity audit to reflect actual—not planned—status.
+1. **Passed, real CPA:** Two actual simulated tool handlers ran through the production Responses adapter and ToolRegistry using full-history replay, followed by valid structured `allow`.
+2. **Passed, automated:** Reviewer accesses main-model-visible registered CCM tools under their ordinary permissions; a non-read-only in-memory fixture handler executed and no Reviewer-only read-only ceiling was inserted.
+3. **Passed, implementation/automated:** Reviewer uses the Host model's supplied authorization summary and does not fetch the original Host conversation.
+4. **Passed, automated:** Allow, deny, malformed JSON, tool error, safe fallback to human approval, frozen identity, exact-once dispatch and in-flight unknown status. Source Codex's parent-turn denial-history breaker remains an explicit parity boundary; live CPA failure/deny injection was not performed on the active Controller.
+5. **Passed, live 6v:** Guardian reviewed and approved exactly one harmless `Write-Output 'CCM_GUARDIAN_REAL_PROBE_20261111'` command, which returned `state=consumed`, `review_source=guardian`, `review_outcome=allow`, `review_risk_level=low`, `exit_code=0` and the expected string.
+6. **Passed, live noha remote Worker:** The same Controller approved and dispatched `Write-Output 'CCM_GUARDIAN_NOHA_PROBE_20261112'` to noha with the corresponding `consumed/guardian/allow/low/exit_code=0` receipt and expected string. Both Workers were `state=normal` after controlled service restarts; both repositories matched `f168215b23a0eb779db6c45ae6a96ed0e173909d`.
 
-## Production gate
+## Known boundaries
 
-The code is staged but the enabled production state must not be reported complete until 6v's live Controller can review and execute a harmless frozen command, reject a denied one, and survive a simulated CPA failure without executing or doubling a command, and noha has the same synced source commit and remains healthy. Maintain README/AGENTS and this parity audit as tests progress; remove superseded claims rather than layering them indefinitely.
+The actual deployed scope is the synchronous one-time Guardian review of escalated `exec_command` actions, not the entire Codex native Session/async evidence/denial-history subsystem. Neither live CPA-deny/timeout-injection nor image-result handling has been separately exercised on the running Controller; these are not blockers for the verified allow path but remain targeted additional acceptance work. The existing human approval card is the fallback on reviewer failure. Keep the deployed state and future parity work accurately distinguished, and do not add obsolete compatibility shims.
