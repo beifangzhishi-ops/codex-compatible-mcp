@@ -27,6 +27,7 @@
 | Patch and filesystem semantics | `codex-rs/apply-patch`; `codex-rs/core/src/apply_patch.rs` | `src/runtime/filesystem`, `apply_patch` tools | **Not aligned**; existing CCM tests are not an upstream-differential suite. |
 | Configuration loading, inheritance and policy | `codex-rs/config`, `codex-rs/protocol/src/config_types.rs` | Worker bootstrap and `config/` | **Not aligned overall**; only the shell environment policy TOML subset has been ported. |
 | Worker routing and GPT Host delivery | Codex execution host and protocol interfaces | CCM Controller/Worker RPC, MCP, OAuth, approval UI | **Adaptation surface**; Host-specific presentation excluded, but execution semantics must still be equivalent. |
+| User-facing Plan guidance | `codex-rs/collaboration-mode-templates/templates/plan.md` at `672e99fed8da8e5efc3268c52cddc4fc97ffd078` | `src/tools/plan-tools.mjs`, `src/controller/mcp-http-server.mjs`, `README.md`; `test/plan-tools.test.mjs`, `test/mcp-http.test.mjs` | **Codex final-Plan writing guidance adopted**: decision-complete and concise, normally 3-5 sections grouped by behavior with only necessary file references. Durable Markdown Plan storage and publish delivery remain GPT Host adaptations; CCM does not implement Codex's Plan Mode lifecycle. |
 
 ## Evidence and remaining acceptance gates
 

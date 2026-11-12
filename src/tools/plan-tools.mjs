@@ -79,11 +79,10 @@ export function registerPlanTools(registry, runtime) {
     tags: ['plan', 'planning', 'patch', 'codex'],
     description: [
       "Create/update a durable Markdown Plan using Codex-style patch text targeting only virtual plan.md: omit plan_id to Add File; pass plan_id to Update File.",
-      "Planning guidance: explore first, ask second. Do not ask the user for facts reasonably discoverable in code, environment or docs. Bias toward questions over guessing when a material user preference is unresolved: offer 2-4 mutually exclusive choices and a recommended default in the same user-visible question; accept other answers.",
-      "Planning mutation boundary: inspect, diagnose and run non-mutating tests/builds (ignored/cache/temp outputs only), but do not edit tracked project files, migrate, change dependencies, deploy, commit or push before explicit implementation authorization. No historical compatibility unless the user requests it.",
-      "Decision-complete Plan: record implementation approach, affected files/interfaces, failures, cleanup and validation so another executor can act without inventing product decisions; identify remaining blockers.",
-      "Final Plan handoff: call ccm-extra.publish with plan_id alone for an immutable Markdown snapshot. Review returned screenshots or disclose unavailable coverage; summarize rather than reading/pasting the entire Plan. Publishing is not implementation authorization.",
-      "Keep the durable Plan current: remove stale or completed items. Execution gate: planning, patching the Plan and workspace/sandbox approvals do not count as execution authorization. Later plan_read during implementation remains lifecycle-neutral.",
+      "Use for substantive planning, not a routine progress checklist. Explore discoverable facts before asking. Ask about unresolved material preferences with 2-4 meaningful options and a recommended default; accept other answers.",
+      "Write a decision-complete but concise Plan scaled to the task: clear title and usually 3-5 short sections for summary, key changes, tests and assumptions/defaults as applicable. Group changes by behavior/subsystem rather than file inventory; name files only when needed (normally at most 3 paths). Include material interfaces and validation, but omit repeated facts, unnecessary schemas/fallbacks, speculative edge cases, and defensive prose. Expand only to prevent real implementation ambiguity.",
+      "Planning permits inspection and non-mutating validation, not tracked implementation edits, dependency changes, deployment or commits without explicit implementation authorization. Do not assume historical compatibility.",
+      "Keep the Plan current. On completion publish plan_id alone through ccm-extra.publish, inspect returned screenshots or report unavailable coverage, and summarize without pasting the Plan. Publishing and workspace/sandbox approvals do not authorize implementation; plan_read remains lifecycle-neutral.",
     ].join('\n\n'),
     inputSchema: {
       plan_id: z.string().uuid().optional().describe(

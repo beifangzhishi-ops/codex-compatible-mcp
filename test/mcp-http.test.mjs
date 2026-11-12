@@ -116,6 +116,9 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(client.getInstructions(), /automatic code-free follow-up/);
     assert.match(client.getInstructions(), /call claim_full_access/);
     assert.match(client.getInstructions(), /plan_patch\/plan_read/);
+    assert.match(client.getInstructions(), /decision-complete but concise Plans/);
+    assert.match(client.getInstructions(), /implementation changes require explicit authorization/);
+    assert.match(client.getInstructions(), /publish plan_id with ccm-extra\.publish/);
     assert.match(client.getInstructions(), /Use ccm-extra.conversation/);
     assert.match(client.getInstructions(), /write_stdin.*read-only/);
     assert.match(client.getInstructions(), /propose a narrow prefix_rule/);
