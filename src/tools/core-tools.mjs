@@ -401,7 +401,7 @@ export function registerCoreTools(registry, runtime) {
     provider: 'ccm-core',
 
     tags: ['approval', 'full-access', 'unlock'],
-    description: 'Fallback only when the owner has unlocked CCM but has not provided a usable full_access_grant_id (for example, ChatGPT blocked the copied message). Claim the pending web grant, or recover the SAME already-claimed ID once after browser copy, within the original five-minute claim window or earlier grant expiry. No arguments. Do not call if the user supplied an already-claimed ID. Use the returned full_access_grant_id explicitly in privileged tools; claiming or recovery never extends expiry or changes Worker configuration.',
+    description: 'Fallback only when the owner unlocked CCM at /ccm/unlock but has not provided a usable full_access_grant_id (for example, ChatGPT blocked the copied message). Claim the pending web grant, or recover the SAME already-claimed ID once after browser copy, within the original five-minute claim window or earlier grant expiry. No arguments. Do not call if the user supplied an already-claimed ID. Use the returned full_access_grant_id explicitly in privileged tools; claiming or recovery never extends expiry or changes Worker configuration. Never request or expose phone enrollment secrets.',
     inputSchema: {},
     handler: async () => {
       const claim = runtime.webFullAccess?.claim();
@@ -508,7 +508,7 @@ export function registerCoreTools(registry, runtime) {
     supportsParallel: true,
     description: [
       "List connected Workers, registered projects and configured default project directories without entering a workspace. Omit environment_id for all Workers; all=true also lists existing projectless workspaces.",
-      "Results include independent sandbox_read_scope and sandbox_write_scope, platform, capabilities and Worker state. Compare connected_at and state=normal after restart; one stale Worker does not block others.",
+      "Results include independent sandbox_read_scope and sandbox_write_scope, platform, capabilities and Worker state. A project_directory_hint is for display only, never workspace-entry authorization or an authoritative project root. Compare connected_at and state=normal after restart; one stale Worker or a single network timeout does not prove all Workers are offline.",
     ].join('\n\n'),
     inputSchema: {
       environment_id: z.string().optional().describe('Optional environment id. Omit to list projects across every connected environment.'),
@@ -819,7 +819,7 @@ export function registerCoreTools(registry, runtime) {
       "For repeatable build/test/dev escalation, proactively supply a practical prefix_rule: stable executable, subcommand, script and fixed options, excluding variable suffixes. Do not use a bare generic shell/interpreter. Always allow saves the prefix across Workers; do not pass prefix_rule on ordinary commands.",
       "Timed Full Access: use the supplied claimed full_access_grant_id per command, or call claim_full_access only if the owner unlocked without providing the ID. No grant changes Worker baseline or renews expiry.",
       "Windows run_as_admin=true uses an unrestricted administrator Agent after one-shot Guardian/human approval. It cannot combine with escalation, grants or prefix_rule; saved rules cannot authorize admin. Preserve verified absolute targets for destructive file operations.",
-      "Host Script/tool failures without a structured CCM result are not evidence that CCM rejected or dispatched a command.",
+      "Host Script/tool failures without a structured CCM result are not evidence that CCM rejected or dispatched a command. Distinguish these from process exit errors, network/target-site errors and Worker connectivity before retrying; do not silently start a replacement session.",
     ].join('\n\n'),
     inputSchema: {
       cmd: z.string().min(1).describe('Shell command to execute.'),
@@ -992,7 +992,7 @@ export function registerCoreTools(registry, runtime) {
     tags: ['process', 'terminal', 'session', 'stdin'],
     description: [
       'Writes characters to an existing unified exec session and returns recent output.',
-      'workspace_handle is required and must match the context that created session_id. Copy both values from the exec_command result; CCM rejects cross-workspace session continuation before contacting the Worker.',
+      'workspace_handle is required and must match the context that created session_id. Copy both values from the exec_command result; CCM rejects cross-workspace session continuation before contacting the Worker. Empty chars polls are read-only; a Host tool failure is not proof the process stopped or a poll succeeded.',
     ].join(' '),
     inputSchema: {
       session_id: z.number().int().describe('Identifier of the running unified exec session.'),

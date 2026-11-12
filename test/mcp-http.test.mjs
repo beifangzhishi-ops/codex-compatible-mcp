@@ -110,10 +110,8 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
 
   try {
     await client.connect(transport);
-    assert.match(client.getInstructions(), /Reuse an existing workspace_handle/);
+    assert.match(client.getInstructions(), /CCM provides MCP tools for connected computers/);
     assert.match(client.getInstructions(), /Host chooses and sequences peer tools/);
-    assert.match(client.getInstructions(), /Call list_projects to discover/);
-    assert.match(client.getInstructions(), /default project directories/);
     assert.match(client.getInstructions(), /keyboard\/mouse automation/);
     assert.match(client.getInstructions(), /available proxy/);
     assert.match(client.getInstructions(), /historical compatibility/);
@@ -124,19 +122,9 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(client.getInstructions(), /verified absolute executable and file paths/);
     assert.match(client.getInstructions(), /Prefer root-cause fixes/);
     assert.doesNotMatch(client.getInstructions(), /code review findings first|retain actual uncertainty/i);
-    assert.match(client.getInstructions(), /automatic code-free follow-up/);
-    assert.match(client.getInstructions(), /call claim_full_access/);
-    assert.match(client.getInstructions(), /plan_patch\/plan_read/);
-    assert.match(client.getInstructions(), /decision-complete but concise Plans/);
-    assert.match(client.getInstructions(), /implementation changes require explicit authorization/);
-    assert.match(client.getInstructions(), /publish plan_id with ccm-extra\.publish/);
-    assert.match(client.getInstructions(), /Use ccm-extra.conversation/);
-    assert.match(client.getInstructions(), /write_stdin.*read-only/);
-    assert.match(client.getInstructions(), /propose a narrow prefix_rule/);
-    assert.match(client.getInstructions(), /explicitly requested entry\/registration/);
-    assert.match(client.getInstructions(), /Publish user-facing deliverables and previews/);
-    assert.match(client.getInstructions(), /run_as_admin=true requests one-shot Guardian\/human approval/);
-    assert.ok(client.getInstructions().length < 5000, 'Controller introduction should stay compact');
+    assert.doesNotMatch(client.getInstructions(), /list_projects|workspace_handle|write_stdin|claim_full_access|plan_patch|publish|conversation|ExecPolicy|run_as_admin|request_approval|verification code/i,
+      'tool-specific instructions must not pollute every tool discovery entry');
+    assert.ok(client.getInstructions().length < 1600, 'Controller introduction should contain only Host defaults and server identity');
     const listed = await client.listTools();
     const names = listed.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, registry.list().map((tool) => tool.name).sort());
@@ -147,9 +135,34 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       'qq','wechat','transcribe','sjtu_mail']) {
       assert.ok(names.includes(name), name + ' must be a top-level MCP tool');
     }
+    const toolDescription = (name) => {
+      const tool = listed.tools.find((item) => item.name === name);
+      assert.ok(tool, name + ' must be present');
+      return tool.description;
+    };
+    assert.match(toolDescription('list_projects'), /default project directories/);
+    assert.match(toolDescription('list_projects'), /project_directory_hint.*display only/);
+    assert.match(toolDescription('select_workspace'), /explicitly requested entry\/switch/);
+    assert.match(toolDescription('register_workspace'), /explicit user registration request/);
+    assert.match(toolDescription('create_projectless_handle'), /Never use it to bypass/);
+    assert.match(toolDescription('write_stdin'), /Empty chars polls are read-only/);
+    assert.match(toolDescription('request_verification_input'), /automatic code-free follow-up/);
+    assert.match(toolDescription('request_verification_input'), /Do NOT inspect or request the code/);
+    assert.match(toolDescription('claim_full_access'), /Never request or expose phone enrollment secrets/);
+    assert.match(toolDescription('plan_patch'), /implementation authorization/);
+    assert.match(toolDescription('plan_patch'), /summarize without pasting the Plan/);
+    assert.match(toolDescription('plan_read'), /lifecycle-neutral/);
+    assert.match(toolDescription('publish'), /Inspect screenshots before claiming visual verification/);
+    assert.match(toolDescription('conversation'), /chatgpt\.com\/share/);
+    assert.match(toolDescription('conversation'), /聊天分享链接/);
+    assert.match(toolDescription('conversation'), /Do not use web search, browsing or BMG/);
+    assert.match(toolDescription('unregister_workspace'), /Always requires a one-shot CCM approval card/);
+    assert.match(toolDescription('request_approval'), /Do not recreate or retry/);
     const commandTool = listed.tools.find((tool) => tool.name === 'exec_command');
     assert.match(commandTool.description, /proactively supply a practical prefix_rule/);
     assert.match(commandTool.description, /run_as_admin=true uses an unrestricted administrator Agent after one-shot Guardian\/human approval/);
+    assert.match(commandTool.description, /Native Codex ExecPolicy/);
+    assert.match(commandTool.description, /do not silently start a replacement session/);
     assert.ok(commandTool.description.length < 2500, 'exec_command description should stay compact');
     assert.ok(listed.tools.reduce((size, tool) => size + (tool.description?.length || 0), 0) < 18000,
       'total registered tool descriptions should stay within their context budget');

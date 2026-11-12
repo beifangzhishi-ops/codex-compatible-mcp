@@ -348,7 +348,7 @@ export function registerSpecializedTools(registry, runtime) {
     environmentRequirements: { capabilities: ['exec'] },
     supportsParallel: true,
     description: [
-      "Read shared ChatGPT/Codex conversations or local Codex threads; no workspace entry needed. For https://chatgpt.com/share/... or https://chatgpt.com/s/cx_... first import, then use conversation_id for thread/read, list or export. Re-import only to refresh.",
+      "Read ChatGPT shared conversation links (聊天分享链接、共享对话), Codex shares and local Codex thread history. No workspace entry needed. For https://chatgpt.com/share/... or https://chatgpt.com/s/cx_... first import, then use conversation_id for thread/read, list or export. Re-import only to refresh.",
       "Local history uses thread_id and owning environment_id; reading never resumes a Codex thread. Lists are paged; export can publish full Markdown/JSON. Do not use web search, browsing or BMG to retrieve shares; snapshots cannot reconstruct upstream-absent content.",
     ].join('\n\n'),
     inputSchema: {
