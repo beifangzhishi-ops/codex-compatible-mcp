@@ -28,22 +28,6 @@
 | Configuration loading, inheritance and policy | `codex-rs/config`, `codex-rs/protocol/src/config_types.rs` | Worker bootstrap and `config/` | **Not aligned overall**; only the shell environment policy TOML subset has been ported. |
 | Worker routing and GPT Host delivery | Codex execution host and protocol interfaces | CCM Controller/Worker RPC, MCP, OAuth, approval UI | **Adaptation surface**; Host-specific presentation excluded, but execution semantics must still be equivalent. |
 
-**Staged upstream native Windows execution (merged into main):**
-`vendor/openai-codex` records the reviewed source at
-`f79b26ccbb3116b052544666a181012fb45dc49b` and includes
-`src/runtime/sandbox/codex-windows-sandbox.mjs` with native CLI/runtime
-discovery (newest complete installation, no CLI version pin), native named permission profiles, and dedicated `CODEX_HOME`
-provisioning. It is not the production default. On 6v, CCM's actual
-`ProcessManager` successfully used this adapter to launch a native
-`CodexSandboxOnline` process, write within the workspace, deny an ordinary
-outside write, and report its output/exit code. Separate upstream probes
-demonstrated the known outside-file hardlink limitation, accepted by the owner
-as outside the accidental-write safety goal. Each Worker now selects its newest
-complete local Codex installation independently; actual sandbox behavior with
-updated releases must still be validated before production activation.
-See `docs/codex-upstream-windows-parity.md` for exact upstream source locations,
-native setup evidence, accepted limitations and remaining integration gaps.
-
 ## Evidence and remaining acceptance gates
 
 The shell environment slice is backed by `test/shell-environment.test.mjs`, `test/shell-environment-config.test.mjs`, `test/codex-shell-profile.test.mjs`, and native executor tests, translated from behavior verified in the pinned Codex implementation. On 6v, `npm test` passed 313/313 and `npm run build:native` succeeded; noha's 19 targeted tests and native build passed. Both Workers successfully executed a real restricted PowerShell command after restart. Those facts **do not** establish parity for unrelated modules.

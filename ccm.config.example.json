@@ -50,7 +50,6 @@
     ]
   },
   "codex": {
-    "home": null,
-    "native_sandbox_toml": "# Codex-native permissions configuration for the pinned Windows sandbox runtime.\n# This is an upstream TOML schema, not a CCM-specific rules language.\n# Staged for parity work; CCM does not yet consume it.\ndefault_permissions = \"workspace-online\"\napproval_policy = \"on-request\"\n\n[windows]\nsandbox = \"elevated\"\n\n[permissions.workspace-online]\nextends = \":workspace\"\n\n[permissions.workspace-online.network]\nenabled = true\n\n[permissions.read-only]\nextends = \":read-only\"\n"
+    "home": null
   }
 }

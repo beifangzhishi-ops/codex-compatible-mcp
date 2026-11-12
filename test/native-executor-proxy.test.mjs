@@ -84,45 +84,6 @@ test('native executor applies proxy/direct mode to each newly spawned process', 
   assert.equal(harness.spawned[2].file, 'ccm-pty-proxy.exe');
 });
 
-test('native executor forwards native Codex home to both pipe and PTY children', () => {
-  const harness = createHarness({
-    invocation: () => ({
-      file: 'codex.exe', args: ['sandbox'], sandboxed: true,
-      environmentOverrides: { CODEX_HOME: 'C:\\protected-codex-home' },
-    }),
-  });
-  harness.start(false);
-  harness.start(true);
-  assert.equal(harness.spawned[0].options.env.CODEX_HOME, 'C:\\protected-codex-home');
-  assert.equal(harness.spawned[1].options.env.CODEX_HOME, 'C:\\protected-codex-home');
-});
-
-test('Codex sandbox PTY uses ConPTY wrapper without altering the upstream CLI argv or stdin', () => {
-  const argv = ['sandbox', '-P', 'workspace-online', '-C', 'C:\\work',
-    '--', 'cmd.exe', '/d', '/s', '/c', 'set /p USER_INPUT='];
-  const harness = createHarness({
-    invocation: () => ({
-      file: 'C:\\Codex\\codex.exe', args: argv, sandboxed: true,
-      environmentOverrides: { CODEX_HOME: 'C:\\protected-codex-home' },
-    }),
-  });
-  const session = harness.start(true);
-  assert.equal(session.sandboxed, true);
-  assert.equal(session.stdinWritable, true);
-  assert.equal(harness.spawned[0].file, 'ccm-pty-proxy.exe');
-  assert.deepEqual(harness.spawned[0].args.slice(0, 8), [
-    '--cwd', 'C:\\work', '--cols', '120', '--rows', '30', '--',
-    'C:\\Codex\\codex.exe',
-  ]);
-  assert.deepEqual(harness.spawned[0].args.slice(8), argv);
-  assert.equal(harness.spawned[0].options.env.CODEX_HOME, 'C:\\protected-codex-home');
-  session.write('first\n');
-  session.write('second\r\n');
-  session.write('\x03');
-  assert.deepEqual(harness.spawned[0].child.stdinWrites,
-    ['first\n', 'second\r\n', '\x03']);
-});
-
 test('native executor reads machine-local CURL_CA_BUNDLE for each pipe and PTY child', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-child-env-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

@@ -24,7 +24,7 @@ test('the tracked root template is a complete independent configuration sample',
   ].sort());
   assert.ok(Array.isArray(config.restart_allowlist.workers));
   assert.ok(Array.isArray(config.worker_quarantine_errors.error_codes));
-  assert.match(config.codex.native_sandbox_toml, /\[windows\]/);
+  assert.deepEqual(Object.keys(config.codex), ['home']);
   assert.deepEqual(readWorkerCaBundle(example), {});
 });
 

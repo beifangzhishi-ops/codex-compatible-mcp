@@ -3,8 +3,6 @@ import { ExecutorRegistry } from './executors/executor-registry.mjs';
 import { NativeEnvironmentExecutor } from './executors/native-executor.mjs';
 import { ProcessManager } from './process-manager.mjs';
 import { NativeSandboxBackend } from './sandbox/native-sandbox.mjs';
-import { CodexWindowsSandboxBackend, resolveCodexRuntime } from './sandbox/codex-windows-sandbox.mjs';
-import { provisionCodexRuntimeHome } from './sandbox/codex-runtime-home.mjs';
 import { NativeFileService } from './filesystem/native-file-service.mjs';
 import { WorkerTransferService } from './filesystem/transfer-worker.mjs';
 import { WorkspaceRegistry } from './workspace-registry.mjs';
@@ -13,20 +11,8 @@ import { ChildProxyPolicy } from './child-proxy-policy.mjs';
 export function createWorkerRuntime(options = {}) {
   const environmentRegistry = options.environmentRegistry ||
     createLocalEnvironmentRegistry(options.environment);
-  const sandboxBackend = options.sandboxBackend || (() => {
-    if (options.codexSandbox === true) {
-      if (process.platform !== 'win32') {
-        throw new Error('Upstream Codex Elevated Sandbox requires Windows.');
-      }
-      // This is the trusted Worker-side construction path, not a user-command
-      // option. Require a complete Codex CLI installation before accepting work.
-      resolveCodexRuntime();
-      return new CodexWindowsSandboxBackend({
-        codexHome: provisionCodexRuntimeHome(),
-      });
-    }
-    return new NativeSandboxBackend(options.sandbox);
-  })();
+  const sandboxBackend = options.sandboxBackend ||
+    new NativeSandboxBackend(options.sandbox);
   const workspaceRegistry = options.workspaceRegistry || new WorkspaceRegistry({
     environmentRegistry,
     stateFile: options.workspaceStateFile,

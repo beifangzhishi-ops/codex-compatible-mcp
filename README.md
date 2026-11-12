@@ -336,72 +336,15 @@ The `preworker` script builds the native helper for the current platform first.
 
 ## Windows scheduled-task operation
 
-### Upstream Codex Elevated Sandbox alignment (staging only)
+### Windows execution and administrator approval
 
-The merged sandbox implementation records the **entire** reviewed upstream
-`openai/codex` source tree as a Git submodule at commit
-`f79b26ccbb3116b052544666a181012fb45dc49b`
-(`rust-v0.166.0-alpha.5.1`). This is a **source-audit baseline, not a required
-Codex CLI runtime version**. See
-`docs/codex-upstream-windows-parity.md` for the exact native source,
-configuration decision chain, host findings, and required acceptance matrix.
-The Codex-native TOML is declared under `codex.native_sandbox_toml` in the
-root `ccm.config.json`, with a non-secret template in `ccm.config.example.json`.
-The trusted runtime helper writes those exact bytes to
-`%LOCALAPPDATA%\\CCM\\CodexSandbox\\config.toml`, without modifying the
-interactive user's `%USERPROFILE%\\.codex\\config.toml`. This native config
-is exercised by the isolated execution tests; it is not yet the production
-Worker default.
-
-**Not deployed:** CCM still uses its existing Windows native sandbox and approval
-logic. Neither Worker has been switched to the upstream Codex runtime. Until
-the entire decision chain is integrated and tested, do not call the CCM sandbox
-Codex-equivalent. The owner-approved local administrator agent is a separate
-CCM execution path; it is not claimed to reproduce Codex sandbox semantics.
-
-The native Codex CLI adapter has unit tests and opt-in privileged Windows
-integration tests. Its merged implementation is covered by the CCM Node test
-suite; real host-level sandbox testing is tracked separately. On 6v,
-an existing NTFS hardlink from the selected writable root to a disposable
-outside file caused Codex ACL setup to grant its sandbox account write rights
-to the outside file. **The owner explicitly accepts this upstream limitation**:
-the purpose is to prevent accidental modifications of important files, not to
-enforce a malicious-actor-proof or absolute outside-workspace security boundary.
-Do not fork Codex to patch hardlinks or claim guaranteed confinement.
-Continue testing ordinary outside-file write denial and functional compatibility
-before enabling the new backend. CCM no longer pins the installed Codex CLI
-to a particular release: it chooses the newest complete installation with
-the native command runner and sandbox setup helper in the same directory.
-Different CLI versions are allowed on different Workers; incompatible command
-or config behavior must be fixed and verified rather than dismissed solely
-because of a version number. Host-level probes used disposable files and left
-running Workers unchanged.
-
-The 6v trusted-host `ProcessManager → NativeEnvironmentExecutor → codex sandbox`
-integration test **passed**, including the staged
-`createWorkerRuntime({codexSandbox:true})` selection and dedicated Codex home.
-The selection checks the installed CLI and its two adjacent native helpers, then
-provisions the native config before accepting commands. It captured the normal
-exit code and `CodexSandboxOnline` identity, permitted an inside write, and
-denied an accidental outside write. The first run provisioned native sandbox
-users, ACLs and offline networking and may take noticeably longer; reusing the
-same dedicated home avoids re-creating its initial configuration. Permanent
-native tests are `test/codex-elevated-execution.test.mjs` and
-`test/codex-elevated-containment.test.mjs` (both opt-in on trusted Windows).
-Neither test requires patching upstream Codex.
-The actual Worker Agent has not selected this staged backend yet: the
-interactive/TTY, cancellation and cross-machine functional gates remain open.
-The opt-in native PTY integration suite is `test/codex-elevated-terminal.test.mjs`
-(trusted elevated Windows host only, `CCM_RUN_CODEX_ELEVATED_TERMINAL=1`).
-It covers repeated stdin, incremental output, Ctrl+C and cancellation of the
-full process tree. Ordinary runs deliberately skip these three privileged
-cases; mock transport tests verify argv and stdin forwarding but do not
-replace native acceptance. See `docs/codex-upstream-windows-parity.md` for
-the remaining two-machine acceptance requirements.
-At the 2026-11-06 staging checkpoint, the 6v full Node suite completed
-using `node --test --test-isolation=none` with **340 passed, 0 failed,
-5 intentionally skipped**. Plain `npm test` could not spawn isolated test
-files inside that Worker's current sandbox (`spawn EPERM`).
+Normal CCM commands run in the native Windows workspace sandbox. Its
+restricted token and filesystem permissions prevent ordinary writes outside
+the selected project; the separate administrator Agent provides real
+administrator execution only after a frozen one-time Guardian or human
+approval. Administrator commands are not workspace-confined.
+The policy and sandbox status, limitations and test evidence are tracked in
+`docs/codex-parity.md`.
 
 ### User-command environment refresh
 
@@ -640,8 +583,6 @@ npm run worker
 
 ### Worker child-process CA configuration
 
-### Worker child-process CA configuration
-
 Each machine uses one Git-ignored root `ccm.config.json`. Worker bootstrap variables
 (`CCM_*`) reside in the `worker.env` object, and a machine-local absolute
 `CURL_CA_BUNDLE` path may be provided in `worker.child_env`. The Worker supervisor
@@ -653,25 +594,18 @@ neither OAuth nor Controller credentials are injected into shell children.
 
 ### Single CCM configuration file
 
-`ccm.config.json` in the CCM repository root is the only active CCM
-configuration file. It is ignored by Git and intentionally differs between 6v
-and noha. `ccm.config.example.json` is the version-controlled template, not
-an additional runtime config. The schema groups `controller.env`, `worker.env`,
-worker.child_env, restart_allowlist, worker_quarantine_errors, codex.home and codex.native_sandbox_toml are grouped under version: 1. Command authorization is stored separately as a standard Codex Starlark .rules file under the protected Controller state directory, not in the machine config. Credential and session data remain separate in private state/secrets files and are not embedded in the version-controlled template.
-`worker_quarantine_errors`, `codex.home` and
-`codex.native_sandbox_toml` under `version: 1`. Credential and session data
-remain separate in private state/secrets files and are not embedded in the
-version-controlled template.
+`ccm.config.json` in the repository root is the sole active CCM configuration
+file. It is ignored by Git and can differ between 6v and noha.
+`ccm.config.example.json` is the tracked template. Configuration version 1
+includes `controller`, `worker`, `restart_allowlist`,
+`worker_quarantine_errors`, and `codex.home` (used by the conversation
+reader). General command authorization is stored separately in the
+protected Controller Codex Starlark `.rules` file, not in the machine
+configuration. Bootstrap secrets stay in private local configuration.
 
-The restart-allowlist section is read for each restart request. The quarantine error section is hot-reloaded; on an invalid live edit it retains the last valid selection.
-authorization or restart request, respectively. The quarantine error section is
-hot-reloaded; on an invalid live edit it retains the last valid selection.
-An invalid configuration at startup fails closed. For the native Codex
-sandbox staging, the trusted Worker bootstrap materializes
-`codex.native_sandbox_toml` inside the isolated Codex runtime Home and
-rejects mismatched pre-existing bytes; the interactive user's Codex configuration
-remains untouched. The `codex.home` setting is **only** the historical Codex
-sessions directory for the conversation reader (default user `~/.codex`).
+Restart permissions are checked for each restart request; worker-quarantine
+errors are hot-reloaded with the last valid settings retained if a live
+change is invalid. Invalid startup configuration fails closed.
 
 ### Worker child-process proxy/direct mode
 
