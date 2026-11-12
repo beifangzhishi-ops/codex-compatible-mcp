@@ -237,27 +237,27 @@ test('core tool surface returns workspace handles while retaining approval cards
   );
   assert.match(
     registry.get('select_workspace').description,
-    /Requires an explicit user request to enter\/switch workspaces AND no usable workspace_handle/i,
+    /explicitly requested entry\/switch AND there is no usable workspace_handle/i,
   );
   assert.match(
     registry.get('select_workspace').description,
-    /Reading, inspecting, editing, or working on a project is not an entry request/i,
+    /Merely inspecting or editing a project is not entry authorization/i,
   );
   assert.match(
     registry.get('select_workspace').description,
-    /Never show a handle for pending\/failed actions, retry pending entry, or bypass its approval/i,
+    /Never expose a pending\/failed handle, retry the frozen entry, or bypass it/i,
   );
   assert.match(
     registry.get('select_workspace').description,
-    /On full-access success, return the workspace_handle/i,
+    /Full Access returns the handle/i,
   );
   assert.match(
     registry.get('register_workspace').description,
-    /Requires an explicit user request to register a workspace AND no usable workspace_handle/i,
+    /explicit user registration request AND when no usable handle exists/i,
   );
   assert.match(
     registry.get('register_workspace').description,
-    /Reading, inspecting, editing, or working on a project is not a registration request/i,
+    /inspecting or editing alone is not authorization/i,
   );
   assert.match(
     registry.get('exec_command').inputSchema.workspace_handle.description,
@@ -266,25 +266,25 @@ test('core tool surface returns workspace handles while retaining approval cards
   assert.equal(Object.hasOwn(registry.get('exec_command').inputSchema, 'environment_id'), false);
   assert.match(
     registry.get('register_workspace').description,
-    /Never show a handle for pending\/failed actions, retry pending registration, or bypass its approval/i,
+    /Do not expose pending\/failed handles, retry the frozen action, or bypass it/i,
   );
   assert.match(
     registry.get('register_workspace').description,
-    /On full-access success, return the workspace_handle/i,
+    /Full Access returns the handle/i,
   );
   const unregisterTool = registry.get('unregister_workspace');
   assert.match(unregisterTool.description, /Always requires a one-shot CCM approval card/);
   assert.match(
     registry.get('exec_command').description,
-    /does not narrow filesystem reads below the environment's sandbox_read_scope/,
+    /its read scope follows the Worker, while ordinary writes follow the workspace sandbox/i,
   );
   assert.match(
     registry.get('exec_command').description,
-    /For registered-project writes without a handle, ask the user for a handle or explicit entry instruction/i,
+    /Reuse workspace_handle for routing\/cwd and session ownership/i,
   );
   assert.match(
     registry.get('exec_command').description,
-    /do not select\/register merely to inspect a project/i,
+    /Native Codex ExecPolicy \.rules decides Allow.*Prompt.*Forbidden/i,
   );
   assert.match(
     registry.get('apply_patch').description,

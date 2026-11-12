@@ -110,17 +110,19 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
 
   try {
     await client.connect(transport);
-    assert.match(client.getInstructions(), /Always reuse an existing workspace_handle/);
-    assert.match(client.getInstructions(), /Host owns tool discovery/);
-    assert.match(client.getInstructions(), /Call list_projects directly/);
-    assert.match(client.getInstructions(), /After the user submits|card, which automatically sends a code-free follow-up/);
-    assert.match(client.getInstructions(), /call claim_full_access directly/);
-    assert.match(client.getInstructions(), /plan_patch \/ plan_read directly/);
-    assert.match(client.getInstructions(), /call ccm-extra.conversation directly/);
-    assert.match(client.getInstructions(), /write_stdin.*read-only poll/);
-    assert.match(client.getInstructions(), /proactively provide a useful prefix_rule/);
-    assert.match(client.getInstructions(), /Never initiate workspace-entry approval implicitly/);
-    assert.match(client.getInstructions(), /Publish user-facing deliverables and useful previews/);
+    assert.match(client.getInstructions(), /Reuse an existing workspace_handle/);
+    assert.match(client.getInstructions(), /Host chooses and sequences peer tools/);
+    assert.match(client.getInstructions(), /Call list_projects to discover/);
+    assert.match(client.getInstructions(), /automatic code-free follow-up/);
+    assert.match(client.getInstructions(), /call claim_full_access/);
+    assert.match(client.getInstructions(), /plan_patch\/plan_read/);
+    assert.match(client.getInstructions(), /Use ccm-extra.conversation/);
+    assert.match(client.getInstructions(), /write_stdin.*read-only/);
+    assert.match(client.getInstructions(), /propose a narrow prefix_rule/);
+    assert.match(client.getInstructions(), /explicitly requested entry\/registration/);
+    assert.match(client.getInstructions(), /Publish user-facing deliverables and previews/);
+    assert.match(client.getInstructions(), /run_as_admin=true requests one-shot Guardian\/human approval/);
+    assert.ok(client.getInstructions().length < 5000, 'Controller introduction should stay compact');
     const listed = await client.listTools();
     const names = listed.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, registry.list().map((tool) => tool.name).sort());
@@ -133,6 +135,10 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     }
     const commandTool = listed.tools.find((tool) => tool.name === 'exec_command');
     assert.match(commandTool.description, /proactively supply a practical prefix_rule/);
+    assert.match(commandTool.description, /run_as_admin=true uses an unrestricted administrator Agent after one-shot Guardian\/human approval/);
+    assert.ok(commandTool.description.length < 2500, 'exec_command description should stay compact');
+    assert.ok(listed.tools.reduce((size, tool) => size + (tool.description?.length || 0), 0) < 18000,
+      'total registered tool descriptions should stay within their context budget');
     assert.match(commandTool.inputSchema.properties.prefix_rule.description, /stable, narrowly useful ordered-token prefix/);
     const receiveFileTool = listed.tools.find((tool) => tool.name === 'import_chatgpt_file');
     assert.deepEqual(receiveFileTool._meta?.['openai/fileParams'], ['file']);

@@ -423,10 +423,8 @@ export function registerCoreTools(registry, runtime) {
     },
     tags: ['verification', 'input', 'ui', 'session'],
     description: [
-      'Show a CCM verification-input card for an existing live process session. The user types the code in the card, which submits through an App-only tool directly to the same CCM session; do not request the code in chat or pass it through exec_command or write_stdin.',
-      'Call only when the running process is waiting for interactive verification input. Reuse the exact workspace_handle and session_id from exec_command. The card sends the input and Enter; the model receives only the delivery status, never the code. No separate model tool call is needed for submission.',
-      'After showing the card, wait for its automatic code-free follow-up when the user clicks Submit; do not proactively check whether input occurred. On that follow-up, assume the code has been submitted and continue the original task. Do NOT inspect or request the code, query card/submission status, or poll process output specifically to verify code entry; the Host may block such attempts. Ordinary task execution may continue. Only if the task later explicitly reports invalid verification should you present another card for a live session.',
-      'Do not call for a process that has already exited. If no interactive session exists, start a suitable interactive command first.',
+      "Show a verification card only for a live process waiting for a code; pass its workspace_handle and session_id. Never ask for the code in chat or put it in exec_command/write_stdin.",
+      "The App submits the code directly. Wait for its automatic code-free follow-up; on that follow-up, assume the code has been submitted and continue the task. Do NOT inspect or request the code, check card/status, or poll specifically to verify entry. Show another card only after an explicit invalid-code result from ordinary task execution.",
     ].join('\n\n'),
     inputSchema: {
       workspace_handle: z.string().uuid().describe('Workspace handle that owns the live session.'),
@@ -508,13 +506,8 @@ export function registerCoreTools(registry, runtime) {
     tags: ['project', 'environment', 'worker', 'capabilities'],
     supportsParallel: true,
     description: [
-      'List connected CCM environments and their registered projects without entering a project.',
-      'Call this tool directly.',
-      'With no environment_id, returns every connected environment. Pass environment_id to restrict discovery to one environment.',
-      'Registered projects are returned by default. Set all=true only when existing projectless workspaces also need to be inspected.',
-      'Discovery is isolated per environment: an abnormal or stale Worker is reported on that environment without blocking healthy Workers. Explicit environment_id calls remain strict.',
-      'Each environment includes platform/shell metadata, capabilities, independent effective sandbox_read_scope and sandbox_write_scope values, backend, and default selection. Internal bootstrap directories, raw permission profiles, and filesystem permission topology are intentionally not exposed.',
-      'Connected remote environments include connected_at, the current Worker connection time. After restart, compare it with the pre-restart value and verify the environment returns state=normal; an unchanged connection does not prove a restart.',
+      "List connected Workers and registered projects without entering a workspace. Omit environment_id for all Workers; all=true also lists existing projectless workspaces.",
+      "Results include independent sandbox_read_scope and sandbox_write_scope, platform, capabilities and Worker state. Compare connected_at and state=normal after restart; one stale Worker does not block others.",
     ].join('\n\n'),
     inputSchema: {
       environment_id: z.string().optional().describe('Optional environment id. Omit to list projects across every connected environment.'),
@@ -627,11 +620,8 @@ export function registerCoreTools(registry, runtime) {
 
     tags: ['workspace', 'project', 'approval'],
     description: [
-      'Enter one registered workspace. Full-access environments return the workspace_handle directly; restricted environments return a frozen approval request.',
-      'An active webpage-issued full_access_grant_id (or the same ID obtained through fallback claim_full_access) enables Full Access entry without changing the Worker baseline.',
-      'Requires an explicit user request to enter/switch workspaces AND no usable workspace_handle. Reading, inspecting, editing, or working on a project is not an entry request.',
-      'On full-access success, return the workspace_handle in the tool result for the user to copy. On restricted Workers, call request_approval when approval_required=true; the completed approval card displays the handle. Never show a handle for pending/failed actions, retry pending entry, or bypass its approval with projectless execution.',
-      'Full-access skips user approval but keeps workspace identity validation, Worker routing, and workspace-handle boundaries.',
+      "Enter an existing registered workspace only when the user explicitly requested entry/switch AND there is no usable workspace_handle. Merely inspecting or editing a project is not entry authorization.",
+      "Full Access returns the handle; otherwise if approval_required=true call request_approval and use the completed card. Never expose a pending/failed handle, retry the frozen entry, or bypass it with projectless work.",
     ].join('\n\n'),
     inputSchema: {
       environment_id: z.string().describe('Environment whose Worker owns the workspace.'),
@@ -694,11 +684,8 @@ export function registerCoreTools(registry, runtime) {
 
     tags: ['workspace', 'project', 'approval', 'register'],
     description: [
-      'Register and enter one exact project directory. Full-access environments return the workspace_handle directly; restricted environments return a frozen approval request.',
-      'An active webpage-issued full_access_grant_id (or the same ID obtained through fallback claim_full_access) enables Full Access registration without changing the Worker baseline.',
-      'Requires an explicit user request to register a workspace AND no usable workspace_handle for that project. Reading, inspecting, editing, or working on a project is not a registration request.',
-      'On full-access success, return the workspace_handle in the tool result for the user to copy. On restricted Workers, call request_approval when approval_required=true; the completed approval card displays the handle. Never show a handle for pending/failed actions, retry pending registration, or bypass its approval with projectless execution.',
-      'With create_if_missing=true, registration may create the exact missing directory before entry. Full-access skips user approval but keeps target revalidation and workspace-handle boundaries.',
+      "Register and enter an exact project directory only on explicit user registration request AND when no usable handle exists. create_if_missing may create that directory; inspecting or editing alone is not authorization.",
+      "Full Access returns the handle; otherwise if approval_required=true call request_approval and use the completed card. Do not expose pending/failed handles, retry the frozen action, or bypass it through projectless work.",
     ].join('\n\n'),
     inputSchema: {
       environment_id: z.string().describe('Environment whose Worker owns the directory.'),
@@ -768,11 +755,8 @@ export function registerCoreTools(registry, runtime) {
 
     tags: ['workspace', 'project', 'approval', 'unregister'],
     description: [
-      'Remove exactly one registered workspace from a Worker, without deleting its directory or files.',
-      'Always requires a one-shot CCM approval card, even in full-access environments. No Always allow policy is available.',
-      'Call directly. If approval_required=true, pass its approval_id to request_approval and wait for the card decision; never manually retry or bypass it.',
-      'Approval freezes the environment, workspace id, root, and registration identity. Previously issued workspace_handle handles for that registration are revoked. Existing running processes are not forcibly terminated.',
-      'Only registered workspaces may be unregistered. Projectless workspaces are not registration entries. The project directory may already be missing; it is not needed for deregistration.',
+      "Unregister one registered workspace without deleting its files. Always requires a one-shot CCM approval card, including on Full Access; call request_approval if approval_required=true.",
+      "Approval revokes its existing handles but does not kill running processes. Projectless workspaces cannot be unregistered.",
     ].join('\n\n'),
     inputSchema: {
       environment_id: z.string().describe('Environment whose Worker owns the workspace.'),
@@ -821,19 +805,13 @@ export function registerCoreTools(registry, runtime) {
     environmentRequirements: { capabilities: ['exec'] },
     supportsParallel: true,
     description: [
-      'Runs a command using plain pipes by default; set tty=true to allocate a PTY. Returns output or a session ID for ongoing interaction.',
-      'When the owner has clicked the CCM webpage copy button and the page returned to locked state, use the provided claimed full_access_grant_id directly for timed Full Access. If no ID was provided (for example the message was blocked), call claim_full_access directly to claim the pending grant or recover the same already-claimed ID once within the original five-minute claim window. The fallback never extends expiry. Include full_access_grant_id in each privileged command. This bypasses the sandbox for that dispatch on any Worker until expiration, without permanent shell rules or Worker configuration changes. Missing grants follow existing sandbox/approval behavior; unclaimed, unknown or expired grants fail closed.',
-      'workspace_handle is required and determines the Worker, cwd/session ownership, and restricted-write root. It does not narrow filesystem reads below the environment\'s sandbox_read_scope. Do not pass or infer a separate environment for this command.',
-      'Reuse a supplied workspace_handle directly. Without one, create_projectless_handle may support projectless work and permitted absolute-path reads; do not select/register merely to inspect a project. For registered-project writes without a handle, ask the user for a handle or explicit entry instruction. Never bypass a pending explicit workspace approval.',
-      'The Controller evaluates all statically parsed command segments through the native Codex ExecPolicy engine using its standard .rules file. An Allow authorizes unsandboxed execution, Prompt asks for approval and Forbidden rejects the command; ambiguous shell syntax never inherits an Allow. Use absolute executable paths for rules targeting specific installed applications.',
-      'Controller-trusted package scripts such as a specifically trusted workspace npm test are also handled automatically through exec_command. Trust is bound to the workspace and current package.json script hash; if the script changes it stops matching and must not be treated as trusted.',
-      'For a command that genuinely requires full-access outside a workspace-write sandbox without a matching saved rule, set sandbox_permissions=require_escalated and include an optional justification. You may also provide prefix_rule as ordered command tokens to propose a reusable global Allow rule. CCM freezes the exact command and the validated rule before returning approval_required=true; then call request_approval with the returned approval_id.',
-      'When requesting escalation, include review_context with an accurate account of the user-authorized task, relevant limitations, and why the exact command is necessary. If Guardian automatic review is enabled, CCM first reviews the frozen one-time action with CPA codex-auto-review. Allow executes once, deny refuses, and review errors fall back to human approval. The reviewer trusts the Host account and has the main model\'s ordinary CCM tool permissions. Never invent user authorization.',
-      'Always allow persists an upstream Codex prefix_rule in the same native .rules policy as preauthorized commands. It automatically authorizes matching ordinary exec_command calls on any Worker or workspace without require_escalated. Additional suffix arguments are authorized; every safely parsed executable segment must qualify.',
-      'Windows: run_as_admin=true requests one-time approval for an unrestricted Windows administrator command using the separately installed elevated CCM administrator agent. Guardian reviews the frozen administrator action first when enabled; denial blocks it and review errors fall back to the human approval card. No saved Allow rule, trusted command, or Full Access grant can authorize administrator execution. The normal Worker stays unelevated, administrator commands are unrestricted by the workspace-write sandbox, and run_as_admin cannot combine with a Full Access grant, escalation or prefix_rule. The administrator agent must already be installed and running on that Worker machine.',
-      'For recurring build, test, and development commands that need an approval, proactively supply a practical prefix_rule: keep stable program, subcommand, script path and invariant options, but leave out arguments expected to vary. Example: npm run build:native -> ["npm","run","build:native"]. Never use a bare general-purpose shell or interpreter (powershell, pwsh, cmd, node) as the prefix. Always allow is global across Workers and workspaces, so the user must see the precise proposed prefix and choose whether to persist it. Do not send prefix_rule on ordinary commands; it is only valid with require_escalated.',
-      'A CCM-originated result is identifiable by its structured CCM fields. If a host reports a Script error or safety/policy/tool-call failure without this tool returning a structured result, do not attribute that failure to CCM or claim CCM blocked the command.',
-      'On Windows, keep destructive filesystem operations in one shell and verify resolved targets before recursive deletes or moves.',
+      "Run a shell command using pipes (tty=true for PTY); return output or a session_id for write_stdin. Reuse workspace_handle for routing/cwd and session ownership; its read scope follows the Worker, while ordinary writes follow the workspace sandbox.",
+      "Native Codex ExecPolicy .rules decides Allow (Full Access), Prompt (approval), Forbidden (deny); unmatched commands remain sandboxed. Trusted package scripts are workspace/script-hash bound.",
+      "For a command requiring escalation, set sandbox_permissions=require_escalated, give justification and accurate review_context. When enabled, Guardian may allow one frozen execution, deny it, or fall back to a human approval card. If approval_required=true call request_approval, never reissue the action.",
+      "For repeatable build/test/dev escalation, proactively supply a practical prefix_rule: stable executable, subcommand, script and fixed options, excluding variable suffixes. Do not use a bare generic shell/interpreter. Always allow saves the prefix across Workers; do not pass prefix_rule on ordinary commands.",
+      "Timed Full Access: use the supplied claimed full_access_grant_id per command, or call claim_full_access only if the owner unlocked without providing the ID. No grant changes Worker baseline or renews expiry.",
+      "Windows run_as_admin=true uses an unrestricted administrator Agent after one-shot Guardian/human approval. It cannot combine with escalation, grants or prefix_rule; saved rules cannot authorize admin. Preserve verified absolute targets for destructive file operations.",
+      "Host Script/tool failures without a structured CCM result are not evidence that CCM rejected or dispatched a command.",
     ].join('\n\n'),
     inputSchema: {
       cmd: z.string().min(1).describe('Shell command to execute.'),

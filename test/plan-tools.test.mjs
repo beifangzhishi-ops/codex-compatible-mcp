@@ -17,25 +17,25 @@ test('Plan tools are peers, carry ids explicitly, and keep reads lifecycle-neutr
     assert.deepEqual(registry.list().map((tool) => tool.name), ['plan_patch', 'plan_read']);
     assert.match(patchTool.description, /Planning guidance/);
     assert.match(patchTool.description, /explore first, ask second/i);
-    assert.match(patchTool.description, /Do not ask the user for information.*reasonably be discovered/i);
+    assert.match(patchTool.description, /Do not ask the user for facts reasonably discoverable/i);
     assert.match(patchTool.description, /Bias toward questions over guessing/i);
     assert.match(patchTool.description, /2-4 mutually exclusive choices/i);
     assert.match(patchTool.description, /user-visible question/i);
     assert.match(patchTool.description, /recommended default.*same user-visible question/i);
-    assert.match(patchTool.description, /another answer outside the listed choices/i);
+    assert.match(patchTool.description, /accept other answers/i);
     assert.match(patchTool.description, /Planning mutation boundary/i);
     assert.match(patchTool.description, /do not edit tracked project files/i);
     assert.match(patchTool.description, /Decision-complete Plan/i);
-    assert.match(patchTool.description, /without inventing new product or design decisions/i);
+    assert.match(patchTool.description, /without inventing product decisions/i);
     assert.match(patchTool.description, /Final Plan handoff/i);
-    assert.match(patchTool.description, /ccm-extra\.publish tool with plan_id alone/i);
+    assert.match(patchTool.description, /ccm-extra\.publish with plan_id alone/i);
     assert.match(patchTool.description, /immutable Markdown snapshot/i);
-    assert.match(patchTool.description, /Do not read the entire Plan solely for this handoff or paste it into the user reply/i);
-    assert.match(patchTool.description, /later plan_read calls during implementation remain lifecycle-neutral/i);
+    assert.match(patchTool.description, /summarize rather than reading\/pasting the entire Plan/i);
+    assert.match(patchTool.description, /Later plan_read during implementation remains lifecycle-neutral/i);
     assert.match(patchTool.description, /Keep the durable Plan current/);
     assert.match(patchTool.description, /Execution gate/);
-    assert.match(patchTool.description, /workspace approval/);
-    assert.match(patchTool.description, /does not count as execution authorization/);
+    assert.match(patchTool.description, /workspace\/sandbox approvals/);
+    assert.match(patchTool.description, /do not count as execution authorization/);
     assert.match(readTool.description, /lifecycle-neutral/);
 
     const created = (await patchTool.handler({

@@ -6,6 +6,14 @@ CCM does **not** reproduce the Codex *main-agent* model loop or own the host app
 
 Before modifying this repository, read and follow [AGENTS.md](AGENTS.md) for repository-specific agent instructions.
 
+## GPT Host context budget
+
+The Controller exposes one short MCP introduction (`src/controller/mcp-http-server.mjs`) and peer-tool descriptions in `src/tools/`. Common workflow rules belong in the introduction; per-tool descriptions retain invocation conditions and safety-critical details without repeating the whole introduction. Zod input/output schemas, MCP App visibility, execution policy, approvals, and Worker routing are unchanged by prompt-only reductions.
+
+**2026-11-12 source measurements:** the Controller introduction was reduced from **15,032 to 4,039 characters**; the descriptions for all 31 registered tools were reduced from **29,853 to 16,614 characters**. These count source prompt/description strings, not JSON Schema payloads or billable GPT tokens. ChatGPT/Work may cache or load tools selectively, so this is a context-payload reduction, **not** a measured token-cost or latency improvement. To see revised descriptions, refresh/reconnect the Host plugin after deploying the Controller.
+
+`test/mcp-http.test.mjs` checks both the retained permission/approval instructions and maximum description lengths. Keep prompts task-specific and concise without removing one-shot approval rules, explicit workspace-entry authorization, verification-code privacy, or the Plan publication/execution boundary. If a future procedure needs extensive setup instructions, put them only in that tool's description rather than duplicating them in the global introduction.
+
 ## Codex upstream conformance
 
 OpenAI Codex is the normative upstream for every CCM behavior except the ChatGPT/GPT Host integration layer (MCP transport, OAuth, host-specific cards and UI). The architecture rule in `AGENTS.md` requires an exact upstream commit and source-level behavior mapping **before** changing execution, approval, rules, sandboxing, environment, configuration or tool semantics. CCM-specific transport between Controller and Workers may adapt implementation language and process boundaries, but may not silently change upstream behavior. Any unsupported behavior or intentional departure requires the user's prior decision.
