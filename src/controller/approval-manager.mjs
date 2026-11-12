@@ -16,6 +16,7 @@ function intentFor(args, environmentId) {
     workdir: args.workdir == null ? null : String(args.workdir),
     tty: Boolean(args.tty),
     shell: args.shell == null ? null : String(args.shell),
+    run_as_admin: args.run_as_admin === true,
     prefix_rule: Array.isArray(args.prefix_rule)
       ? args.prefix_rule.map((token) => String(token))
       : null,
@@ -87,6 +88,7 @@ function frozenExecutionAction(args, environmentId, workspace = {}) {
     workdir: args.workdir == null ? null : String(args.workdir),
     tty: Boolean(args.tty),
     shell: args.shell == null ? null : String(args.shell),
+    run_as_admin: args.run_as_admin === true,
     prefix_rule: Array.isArray(args.prefix_rule)
       ? Object.freeze(args.prefix_rule.map((token) => String(token)))
       : null,
@@ -176,7 +178,9 @@ export class ApprovalManager {
       action: frozenExecutionAction(args, environmentId, workspace),
       justification: String(
         args.justification ||
-        'Allow this command to run once with full-access outside the CCM sandbox?',
+        (args.run_as_admin === true
+          ? 'Allow this command to run once with unrestricted Windows administrator permissions?'
+          : 'Allow this command to run once with full-access outside the CCM sandbox?'),
       ),
       createdAt,
       expiresAt: createdAt + this.ttlMs,
@@ -534,6 +538,7 @@ export class ApprovalManager {
       workdir: request.intent.workdir,
       tty: request.intent.tty,
       shell: request.intent.shell,
+      run_as_admin: request.intent.run_as_admin,
       prefix_rule: request.intent.prefix_rule,
       policy_kind: request.intent.policy_kind,
       policy_persistable: request.intent.policy_persistable,

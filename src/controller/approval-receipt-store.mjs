@@ -69,6 +69,8 @@ export class ApprovalReceiptStore {
       nonce_hash: request.approvalNonceHash.toString('hex'),
       host_session: request.hostSession || null,
       kind: request.kind,
+      ...(request.kind === 'execution'
+        ? { run_as_admin: request.action?.run_as_admin === true } : {}),
       operation: request.kind === 'workspace' ? request.intent.operation : null,
       environment_id: request.intent.environment_id,
       workspace_id: request.action?.workspace_id || null,

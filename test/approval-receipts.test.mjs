@@ -83,6 +83,7 @@ test('execution receipt survives Controller restart with bounded output and resu
     const pending = manager.requestExecution({
       workspace_handle: '00000000-0000-4000-8000-000000000001',
       cmd: 'secret command must not be stored',
+      run_as_admin: true,
     }, 'worker');
     const { approvalNonce } = manager.prepareAppApproval(pending.approval_id);
     manager.claimAppExecution(pending.approval_id, approvalNonce);
@@ -95,6 +96,7 @@ test('execution receipt survives Controller restart with bounded output and resu
       pending.approval_id, approvalNonce, null,
     );
     assert.equal(saved.state, 'consumed');
+    assert.equal(saved.run_as_admin, true);
     assert.equal(saved.exit_code, 4);
     assert.equal(saved.output.length, 12_000);
     assert.equal(saved.output_truncated, true);

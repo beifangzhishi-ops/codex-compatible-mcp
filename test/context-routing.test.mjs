@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { RemoteProcessManager } from '../src/runtime/remote-process-manager.mjs';
+import { ApprovalManager } from '../src/controller/approval-manager.mjs';
 import { resolvePermissionProfile } from '../src/runtime/sandbox/sandbox-policy.mjs';
 import { RemoteFileService } from '../src/runtime/filesystem/remote-file-service.mjs';
 import { NativeFileService } from '../src/runtime/filesystem/native-file-service.mjs';
@@ -108,7 +109,7 @@ test('RemoteProcessManager requires context and rejects environment routing', as
   }
 });
 
-test('explicit administrator command bypasses ordinary command policy but not option validation', async () => {
+test('administrator command bypasses ordinary Allow rules but requires a frozen one-shot approval', async () => {
   const workerHub = new FakeWorkerHub();
   const registry = {
     resolve(id) {
@@ -123,15 +124,32 @@ test('explicit administrator command bypasses ordinary command policy but not op
     environmentRegistry: registry,
     workerHub,
     workspaceHandleManager: workspaceHandleManager(),
+    approvalManager: new ApprovalManager(),
     codexPolicy: { match() { throw new Error('must not consult Full Access allow rules'); } },
   });
   const base = { workspace_handle: CONTEXT_ID, cmd: 'whoami /groups' };
   try {
     const result = await manager.execCommand({ ...base, run_as_admin: true });
-    assert.equal(result.administrator_agent, true);
+    assert.equal(result.approval_required, true);
+    assert.equal(result.run_as_admin, true);
+    assert.equal(result.policy_persistable, false);
+    assert.equal(workerHub.calls.length, 0);
+    const card = manager.approvalManager.prepareAppApproval(result.approval_id);
+    const approved = await manager.resolvePendingExecution({
+      approval_id: result.approval_id,
+      approval_nonce: card.approvalNonce,
+      decision: 'approve',
+    });
+    assert.equal(approved.administrator_agent, true);
+    assert.equal(approved.state, 'consumed');
     assert.equal(workerHub.calls.length, 1);
     assert.equal(workerHub.calls[0].params.sandbox_permissions, 'admin_elevated');
     assert.equal('run_as_admin' in workerHub.calls[0].params, false);
+    await assert.rejects(manager.resolvePendingExecution({
+      approval_id: result.approval_id,
+      approval_nonce: card.approvalNonce,
+      decision: 'approve',
+    }), /cannot dispatch from state/);
     await assert.rejects(manager.execCommand({
       ...base, run_as_admin: true, sandbox_permissions: 'require_escalated',
     }), /cannot be combined/);
@@ -141,6 +159,9 @@ test('explicit administrator command bypasses ordinary command policy but not op
     await assert.rejects(manager.execCommand({
       ...base, run_as_admin: true, prefix_rule: ['whoami'],
     }), /cannot be combined/);
+    assert.equal(workerHub.calls.length, 1);
+    const again = await manager.execCommand({ ...base, run_as_admin: true });
+    assert.notEqual(again.approval_id, result.approval_id);
     assert.equal(workerHub.calls.length, 1);
   } finally {
     await manager.close();

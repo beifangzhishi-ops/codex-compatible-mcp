@@ -357,6 +357,23 @@ test('web-style globals before initialize verify a pending card without duplicat
   assert.equal(card.calls.filter((call) => call.params?.name === 'resolve_pending_action').length, 0);
 });
 
+test('administrator approval card states unrestricted Windows permissions and never offers Always allow', async () => {
+  const card = await createApprovalAppHarness({
+    initialApproval: executionApproval({
+      run_as_admin: true,
+      policy_persistable: true,
+      justification: 'Approve an administrator identity check?',
+    }),
+  });
+  await waitFor(() => card.elements.status.textContent === 'Waiting for your decision.', 'administrator approval');
+  assert.match(card.elements.title.textContent, /Windows administrator execution/);
+  assert.equal(card.elements.approveAlways.hidden, true);
+  assert.equal(card.elements.approveAlways.disabled, true);
+  card.click('approveAlways');
+  assert.equal(card.calls.filter(x => x.params?.name === 'resolve_pending_action').length, 0);
+  assert.equal(card.elements.approve.disabled, false);
+});
+
 test('reopened card restores matching widgetState while a status query is unavailable, but cannot approve', async () => {
   const context = '00000000-0000-4000-8000-000000000099';
   const initial = executionApproval({ kind: 'workspace', operation: 'select_workspace' });

@@ -40,7 +40,7 @@ The Controller now has a configurable synchronous Guardian adapter derived from 
 
 The Reviewer uses the **same model-visible CCM ToolRegistry and effective tool permissions as the main model**, not a forced read-only reviewer sandbox. An internal review-origin marker prevents recursive Guardian review but never authorizes nested tool escalation. Existing sandbox, app approval, Workspace and Admin rules still apply. Existing native Codex ExecPolicy stays the sole command policy authority, including its Forbidden and persistent Allow rules.
 
-When a command needs explicit `require_escalated` approval or a native ExecPolicy `prompt`, the Controller creates a frozen ApprovalManager request. If `controller.guardian.enabled=true`, Guardian reviews the same single action using an optional main-model `review_context`. **Allow** claims the exact intent once and executes it through the original Worker; **deny** terminates without executing; CPA/parse/timeout/tool errors do **not** authorize execution and fall back to the original human approval card. Reviewer approval never appends a persistent rule. Prior normal sandbox commands, explicitly approved persistent policy rules and `run_as_admin` retain their independent routing.
+When a command needs explicit `require_escalated` approval, a native ExecPolicy `prompt`, or `run_as_admin=true`, the Controller creates a frozen ApprovalManager request. If `controller.guardian.enabled=true`, Guardian reviews the same single action using an optional main-model `review_context` and the exact execution permission level. **Allow** claims the exact intent once and executes it through the original Worker; **deny** terminates without executing; CPA/parse/timeout/tool errors do **not** authorize execution and fall back to the original human approval card. Reviewer approval never appends a persistent rule. Administrator commands require one-time approval regardless of saved Allow rules, trusted commands or timed Full Access grants, and execute only through the administrator Agent after approval.
 
 Guardian is **enabled on the deployed 6v Controller** and reviews escalations for its local and remote Workers, including noha. The tracked `ccm.config.example.json` stays **disabled by default** for fresh installations. The active setting is held in the ignored root `ccm.config.json`. Its `api_key_config` references CPA's own ignored `config.yaml` by **absolute path**; alternatively use `CCM_GUARDIAN_API_KEY` in the protected `controller.env` configuration. Do not copy actual keys into tracked files or pass them as MCP tool arguments. The default model is `codex-auto-review`, with a shared review deadline, bounded function-call turns/results, parse-retry rules and human fallback.
 
@@ -440,14 +440,18 @@ The Worker never receives the administrator token. Missing agents, invalid keys
 or broken connections fail closed rather than running as a different user.
 
 To explicitly invoke it, set `run_as_admin=true` on `exec_command` with a valid
-`workspace_handle`. This does **not** show a per-command CCM approval card.
-It runs with full administrator permissions and **no workspace write boundary**.
+`workspace_handle`. The Controller freezes the exact command, Worker,
+Workspace and administrator execution mode, then requests one-time approval:
+Guardian decides first when enabled; its refusal blocks dispatch, and review
+errors fall back to the human approval card. If Guardian is disabled, human
+approval is required. An approval never persists an administrator Allow rule.
+The approved command runs with full administrator permissions and **no workspace
+write boundary**.
 Only explicit parameter use selects the agent; no command matching or sandbox
 failure should trigger an automatic administrator retry. The option cannot
 combine with `sandbox_permissions=require_escalated`, `prefix_rule` or
-`full_access_grant_id`; `apply_patch` is not privileged. Treat tool access as
-authorization to request administrator execution: this is a usability policy,
-not a boundary against an intentionally hostile tool client.
+`full_access_grant_id`; neither ordinary Full Access nor a saved Allow rule
+authorizes administrator execution. `apply_patch` is not privileged.
 
 To repair or upgrade an administrator agent that cannot be reached through
 `run_as_admin=true`, execute `scripts/install-ccm-admin-agent.ps1` **from an
@@ -468,8 +472,8 @@ outside-project write and an explicitly elevated command. Reinstalling the
 scheduled tasks changes their saved principal; editing the scripts or using
 `ccm.restart` alone does not. Keep a recoverable session on each machine until
 the normal Worker reconnects. A Task Scheduler administrator authorization may
-be required for one-time installation; individual administrator commands do
-not require CCM approval afterward.
+be required for one-time installation. Each subsequent administrator command
+requires Guardian or human approval.
 
 For a host where the administrator agent is already installed, run
 `scripts/complete-ccm-privilege-split.ps1 -Role RemoteWorker` or

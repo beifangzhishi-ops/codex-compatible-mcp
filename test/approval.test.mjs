@@ -162,6 +162,23 @@ test('ApprovalManager freezes one exact execution before binding an approval car
   );
 });
 
+test('ApprovalManager binds Windows administrator permission to its frozen execution identity', () => {
+  const approvals = new ApprovalManager();
+  const args = {
+    workspace_handle: '00000000-0000-4000-8000-000000000001',
+    cmd: 'whoami', run_as_admin: true,
+  };
+  const admin = approvals.requestExecution(args, 'approval-worker');
+  const ordinary = approvals.requestExecution({ ...args, run_as_admin: false }, 'approval-worker');
+  assert.equal(admin.run_as_admin, true);
+  assert.equal(ordinary.run_as_admin, false);
+  assert.notEqual(admin.intent_sha256, ordinary.intent_sha256);
+  args.run_as_admin = false;
+  const claimed = approvals.claimReviewerExecution(admin.approval_id, admin.intent_sha256);
+  assert.equal(claimed.action.run_as_admin, true);
+  assert.equal(approvals.getRequest(admin.approval_id).run_as_admin, true);
+});
+
 test('ApprovalManager applies the configured TTL to workspace approvals', () => {
   let now = Date.UTC(2026, 8, 23, 12, 0, 0);
   const approvals = new ApprovalManager({

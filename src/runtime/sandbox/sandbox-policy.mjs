@@ -8,7 +8,7 @@ export function resolvePermissionProfile(
 
   if (sandboxPermissions === 'require_escalated') {
     throw new Error(
-      'Escalated execution requires an approval reviewer, which is not enabled in CCM v1.',
+      'Escalated execution requires Controller approval before Worker dispatch.',
     );
   }
 

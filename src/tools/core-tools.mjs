@@ -54,6 +54,7 @@ const UNIFIED_EXEC_OUTPUT_SCHEMA = {
   trusted_package_script: z.boolean().optional(),
   trusted_package_script_rule_id: z.string().optional(),
   administrator_agent: z.boolean().optional(),
+  run_as_admin: z.boolean().optional(),
   action_failed: z.boolean().optional(),
   review_source: z.literal('guardian').optional(),
   review_outcome: z.enum(['allow', 'deny', 'error']).optional(),
@@ -74,7 +75,9 @@ function execResult(value) {
     lines.push('Approval ID: ' + value.approval_id);
     lines.push('Environment: ' + value.environment_id);
     lines.push('Command: ' + value.command);
-    lines.push('Permission: full-access for this execution only');
+    lines.push(value.run_as_admin
+      ? 'Permission: unrestricted Windows administrator for this execution only'
+      : 'Permission: full-access for this execution only');
     if (value.policy_persistable && Array.isArray(value.prefix_rule)) {
       lines.push('Persistent prefix: ' + value.prefix_rule.join(' '));
     }
@@ -827,7 +830,7 @@ export function registerCoreTools(registry, runtime) {
       'For a command that genuinely requires full-access outside a workspace-write sandbox without a matching saved rule, set sandbox_permissions=require_escalated and include an optional justification. You may also provide prefix_rule as ordered command tokens to propose a reusable global Allow rule. CCM freezes the exact command and the validated rule before returning approval_required=true; then call request_approval with the returned approval_id.',
       'When requesting escalation, include review_context with an accurate account of the user-authorized task, relevant limitations, and why the exact command is necessary. If Guardian automatic review is enabled, CCM first reviews the frozen one-time action with CPA codex-auto-review. Allow executes once, deny refuses, and review errors fall back to human approval. The reviewer trusts the Host account and has the main model\'s ordinary CCM tool permissions. Never invent user authorization.',
       'Always allow persists an upstream Codex prefix_rule in the same native .rules policy as preauthorized commands. It automatically authorizes matching ordinary exec_command calls on any Worker or workspace without require_escalated. Additional suffix arguments are authorized; every safely parsed executable segment must qualify.',
-      'Windows: run_as_admin=true uses the separately installed elevated CCM administrator agent, without per-command approval. The normal Worker stays unelevated. Administrator commands are unrestricted by the workspace-write sandbox, and cannot combine with a Full Access grant, escalation or prefix_rule. The administrator agent must already be installed and running on that Worker machine.',
+      'Windows: run_as_admin=true requests one-time approval for an unrestricted Windows administrator command using the separately installed elevated CCM administrator agent. Guardian reviews the frozen administrator action first when enabled; denial blocks it and review errors fall back to the human approval card. No saved Allow rule, trusted command, or Full Access grant can authorize administrator execution. The normal Worker stays unelevated, administrator commands are unrestricted by the workspace-write sandbox, and run_as_admin cannot combine with a Full Access grant, escalation or prefix_rule. The administrator agent must already be installed and running on that Worker machine.',
       'For recurring build, test, and development commands that need an approval, proactively supply a practical prefix_rule: keep stable program, subcommand, script path and invariant options, but leave out arguments expected to vary. Example: npm run build:native -> ["npm","run","build:native"]. Never use a bare general-purpose shell or interpreter (powershell, pwsh, cmd, node) as the prefix. Always allow is global across Workers and workspaces, so the user must see the precise proposed prefix and choose whether to persist it. Do not send prefix_rule on ordinary commands; it is only valid with require_escalated.',
       'A CCM-originated result is identifiable by its structured CCM fields. If a host reports a Script error or safety/policy/tool-call failure without this tool returning a structured result, do not attribute that failure to CCM or claim CCM blocked the command.',
       'On Windows, keep destructive filesystem operations in one shell and verify resolved targets before recursive deletes or moves.',
@@ -841,10 +844,10 @@ export function registerCoreTools(registry, runtime) {
       max_output_tokens: z.number().int().positive().optional().describe('Output token budget. Defaults to 10000 tokens.'),
       shell: z.string().optional().describe("Shell binary to launch. Defaults to the environment's default shell."),
       sandbox_permissions: z.enum(['use_default', 'require_escalated']).optional().describe('Set require_escalated when this command genuinely needs full-access outside the normal sandbox.'),
-      run_as_admin: z.boolean().optional().describe('Use the local preauthorized Windows administrator agent, without per-command approval. Unrestricted administrator OS permissions; requires the agent to be installed, and cannot combine with escalation/grant/prefix_rule.'),
+      run_as_admin: z.boolean().optional().describe('Request one-time Guardian or human approval before using the local Windows administrator agent with unrestricted administrator OS permissions. Never covered by saved Allow rules or Full Access grants; incompatible with escalation/grant/prefix_rule.'),
       prefix_rule: z.array(z.string().min(1).max(4096)).min(1).max(64).optional().describe('For a repeatable command requiring Full Access, propose a stable, narrowly useful ordered-token prefix for global Always allow; e.g. ["npm","run","build:native"]. Include stable script paths/options, omit variable suffixes, and never propose a bare generic shell/interpreter. Valid only with require_escalated and must match at least one executable segment.'),
-      justification: z.string().optional().describe('User-facing explanation for a require_escalated approval request.'),
-      review_context: z.string().max(8192).optional().describe('Main model summary of actual user task, authorized effects, and constraints for Guardian review of this command.'),
+      justification: z.string().optional().describe('User-facing explanation for a require_escalated or run_as_admin approval request.'),
+      review_context: z.string().max(8192).optional().describe('Main model summary of actual user task, authorized effects, and constraints for Guardian review of this command, including administrator requests.'),
       full_access_grant_id: z.string().uuid().optional().describe('Active CCM global web Full Access grant. If supplied and valid, this command runs with Full Access without individual approval across any Worker.'),
     },
     outputSchema: UNIFIED_EXEC_OUTPUT_SCHEMA,

@@ -365,10 +365,6 @@ export class RemoteProcessManager {
     delete forwardedArgs.full_access_grant_id;
     delete forwardedArgs.run_as_admin;
     delete forwardedArgs.review_context;
-    if (administratorRequested) {
-      forwardedArgs.sandbox_permissions = 'admin_elevated';
-      delete forwardedArgs.justification;
-    }
     const requestedYieldMs = clampInitialExecYield(args.yield_time_ms);
     forwardedArgs = {
       ...forwardedArgs,
@@ -454,15 +450,17 @@ export class RemoteProcessManager {
       });
     }
 
-    if (wantsEscalation && environment.permissionProfile !== 'full-access') {
+    if ((administratorRequested || wantsEscalation) && environment.permissionProfile !== 'full-access') {
       if (!this.approvalManager) {
         throw new Error('Escalated execution requires an approval manager.');
       }
-      const proposal = explicitPolicyProposal || this.#persistentPolicyProposal(
-        args,
-        environment,
-        parsedCommand,
-      );
+      const proposal = administratorRequested
+        ? { prefix_rule: null, policy_kind: null, policy_persistable: false }
+        : explicitPolicyProposal || this.#persistentPolicyProposal(
+          args,
+          environment,
+          parsedCommand,
+        );
       const approval = this.approvalManager.requestExecution(
         {
           ...args,
@@ -488,6 +486,7 @@ export class RemoteProcessManager {
               workspace_root: approval.workspace_root,
               workspace_handle: approval.workspace_handle,
               justification: approval.justification,
+              run_as_admin: approval.run_as_admin,
             },
             reviewContext: args.review_context || args.justification || '',
           });
@@ -535,7 +534,9 @@ export class RemoteProcessManager {
         chunk_id: 'approval',
         wall_time_seconds: 0,
         output:
-          'Approval required before this command can run outside the sandbox.',
+          administratorRequested
+            ? 'Approval required before this command can run with Windows administrator permissions.'
+            : 'Approval required before this command can run outside the sandbox.',
         approval_required: true,
         ...approval,
         ...(workspaceHandle || {}),
@@ -598,14 +599,6 @@ export class RemoteProcessManager {
       operationId,
       Boolean(args.tty),
     );
-    if (administratorRequested) {
-      this.#emit('administrator_agent_dispatch', {
-        operation_id: operationId,
-        environment_id: environment.id,
-        workspace_handle: workspaceHandle.workspace_handle,
-      });
-      return { ...recorded, administrator_agent: true };
-    }
     if (trustedPackageScriptRule) {
       return {
         ...recorded,
@@ -680,7 +673,16 @@ export class RemoteProcessManager {
           'Frozen workspace identity no longer matches the current workspace handle.',
         );
       }
+      if (action.run_as_admin && (
+        environment.platform !== 'windows' ||
+        environment.permissionProfile !== 'workspace-write'
+      )) {
+        throw new Error('Frozen administrator approval requires a Windows workspace-write Worker.');
+      }
       if (decision === 'approve_always') {
+        if (action.run_as_admin) {
+          throw new Error('Administrator approval cannot be saved as an Always allow rule.');
+        }
         if (!action.policy_persistable) {
           throw new Error(
             'This frozen approval does not contain a persistable policy scope.',
@@ -729,7 +731,7 @@ export class RemoteProcessManager {
       environment_id: environment.id,
       workspace_id: action.workspace_id,
       expected_workspace_root: action.workspace_root,
-      sandbox_permissions: 'approved_escalated',
+      sandbox_permissions: action.run_as_admin ? 'admin_elevated' : 'approved_escalated',
       yield_time_ms: requestedYieldMs,
       ...(action.workdir ? { workdir: action.workdir } : {}),
       ...(action.tty ? { tty: true } : {}),
@@ -821,6 +823,14 @@ export class RemoteProcessManager {
       }
     }
     const consumed = this.approvalManager.markAppExecutionConsumed(approvalId);
+    if (action.run_as_admin) {
+      this.#emit('administrator_agent_dispatch', {
+        approval_id: approvalId,
+        operation_id: claimed.request.operation_id,
+        environment_id: environment.id,
+        workspace_handle: workspaceHandle.workspace_handle,
+      });
+    }
     this.#emit('approval_consumed', {
       approval_id: approvalId,
       operation_id: consumed.operation_id,
@@ -832,6 +842,7 @@ export class RemoteProcessManager {
     });
     return {
       ...recorded,
+      ...(action.run_as_admin ? { administrator_agent: true } : {}),
       approval_id: consumed.approval_id,
       state: consumed.state,
       intent_sha256: consumed.intent_sha256,

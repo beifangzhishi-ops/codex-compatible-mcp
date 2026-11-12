@@ -182,6 +182,11 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         ) || null;
       }
 
+      function canSavePolicy(action) {
+        return action?.kind === "execution" && action?.run_as_admin !== true &&
+          action?.policy_persistable === true;
+      }
+
       function readInitialResult(result = null) {
         const envelope = result || toolEnvelope();
         const structured = envelope?.structuredContent ||
@@ -204,25 +209,29 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         copyHandle.textContent = 'Copy handle';
         retryDecision = null;
         const workspaceAction = structured.kind === "workspace";
+        const administratorAction = !workspaceAction && structured.run_as_admin === true;
         title.textContent = workspaceAction
           ? (structured.operation === "register_workspace"
               ? "CCM requests workspace registration"
               : structured.operation === "unregister_workspace"
                 ? "CCM requests workspace deregistration"
                 : "CCM requests workspace access")
-          : "CCM requests full-access execution";
+          : administratorAction
+            ? "CCM requests Windows administrator execution"
+            : "CCM requests full-access execution";
         justification.textContent = structured.justification ||
           (workspaceAction
             ? "Allow this frozen workspace action?"
-            : "Run this command once with full-access outside the CCM sandbox?");
+            : administratorAction
+              ? "Run this command once with unrestricted Windows administrator permissions?"
+              : "Run this command once with full-access outside the CCM sandbox?");
         workspace.textContent = [
           structured.workspace_id,
           structured.workspace_root
         ].filter(Boolean).join(" · ") || structured.workspace_handle || "Unknown";
         environment.textContent = structured.environment_id || "Unknown";
         expires.textContent = structured.expires_at || "";
-        const policyPersistable =
-          !workspaceAction && structured.policy_persistable === true;
+        const policyPersistable = canSavePolicy(structured);
         policyScopeRow.hidden = !policyPersistable;
         if (policyPersistable) {
           const prefix = Array.isArray(structured.prefix_rule)
@@ -409,8 +418,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
             busy = false;
             approve.disabled = false;
             deny.disabled = false;
-            approveAlways.disabled = approval?.kind === 'workspace' ||
-              approval?.policy_persistable !== true;
+            approveAlways.disabled = !canSavePolicy(approval);
             approve.textContent = value.state === 'approved_retryable'
               ? 'Retry approved action'
               : approval.kind === 'workspace' ? 'Approve' : 'Approve once';
@@ -453,8 +461,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
       function setBusy(value) {
         busy = value;
         approve.disabled = value || !approvalNonce;
-        approveAlways.disabled =
-          value || !approvalNonce || approval?.policy_persistable !== true;
+        approveAlways.disabled = value || !approvalNonce || !canSavePolicy(approval);
         deny.disabled = value || !approvalNonce;
       }
 
@@ -466,6 +473,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
           state: structured?.state,
           kind: structured?.kind,
           operation: structured?.operation,
+          run_as_admin: structured?.run_as_admin === true || approval?.run_as_admin === true,
           workspace_handle: structured?.workspace_handle,
           environment_id: structured?.environment_id,
           workspace_id: structured?.workspace_id,
@@ -500,7 +508,9 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
                 ? "The approved CCM workspace action failed safely and was consumed; request a new approval before retrying."
                 : "The user approved the frozen CCM workspace action. CCM completed it and returned the workspace handle; do not recreate or retry the workspace action.")
           : (decision === "deny"
-              ? "The user denied the frozen CCM full-access action."
+              ? (approval?.run_as_admin === true
+                  ? "The user denied the frozen CCM Windows administrator action."
+                  : "The user denied the frozen CCM full-access action.")
               : decision === "approve_always"
                 ? (structured?.policy_save_failed
                     ? "The user approved the frozen CCM action. The command already executed, but saving the persistent policy failed; do not rerun the command to retry persistence."
@@ -562,7 +572,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         if (busy || !verified || finalOutcome || !approval || !approvalNonce) return;
         verified = false;
         queryGeneration++;
-        if (approval.kind === "workspace" && decision === "approve_always") {
+        if (decision === "approve_always" && !canSavePolicy(approval)) {
           return;
         }
         if (approval.kind !== "workspace" &&
@@ -666,7 +676,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         void resolve(retryDecision || "approve");
       });
       approveAlways.addEventListener("click", () => {
-        if (approval?.policy_persistable === true) {
+        if (canSavePolicy(approval)) {
           void resolve("approve_always");
         }
       });

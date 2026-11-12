@@ -65,6 +65,10 @@ export function guardianReviewPrompt({ action, reviewContext }) {
       cmd: action.cmd, shell: action.shell, workdir: action.workdir,
       workspace_root: action.workspace_root, environment_id: action.environment_id,
       workspace_id: action.workspace_id,
+      run_as_admin: action.run_as_admin === true,
+      execution_permissions: action.run_as_admin === true
+        ? 'Unrestricted Windows administrator token; no workspace-write sandbox'
+        : 'Unsandboxed Worker user token (not a Windows administrator escalation)',
       justification: action.justification,
     }),
     'The decision only covers this command once and never saves a persistent rule.',

@@ -4,11 +4,11 @@ import { EventEmitter } from 'node:events';
 import * as z from 'zod/v4';
 import { ApprovalManager } from '../src/controller/approval-manager.mjs';
 import { GUARDIAN_OUTPUT_SCHEMA, parseGuardianAssessment } from '../src/controller/guardian-assessment.mjs';
-import { guardianInstructions } from '../src/controller/guardian-prompts.mjs';
+import { guardianInstructions, guardianReviewPrompt } from '../src/controller/guardian-prompts.mjs';
 import { CpaReviewClient } from '../src/controller/cpa-review-client.mjs';
 import { GuardianReviewer } from '../src/controller/guardian-reviewer.mjs';
 import { GuardianToolDispatcher } from '../src/controller/guardian-tool-dispatcher.mjs';
-import { isReviewerTool } from '../src/controller/guardian-tool-context.mjs';
+import { isReviewerTool, runReviewerTool } from '../src/controller/guardian-tool-context.mjs';
 import { mayRetryGuardian } from '../src/controller/guardian-retry.mjs';
 import { ToolRegistry } from '../src/tools/tool-registry.mjs';
 import { createToolRegistry } from '../src/tools/index.mjs';
@@ -36,6 +36,18 @@ test('Guardian instructions reuse Codex risk policy with approved main-model tru
   assert.match(instructions, /trust the main Host model/i);
   assert.match(instructions, /same effective/i);
   assert.doesNotMatch(instructions, /you can only run read-only commands/i);
+});
+
+test('Guardian prompt names the actual Windows administrator execution scope', () => {
+  const prompt = guardianReviewPrompt({
+    action: { cmd: 'whoami', run_as_admin: true, workspace_root: 'C:\\workspace' },
+    reviewContext: 'User requested Windows administrator identity inspection.',
+  });
+  assert.match(prompt, /"run_as_admin":true/);
+  assert.match(prompt, /Unrestricted Windows administrator token/);
+  assert.match(prompt, /User requested Windows administrator identity inspection/);
+  const ordinary = guardianReviewPrompt({ action: { cmd: 'whoami' } });
+  assert.match(ordinary, /"run_as_admin":false/);
 });
 
 test('Guardian tool schemas cover every currently model-visible CCM tool', () => {
@@ -235,6 +247,107 @@ test('Guardian allow dispatches frozen escalation once; deny never dispatches', 
   assert.equal(rejected.review_outcome, 'deny');
   assert.equal(rejected.approval_required, false);
   assert.equal(deny.workerHub.calls.length, 0);
+});
+
+test('Guardian administrator allow uses only the elevated agent and never a saved Full Access rule', async (t) => {
+  let reviewedAction;
+  const rig = fixtureManager({
+    isEnabled: () => true,
+    review: async ({ action }) => {
+      reviewedAction = action;
+      return { outcome: 'allow', risk_level: 'low', rationale: 'owner requested identity check' };
+    },
+  });
+  t.after(() => rig.processManager.close());
+  rig.processManager.codexPolicy = {
+    match() { throw new Error('administrator requests must not consult command Allow rules'); },
+    allow() { throw new Error('administrator decisions must not persist policies'); },
+  };
+  const result = await rig.processManager.execCommand({
+    workspace_handle: WORKSPACE_HANDLE, cmd: 'whoami', run_as_admin: true,
+    review_context: 'Owner authorized this administrator identity check.',
+  });
+  assert.equal(reviewedAction.run_as_admin, true);
+  assert.equal(result.state, 'consumed');
+  assert.equal(result.review_outcome, 'allow');
+  assert.equal(result.administrator_agent, true);
+  assert.equal(rig.workerHub.calls.length, 1);
+  assert.equal(rig.workerHub.calls[0].params.sandbox_permissions, 'admin_elevated');
+});
+
+test('Guardian administrator deny blocks execution; review failure falls back to the same human card', async (t) => {
+  const denied = fixtureManager({
+    isEnabled: () => true,
+    review: async () => ({ outcome: 'deny', risk_level: 'high', rationale: 'outside scope' }),
+  });
+  t.after(() => denied.processManager.close());
+  const args = { workspace_handle: WORKSPACE_HANDLE, cmd: 'whoami', run_as_admin: true };
+  const blocked = await denied.processManager.execCommand(args);
+  assert.equal(blocked.review_outcome, 'deny');
+  assert.equal(blocked.run_as_admin, true);
+  assert.equal(denied.workerHub.calls.length, 0);
+  const failed = fixtureManager({
+    isEnabled: () => true,
+    review: async () => { throw new Error('CPA unavailable'); },
+  });
+  t.after(() => failed.processManager.close());
+  const pending = await failed.processManager.execCommand(args);
+  assert.equal(pending.approval_required, true);
+  assert.equal(pending.run_as_admin, true);
+  assert.equal(failed.workerHub.calls.length, 0);
+  const card = failed.approvalManager.prepareAppApproval(pending.approval_id);
+  assert.equal(card.request.run_as_admin, true);
+  const executed = await failed.processManager.resolvePendingExecution({
+    approval_id: pending.approval_id, approval_nonce: card.approvalNonce, decision: 'approve',
+  });
+  assert.equal(executed.administrator_agent, true);
+  assert.equal(failed.workerHub.calls[0].params.sandbox_permissions, 'admin_elevated');
+});
+
+test('Administrator Always allow is rejected without dispatch and its frozen mode is retained', async (t) => {
+  const rig = fixtureManager({ isEnabled: () => false });
+  t.after(() => rig.processManager.close());
+  const pending = await rig.processManager.execCommand({
+    workspace_handle: WORKSPACE_HANDLE, cmd: 'whoami', run_as_admin: true,
+  });
+  const card = rig.approvalManager.prepareAppApproval(pending.approval_id);
+  const denied = await rig.processManager.resolvePendingExecution({
+    approval_id: pending.approval_id, approval_nonce: card.approvalNonce,
+    decision: 'approve_always',
+  });
+  assert.equal(denied.state, 'approved_retryable');
+  assert.equal(denied.run_as_admin, true);
+  assert.equal(rig.workerHub.calls.length, 0);
+});
+
+test('Nested Guardian administrator request cannot authorize itself', async (t) => {
+  const rig = fixtureManager({
+    isEnabled: () => true,
+    review: async () => { throw new Error('Guardian must not recursively review its own administrator request'); },
+  });
+  t.after(() => rig.processManager.close());
+  const pending = await runReviewerTool(() => rig.processManager.execCommand({
+    workspace_handle: WORKSPACE_HANDLE, cmd: 'whoami', run_as_admin: true,
+  }));
+  assert.equal(pending.approval_required, true);
+  assert.equal(pending.run_as_admin, true);
+  assert.equal(rig.workerHub.calls.length, 0);
+});
+
+test('Administrator dispatch loss after Guardian allow becomes unknown without retry', async (t) => {
+  const rig = fixtureManager({
+    isEnabled: () => true,
+    review: async () => ({ outcome: 'allow', risk_level: 'low' }),
+  });
+  t.after(() => rig.processManager.close());
+  let count = 0;
+  rig.workerHub.call = async () => { count++; throw new Error('disconnected after enqueue'); };
+  const output = await rig.processManager.execCommand({
+    workspace_handle: WORKSPACE_HANDLE, cmd: 'whoami', run_as_admin: true,
+  });
+  assert.equal(output.state, 'execution_unknown');
+  assert.equal(output.approval_required, false);
+  assert.equal(count, 1);
 });
 
 test('Guardian failure retains the same frozen pending request for human approval', async (t) => {
