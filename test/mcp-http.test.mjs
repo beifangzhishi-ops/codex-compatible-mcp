@@ -113,6 +113,17 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(client.getInstructions(), /Reuse an existing workspace_handle/);
     assert.match(client.getInstructions(), /Host chooses and sequences peer tools/);
     assert.match(client.getInstructions(), /Call list_projects to discover/);
+    assert.match(client.getInstructions(), /default project directories/);
+    assert.match(client.getInstructions(), /keyboard\/mouse automation/);
+    assert.match(client.getInstructions(), /available proxy/);
+    assert.match(client.getInstructions(), /historical compatibility/);
+    assert.match(client.getInstructions(), /obsolete implementations, names and references/);
+    assert.match(client.getInstructions(), /without defensive phrasing/);
+    assert.match(client.getInstructions(), /Read applicable AGENTS.md/);
+    assert.match(client.getInstructions(), /Maintain project README.md/);
+    assert.match(client.getInstructions(), /verified absolute executable and file paths/);
+    assert.match(client.getInstructions(), /Prefer root-cause fixes/);
+    assert.doesNotMatch(client.getInstructions(), /code review findings first|retain actual uncertainty/i);
     assert.match(client.getInstructions(), /automatic code-free follow-up/);
     assert.match(client.getInstructions(), /call claim_full_access/);
     assert.match(client.getInstructions(), /plan_patch\/plan_read/);

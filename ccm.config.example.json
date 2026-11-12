@@ -1,6 +1,9 @@
 {
   "version": 1,
   "controller": {
+    "project_directory_hints": {
+      "example-worker": "C:\\Users\\example\\Documents\\Projects"
+    },
     "guardian": {
       "enabled": false,
       "model": "codex-auto-review",

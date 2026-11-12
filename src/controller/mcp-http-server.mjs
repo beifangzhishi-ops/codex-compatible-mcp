@@ -56,7 +56,7 @@ function createProtocolServer(
     capabilities: { tools: { listChanged: true } },
     instructions: [
       "CCM provides MCP execution tools; the Host chooses and sequences peer tools. Reuse an existing workspace_handle, which selects the Worker and workspace but does not further restrict readable paths.",
-      "Call list_projects to discover Workers/projects. Select or register a workspace only if no usable handle exists AND the user explicitly requested entry/registration; ordinary project work is not entry authorization. For projectless tasks or permitted absolute-path reads, use create_projectless_handle, never to bypass pending entry. Do not infer a project root from bootstrap paths.",
+      "Call list_projects to discover Workers, registered projects and configured default project directories. Select or register a workspace only if no usable handle exists AND the user explicitly requested entry/registration; ordinary project work is not entry authorization. For projectless tasks or permitted absolute-path reads, use create_projectless_handle, never to bypass pending entry. Do not infer a project root from bootstrap paths or directory hints.",
       "Use exec_command for shell work; resume live sessions with write_stdin and the same workspace_handle/session_id. An empty chars poll is read-only. On an unstructured Host tool failure do not assume a command ran or silently start a replacement session.",
       "If a live process awaits a verification code, call request_verification_input. The user enters it in the App; wait for its automatic code-free follow-up, then continue without checking submission, code, or status. Retry only after ordinary task execution explicitly reports invalid verification.",
       "Timed Full Access: use a supplied claimed full_access_grant_id directly for eligible operations; otherwise, if the owner says they unlocked CCM but the ID is missing, call claim_full_access. Unlock/copy/claim occurs on /ccm/unlock. Claims do not renew expiry; never request or expose phone setup secrets. Unregister always needs separate approval.",
@@ -68,6 +68,15 @@ function createProtocolServer(
       "run_as_admin=true requests one-shot Guardian/human approval for an unrestricted Windows administrator Agent; never infer admin authorization from a normal Full Access grant or saved rule. The normal Worker remains unelevated.",
       "For approval_required=true call request_approval with the returned approval_id; the App resolves only the frozen action. Do not invoke App-only resolvers, manually repeat the command, or circumvent pending workspace approvals.",
       "Distinguish CCM structured failures from Host policy/tool failures, process exit errors, network/target-site errors, and transient Worker connectivity. A single HTTP/DNS timeout is not proof a Worker is offline; check the relevant layer.",
+      "Prefer native tools, APIs or CLI; do not use keyboard/mouse automation by default.",
+      "If GitHub or another overseas site fails, retry through an available proxy.",
+      "Ask the user before adding historical compatibility in development.",
+      "When developing or writing docs, remove obsolete implementations, names and references in the project; ask before retaining any, including in defensive wording.",
+      "Write documents with concrete methods and results, without defensive phrasing, repeated disclaimers, self-justification or empty abstractions.",
+      "Read applicable AGENTS.md rules when entering a project.",
+      "Maintain project README.md for current status and AGENTS.md for ongoing rules.",
+      "Give user-facing terminal commands with verified absolute executable and file paths.",
+      "Prefer root-cause fixes over accumulating patches; run focused tests before broader regression tests.",
     ].join('\n'),
   });
 

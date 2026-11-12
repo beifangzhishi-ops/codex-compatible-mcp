@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { registerCoreTools } from '../src/tools/core-tools.mjs';
 import { ToolRegistry } from '../src/tools/tool-registry.mjs';
+import { readCcmConfig } from '../src/runtime/ccm-config.mjs';
 
 function runtimeStub() {
   return {
@@ -185,6 +190,39 @@ function runtimeStub() {
     },
   };
 }
+
+test('list_projects displays optional per-Worker default project directories without changing roots', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-directory-hints-'));
+  const configPath = path.join(directory, 'ccm.config.json');
+  const examplePath = new URL('../ccm.config.example.json', import.meta.url);
+  try {
+    const config = readCcmConfig(fileURLToPath(examplePath));
+    config.controller.project_directory_hints = {
+      primary: 'C:\\Users\\example\\Documents\\ChatGPT',
+      noha: 'C:\\Users\\example\\Documents\\AAAVitalFile',
+    };
+    fs.writeFileSync(configPath, JSON.stringify(config));
+    const runtime = runtimeStub();
+    runtime.ccmConfigFile = configPath;
+    const registry = registerCoreTools(new ToolRegistry(), runtime);
+    const listed = (await registry.get('list_projects').handler({})).structuredContent.environments;
+    assert.deepEqual(listed.map((env) => env.project_directory_hint), [
+      'C:\\Users\\example\\Documents\\ChatGPT',
+      'C:\\Users\\example\\Documents\\AAAVitalFile',
+    ]);
+    assert.equal(listed[0].projects[0].root, 'C:\\work\\primary-project');
+    assert.equal((await registry.get('list_projects').handler({ environment_id: 'noha' }))
+      .structuredContent.environments[0].project_directory_hint,
+    'C:\\Users\\example\\Documents\\AAAVitalFile');
+
+    delete config.controller.project_directory_hints;
+    fs.writeFileSync(configPath, JSON.stringify(config));
+    const withoutHints = (await registry.get('list_projects').handler({})).structuredContent.environments;
+    assert.ok(withoutHints.every((env) => !Object.hasOwn(env, 'project_directory_hint')));
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test('core tool surface returns workspace handles while retaining approval cards', async () => {
   const registry = registerCoreTools(new ToolRegistry(), runtimeStub());

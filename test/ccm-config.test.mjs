@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import {
   readCcmConfig,
   readCcmSection,
+  readProjectDirectoryHints,
   applyCcmBootstrapEnv,
   readWorkerCaBundle,
 } from '../src/runtime/ccm-config.mjs';
@@ -26,6 +27,7 @@ test('the tracked root template is a complete independent configuration sample',
   assert.ok(Array.isArray(config.worker_quarantine_errors.error_codes));
   assert.deepEqual(Object.keys(config.codex), ['home']);
   assert.deepEqual(readWorkerCaBundle(example), {});
+  assert.equal(readProjectDirectoryHints(example)['example-worker'], 'C:\\Users\\example\\Documents\\Projects');
 });
 
 test('bootstrap variables are loaded from the selected JSON section, never shell child secrets', () => {
@@ -50,6 +52,17 @@ test('malformed configurations and unauthorized child overrides fail closed', ()
     fixture.worker.child_env = { CURL_CA_BUNDLE: 'relative/path' };
     fs.writeFileSync(fixtureFile, JSON.stringify(fixture));
     assert.throws(() => readWorkerCaBundle(fixtureFile), /absolute path/);
+
+    fixture.worker.child_env = {};
+    fixture.controller.project_directory_hints = { noha: 'relative/path' };
+    fs.writeFileSync(fixtureFile, JSON.stringify(fixture));
+    assert.throws(() => readProjectDirectoryHints(fixtureFile), /Invalid project directory hint/);
+    fixture.controller.project_directory_hints = ['C:\\test'];
+    fs.writeFileSync(fixtureFile, JSON.stringify(fixture));
+    assert.throws(() => readProjectDirectoryHints(fixtureFile), /must be an object/);
+    delete fixture.controller.project_directory_hints;
+    fs.writeFileSync(fixtureFile, JSON.stringify(fixture));
+    assert.deepEqual(readProjectDirectoryHints(fixtureFile), {});
   } finally {
     fs.rmSync(fixtureFile, { force: true });
   }

@@ -1,6 +1,7 @@
 import * as z from 'zod/v4';
 import { APPROVAL_UI_URI } from '../ui/approval-app.mjs';
 import { VERIFICATION_INPUT_UI_URI } from '../ui/verification-input-app.mjs';
+import { readProjectDirectoryHints } from '../runtime/ccm-config.mjs';
 
 const UNIFIED_EXEC_OUTPUT_SCHEMA = {
   chunk_id: z.string().optional(),
@@ -506,7 +507,7 @@ export function registerCoreTools(registry, runtime) {
     tags: ['project', 'environment', 'worker', 'capabilities'],
     supportsParallel: true,
     description: [
-      "List connected Workers and registered projects without entering a workspace. Omit environment_id for all Workers; all=true also lists existing projectless workspaces.",
+      "List connected Workers, registered projects and configured default project directories without entering a workspace. Omit environment_id for all Workers; all=true also lists existing projectless workspaces.",
       "Results include independent sandbox_read_scope and sandbox_write_scope, platform, capabilities and Worker state. Compare connected_at and state=normal after restart; one stale Worker does not block others.",
     ].join('\n\n'),
     inputSchema: {
@@ -515,6 +516,7 @@ export function registerCoreTools(registry, runtime) {
     },
     handler: async (args) => {
       try {
+        const directoryHints = readProjectDirectoryHints(runtime.ccmConfigFile);
         const publicEnvironments = runtime.environmentRegistry.listPublic();
         let environments = publicEnvironments;
         if (args.environment_id) {
@@ -525,6 +527,12 @@ export function registerCoreTools(registry, runtime) {
         }
         const includeAll = Boolean(args.all);
         const discover = async (environment) => {
+          const directoryHint = Object.hasOwn(directoryHints, environment.id)
+            ? directoryHints[environment.id] : undefined;
+          const withDirectoryHint = (result) => ({
+            ...result,
+            ...(directoryHint === undefined ? {} : { project_directory_hint: directoryHint }),
+          });
           const currentStatus = runtime.workerHub.environmentStatus?.(
             environment.id,
           ) || { state: 'normal' };
@@ -535,7 +543,7 @@ export function registerCoreTools(registry, runtime) {
             );
             error.code = 'worker_quarantined';
             if (args.environment_id) throw error;
-            return { ...environment, ...currentStatus };
+            return withDirectoryHint({ ...environment, ...currentStatus });
           }
 
           try {
@@ -545,7 +553,7 @@ export function registerCoreTools(registry, runtime) {
               { all: includeAll },
               { timeoutMs: 10_000 },
             );
-            return {
+            return withDirectoryHint({
               ...environment,
               state: 'normal',
               ...(currentStatus.connected_at ? { connected_at: currentStatus.connected_at } : {}),
@@ -553,7 +561,7 @@ export function registerCoreTools(registry, runtime) {
               ...(includeAll
                 ? { projectless_workspaces: result.projectless_workspaces || [] }
                 : {}),
-            };
+            });
           } catch (error) {
             runtime.workerHub.quarantine?.(
               environment.id,
@@ -568,11 +576,11 @@ export function registerCoreTools(registry, runtime) {
               abnormal_code: error?.code || 'project_discovery_failed',
               abnormal_reason: String(error?.message || error),
             };
-            return {
+            return withDirectoryHint({
               ...environment,
               ...failedStatus,
               project_discovery_error: String(error?.message || error),
-            };
+            });
           }
         };
         const enriched = await Promise.all(environments.map(discover));
