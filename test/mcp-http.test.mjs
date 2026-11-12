@@ -354,7 +354,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(download.status, 200);
     assert.deepEqual(Buffer.from(await download.arrayBuffer()), docBytes);
 
-    const planLines = ['# Delivered plan', ...Array.from({ length: 500 }, (_, i) => 'step ' + i)];
+    const planLines = ['# Delivered plan', 'Formula: $E=mc^2$', ...Array.from({ length: 500 }, (_, i) => 'step ' + i)];
     const createdPlan = await runtime.planManager.create([
       '*** Begin Patch', '*** Add File: plan.md', ...planLines.map((line) => '+' + line), '*** End Patch',
     ].join('\n'));
@@ -367,6 +367,17 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(planPublish.structuredContent.plan_id, createdPlan.plan_id);
     assert.equal(planPublish.structuredContent.environment_id, undefined);
     assert.equal(planPublish.structuredContent.markdown_truncated, false);
+    assert.equal(planPublish.structuredContent.render_inspection.visual_review_required, true);
+    const renderedShots = planPublish.content.filter((item) => item.type === 'image');
+    if (process.env.CCM_RUN_PUBLISH_VISUAL_TEST === '1') assert.ok(renderedShots.length >= 1, 'publish must expose screenshots as MCP image content');
+    assert.equal(renderedShots.length, planPublish.structuredContent.render_inspection.screenshot_count ?? 0);
+    if (renderedShots.length) {
+      assert.equal(renderedShots[0].mimeType, 'image/jpeg');
+      assert.ok(Buffer.from(renderedShots[0].data, 'base64').length > 1000);
+    } else {
+      assert.equal(planPublish.structuredContent.render_inspection.status, 'unavailable');
+      assert.match(planPublish.content[0].text, /visual review was not possible/);
+    }
     assert.match(planPublish.structuredContent.preview_url, /^https:\/\/example\.test\/ccm\/preview\//);
     const planToken = planPublish.structuredContent.download_url.split('/').at(-1);
     const planDownload = await fetch('http://127.0.0.1:' + controller.address.port + '/ccm/download/' + planToken);

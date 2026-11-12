@@ -1,8 +1,9 @@
-﻿import * as z from 'zod/v4';
+import * as z from 'zod/v4';
 import { PUBLISHED_FILE_UI_URI } from '../ui/published-file-app.mjs';
 import { textPreviewFromBase64 } from '../controller/text-file-preview.mjs';
 import { publishedPreviewKind } from '../controller/published-file-preview.mjs';
 import { renderMarkdownFragment } from '../controller/markdown-preview.mjs';
+import { inspectMarkdownRender } from '../controller/markdown-visual-inspection.mjs';
 function toolError(error) {
   return {
     content: [{ type: 'text', text: String(error?.message || error) }],
@@ -36,7 +37,7 @@ function execResult(value, metadata = {}) {
   };
 }
 
-function fileResourceResult(value, environmentId, runtime, metadata = {}) {
+async function fileResourceResult(value, environmentId, runtime, metadata = {}) {
   const fileTransferStore = runtime.fileTransferStore;
   if (!fileTransferStore) {
     throw new Error('CCM file-transfer store is unavailable.');
@@ -56,10 +57,33 @@ function fileResourceResult(value, environmentId, runtime, metadata = {}) {
     ? renderMarkdownFragment(textPreview.text) : null;
   const markdownPreview = candidateMarkdown && Buffer.byteLength(candidateMarkdown, 'utf8') <= 32 * 1024
     ? candidateMarkdown : null;
+  let renderCheck = null;
+  if (previewKind === 'markdown') {
+    try {
+      const source = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.from(value.data, 'base64'));
+      if (source.includes('\0')) throw new Error('Markdown contains NUL bytes');
+      renderCheck = await inspectMarkdownRender(source, transfer.filename);
+    } catch (error) {
+      renderCheck = {
+        inspection: { status: 'unavailable', message: String(error?.message || error).slice(0, 300), visual_review_required: true },
+        screenshots: [],
+      };
+    }
+  }
   return {
-    content: [{ type: 'text', text: 'Download ' + transfer.filename + ': ' + url +
-      (previewUrl ? '\nPreview: ' + previewUrl : '') +
-      '\nExpires: ' + new Date(transfer.expiresAt).toISOString() }],
+    content: [
+      { type: 'text', text: 'Download ' + transfer.filename + ': ' + url +
+        (previewUrl ? '\nPreview: ' + previewUrl : '') +
+        '\nExpires: ' + new Date(transfer.expiresAt).toISOString() +
+        (renderCheck ? '\nRender inspection: ' + JSON.stringify(renderCheck.inspection) +
+          '\nModel: inspect the returned screenshots before declaring visual review complete. ' +
+          'If screenshots are unavailable, explicitly report that visual review was not possible. ' +
+          'Correct any issues and re-publish; long-document screenshots are representative rather than exhaustive.' : '') },
+      ...(renderCheck?.screenshots || []).flatMap((screenshot, index) => [
+        { type: 'text', text: 'Rendered Markdown screenshot ' + (index + 1) + ': ' + screenshot.label },
+        { type: 'image', data: screenshot.data, mimeType: screenshot.mimeType },
+      ]),
+    ],
     structuredContent: {
       capability: 'publish',
       ...(environmentId ? { environment_id: environmentId } : {}),
@@ -76,6 +100,7 @@ function fileResourceResult(value, environmentId, runtime, metadata = {}) {
         markdown_preview: markdownPreview,
         markdown_truncated: textPreview.truncated,
       } : {}),
+      ...(renderCheck ? { render_inspection: renderCheck.inspection } : {}),
       filename: transfer.filename,
       mime_type: transfer.mime_type,
       byte_length: transfer.byte_length,
@@ -219,10 +244,10 @@ export function registerSpecializedTools(registry, runtime) {
     },
     supportsParallel: false,
     description: [
-      'Publish exactly one resource: either a Controller-hosted durable Plan using only plan_id, or a Worker file using both workspace_handle and path. These input modes are mutually exclusive; never supply plan_id together with path or workspace_handle. The original content is published as a fixed snapshot in a temporary HTTPS download link (up to 72 hours) with one MCP App card. Markdown is rendered as safe HTML in the card (bounded excerpt) and full browser preview, while the original .md stays downloadable. Other UTF-8 text/JSON/code uses a source snippet and full-text link. Browser-native images, PDF, audio/video and isolated HTML/SVG have preview links. This is not a native ChatGPT attachment.',
+      'Publish exactly one resource: either a Controller-hosted durable Plan using only plan_id, or a Worker file using both workspace_handle and path. These input modes are mutually exclusive; never supply plan_id together with path or workspace_handle. The original content is published as a fixed snapshot in a temporary HTTPS download link (up to 72 hours) with one MCP App card. Markdown including LaTeX formulas is rendered as safe HTML in the card (bounded excerpt) and full browser preview, while the original .md stays downloadable. The same publish call includes model-visible browser screenshot images and automated formula/layout diagnostics; review the images before declaring the publication visually checked, fix discovered defects and publish again. If screenshots are unavailable, report that limitation rather than claiming visual verification. Other UTF-8 text/JSON/code uses a source snippet and full-text link. Browser-native images, PDF, audio/video and isolated HTML/SVG have preview links. This is not a native ChatGPT attachment.',
       'When planning reaches a decision-complete stopping point, publish the current Plan with plan_id without copying its full text into the reply. When generating user-facing artifacts, proactively publish finished deliverables and useful previews. Stage previews are permitted; do not publish files merely for model-side inspection.',
       'For Worker files, workspace_handle is required and selects the Worker; relative paths resolve from its context root, absolute paths remain absolute. Reuse an existing handle; for genuinely projectless work use create_projectless_handle and never enter/register a project merely to publish a file.',
-      'view_image is only for model-side image inspection. The card keeps the download link beside any native browser preview. PDF previews use the browser PDF reader; Office files require conversion and therefore remain download-only. Avoid publishing unnecessary intermediate files.',
+      'view_image is for model-side inspection of local images; publish directly returns model-facing screenshots for Markdown. The card keeps the download link beside any native browser preview. PDF previews use the browser PDF reader; Office files require conversion and therefore remain download-only. Avoid publishing unnecessary intermediate files.',
       'Publishing a Plan reads its entire latest persisted Markdown directly from Controller storage, without plan_read bounds, Worker access, or tracked-file writes. Every publication is an immutable snapshot, not a live Plan link. Publish one resource per call, sequentially; public links are bearer capabilities and anyone possessing them can download during their lifetime.',
     ].join('\n\n'),
     inputSchema: z.object({
@@ -240,7 +265,7 @@ export function registerSpecializedTools(registry, runtime) {
         if (args.plan_id != null) {
           if (!runtime.planManager) throw new Error('CCM Plan manager is unavailable.');
           const bytes = await runtime.planManager.snapshot(args.plan_id);
-          return fileResourceResult({
+          return await fileResourceResult({
             filename: 'plan-' + args.plan_id + '.md',
             mime_type: 'text/markdown; charset=utf-8',
             byte_length: bytes.length,
@@ -248,7 +273,7 @@ export function registerSpecializedTools(registry, runtime) {
           }, null, runtime, { plan_id: args.plan_id });
         }
         const value = await runtime.fileService.sendFile({ workspace_handle: args.workspace_handle, path: args.path });
-        return fileResourceResult(
+        return await fileResourceResult(
           value,
           value.environment_id,
           runtime,

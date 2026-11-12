@@ -1,8 +1,11 @@
 import MarkdownIt from 'markdown-it';
+import { katex } from '@mdit/plugin-katex';
 
 // Render untrusted Markdown without embedded HTML, scripts, or remote image loads.
 // The outer browser preview also runs inside a restrictive CSP sandbox.
 const markdown = new MarkdownIt({ html: false, linkify: false, maxNesting: 32 });
+// Native MathML keeps formula previews self-contained under the existing CSP.
+markdown.use(katex, { delimiters: 'all', output: 'mathml', throwOnError: false, trust: false, maxExpand: 1000 });
 markdown.renderer.rules.image = (tokens, index) =>
   '<span class="markdown-image">[Image: ' +
   markdown.utils.escapeHtml(tokens[index].content) + ']</span>';
@@ -33,6 +36,8 @@ const STYLES = `
   th, td { border: 1px solid #8886; padding: 6px 12px; text-align: left; }
   th { background: color-mix(in srgb, CanvasText 6%, Canvas); }
   .markdown-image { font-style: italic; opacity: .7; }
+  .katex-display { display: block; max-width: 100%; overflow-x: auto; margin: 1em 0; }
+  .katex-error { color: #b42318; overflow-wrap: anywhere; }
   @media (max-width: 600px) { body { padding: 12px 14px 40px; font-size: 15px; } }
 `;
 

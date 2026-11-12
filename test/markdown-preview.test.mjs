@@ -27,3 +27,41 @@ test('Markdown escapes HTML and disallows script URLs and external image request
   assert.match(html, /\[Image: remote\]/);
   assert.match(html, /href="https:\/\/example\.test\/doc"/);
 });
+
+test('Markdown renders dollar and bracket math as self-contained MathML', () => {
+  const source = [
+    'Inline $E=mc^2$.',
+    '',
+    '$$',
+    '\\frac{a}{b}',
+    '$$',
+    '',
+    'Bracket inline \\(x+y\\) and display:',
+    '',
+    '\\[',
+    '\\int_0^1 x\\,dx',
+    '\\]',
+  ].join('\n');
+  const html = renderMarkdownFragment(source);
+  assert.equal((html.match(/<math(?:\s|>)/g) || []).length, 4);
+  assert.doesNotMatch(html, /<script|<iframe|https:\/\/cdn/i);
+  assert.match(renderMarkdownDocument(source), /katex-display/);
+});
+
+test('Markdown keeps code math literal and flags malformed formulas without unsafe HTML', () => {
+  const source = [
+    'Inline code: ' + String.fromCharCode(96) + '$not_math$' + String.fromCharCode(96),
+    '',
+    '~~~md',
+    '$not_math$',
+    '~~~',
+    '',
+    'Wrong formula $\\definitelyNotACommand$',
+    '',
+    'Unsafe formula $\\href{javascript:alert(1)}{x}$',
+  ].join('\n');
+  const html = renderMarkdownFragment(source);
+  assert.equal((html.match(/<math(?:\s|>)/g) || []).length, 2);
+  assert.match(html, /mathcolor="#cc0000"/);
+  assert.doesNotMatch(html, /<script|href="javascript:/i);
+});

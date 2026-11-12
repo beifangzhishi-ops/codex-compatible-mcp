@@ -1,4 +1,4 @@
-export const PUBLISHED_FILE_UI_URI = 'ui://ccm/published-file-v9.html';
+export const PUBLISHED_FILE_UI_URI = 'ui://ccm/published-file-v10.html';
 
 // Every publication gets one useful card: images render inline, text shows a
 // bounded scrollable snippet, and other browser-native types show preview links.
@@ -48,6 +48,8 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
     #markdown-preview th, #markdown-preview td { padding: 4px 7px; border: 1px solid #8886; }
     #markdown-preview blockquote { border-left: 3px solid #888; margin-left: 0; padding-left: 10px; }
     #markdown-preview a { pointer-events: none; }
+    #markdown-preview .katex-display { display: block; max-width: 100%; overflow-x: auto; margin: .8em 0; }
+    #markdown-preview .katex-error { color: #b42318; overflow-wrap: anywhere; }
     #text-note { display: none; margin-top: 5px; font-size: 11px; opacity: 0.65; }
     #status { opacity: 0.8; }
     #details { display: none; margin-top: 7px; font-size: 12px; opacity: 0.7; }
