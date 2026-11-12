@@ -246,6 +246,7 @@ export function registerSpecializedTools(registry, runtime) {
     description: [
       "Publish one immutable snapshot: plan_id alone for a Controller Plan, or workspace_handle plus path for a Worker file (never both). Returns an MCP App card and temporary HTTPS download link, not a native ChatGPT attachment. Links are bearer-accessible and expire within 72 hours.",
       "Proactively publish finished user-facing deliverables and useful previews, not intermediate files needed only for model inspection. For decision-complete Plans use plan_id and summarize without pasting the full Plan; publication does not authorize implementation.",
+      "For user-facing Worker files, prefer publish at or below the default 12 MiB limit; for larger files proactively call quark_upload instead, even without an explicit Quark request. The user retrieves uploaded files in Quark Cloud Drive; no share link is needed. Honor an explicitly requested delivery method and report unavailable uploads rather than claiming success.",
       "Markdown (including formulas) renders a bounded card, full safe HTML preview and model-visible browser screenshots/diagnostics. Inspect screenshots before claiming visual verification; fix issues and re-publish, or report unavailable/incomplete coverage. The original Markdown remains downloadable.",
       "Other files get appropriate source/browser previews; Office files are download-only unless converted. Relative Worker paths resolve from its context root; reuse existing handles. Publish one resource per call.",
     ].join('\n\n'),

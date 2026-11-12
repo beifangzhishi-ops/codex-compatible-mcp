@@ -104,6 +104,10 @@ test('publish is a peer MCP tool and yields an HTTPS URL', async () => {
   assert.equal(publish.mcpMeta.ui.resourceUri, PUBLISHED_FILE_UI_URI);
   assert.equal(publish.mcpMeta['openai/outputTemplate'], PUBLISHED_FILE_UI_URI);
   assert.match(publish.description, /proactively publish/i);
+  assert.match(publish.description, /default 12 MiB limit/);
+  assert.match(publish.description, /larger files proactively call quark_upload.*without an explicit Quark request/);
+  assert.match(publish.description, /no share link is needed/);
+  assert.match(publish.description, /Honor an explicitly requested delivery method/);
   assert.equal(publish.supportsParallel, false);
   assert.equal(registry.get('ccm-extra.send_file'), null);
   const args = { workspace_handle: '00000000-0000-4000-8000-000000000001', path: 'report.docx' };
