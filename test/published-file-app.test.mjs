@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
-import { PUBLISHED_FILE_UI_HTML } from '../src/ui/published-file-app.mjs';
+import { PUBLISHED_FILE_UI_HTML, PUBLISHED_FILE_UI_URI } from '../src/ui/published-file-app.mjs';
 
 const downloadUrl = 'https://example.test/ccm/download/12345678-1234-4234-8234-123456789abc';
 const previewUrl = 'https://example.test/ccm/preview/12345678-1234-4234-8234-123456789abc';
@@ -220,4 +220,8 @@ test('PDF preview card retains its download link', () => {
   assert.equal(card.elements['preview-link'].textContent, 'View PDF');
   assert.equal(card.elements['preview-link'].style.display, 'block');
   assert.equal(card.elements.link.href, downloadUrl);
+});
+
+test('publish retains the stable mobile-compatible UI resource URI', () => {
+  assert.equal(PUBLISHED_FILE_UI_URI, 'ui://ccm/published-file-v9.html');
 });

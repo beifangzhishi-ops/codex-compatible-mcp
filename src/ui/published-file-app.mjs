@@ -1,4 +1,4 @@
-export const PUBLISHED_FILE_UI_URI = 'ui://ccm/published-file-v10.html';
+export const PUBLISHED_FILE_UI_URI = 'ui://ccm/published-file-v9.html';
 
 // Every publication gets one useful card: images render inline, text shows a
 // bounded scrollable snippet, and other browser-native types show preview links.
