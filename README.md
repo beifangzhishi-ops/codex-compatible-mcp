@@ -401,6 +401,18 @@ combine with `sandbox_permissions=require_escalated`, `prefix_rule` or
 `full_access_grant_id`; neither ordinary Full Access nor a saved Allow rule
 authorizes administrator execution. `apply_patch` is not privileged.
 
+**Model-facing permission retry hint (2026-11-13):** `exec_command` tells the
+Host to consider `run_as_admin=true` after a completed Windows command fails
+with clear administrator-token evidence, instead of stopping at the first
+denial or asking for a manual elevated terminal. The shared execution-result
+formatter adds a `permission_hint` to both text and structured content for
+the protected `\\.\pipe\ProtectedPrefix\Administrators\...` pipe and explicit
+Windows elevation-required errors. Generic `Access is denied`, path, network
+and sandbox failures do not qualify. This is Host-facing guidance only: CCM
+does not auto-retry, change execution permissions, bypass Guardian/human
+approval, or hide the original process error; the model still must judge task
+authorization before making a new administrator call.
+
 To repair or upgrade an administrator agent that cannot be reached through
 `run_as_admin=true`, execute `scripts/install-ccm-admin-agent.ps1` **from an
 independent, elevated Windows PowerShell on that machine**. The installer

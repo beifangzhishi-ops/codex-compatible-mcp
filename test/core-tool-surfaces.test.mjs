@@ -532,3 +532,52 @@ test('write_stdin supports direct empty polling and interactive input', async ()
   assert.equal(writeCalls[1].chars, '');
   assert.equal(writeCalls[2].chars, 'y\n');
 });
+
+test('explicit Windows administrator-token failures suggest an approved retry without auto-escalation', async () => {
+  const runtime = runtimeStub();
+  const calls = [];
+  let nextResult;
+  runtime.processManager.execCommand = async (args) => {
+    calls.push(structuredClone(args));
+    return nextResult;
+  };
+  runtime.processManager.writeStdin = async () => nextResult;
+  const registry = registerCoreTools(new ToolRegistry(), runtime);
+  const args = {
+    workspace_handle: '00000000-0000-4000-8000-000000000001',
+    cmd: 'tailscale funnel status',
+  };
+  const tailscaleError = String.raw`open \\.\pipe\ProtectedPrefix\Administrators\Tailscale\tailscaled: Access is denied.`;
+  nextResult = { wall_time_seconds: 0, output: tailscaleError, exit_code: 1 };
+  const denied = await registry.get('exec_command').handler(args);
+  assert.match(denied.structuredContent.permission_hint, /run_as_admin=true/);
+  assert.match(denied.content[0].text, /Permission hint:.*run_as_admin=true/);
+  assert.equal(denied.structuredContent.output, tailscaleError);
+  assert.equal(calls.length, 1, 'the hint must not execute an administrator retry');
+  assert.equal(calls[0].run_as_admin, undefined);
+
+  const finishedSession = await registry.get('write_stdin').handler({
+    workspace_handle: args.workspace_handle, session_id: 1003,
+  });
+  assert.match(finishedSession.structuredContent.permission_hint, /run_as_admin=true/);
+
+  for (const output of [
+    'Access is denied.',
+    'Network is unreachable: Access is denied.',
+    'Cannot write outside workspace sandbox: Access is denied.',
+    'The system cannot find the path specified.',
+  ]) {
+    nextResult = { wall_time_seconds: 0, output, exit_code: 1 };
+    const genericFailure = await registry.get('exec_command').handler(args);
+    assert.equal(genericFailure.structuredContent.permission_hint, undefined, output);
+  }
+
+  nextResult = { wall_time_seconds: 0, output: tailscaleError, session_id: 123 };
+  assert.equal((await registry.get('exec_command').handler(args)).structuredContent.permission_hint, undefined);
+  nextResult = { wall_time_seconds: 0, output: tailscaleError, exit_code: 0 };
+  assert.equal((await registry.get('exec_command').handler(args)).structuredContent.permission_hint, undefined);
+  nextResult = { wall_time_seconds: 0, output: tailscaleError, exit_code: 1, administrator_agent: true };
+  assert.equal((await registry.get('exec_command').handler(args)).structuredContent.permission_hint, undefined);
+  nextResult = { wall_time_seconds: 0, output: 'The requested operation requires elevation.', exit_code: 1 };
+  assert.match((await registry.get('exec_command').handler(args)).structuredContent.permission_hint, /run_as_admin=true/);
+});

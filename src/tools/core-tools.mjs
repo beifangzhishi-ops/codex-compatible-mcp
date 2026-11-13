@@ -56,6 +56,7 @@ const UNIFIED_EXEC_OUTPUT_SCHEMA = {
   trusted_package_script_rule_id: z.string().optional(),
   administrator_agent: z.boolean().optional(),
   run_as_admin: z.boolean().optional(),
+  permission_hint: z.string().optional(),
   action_failed: z.boolean().optional(),
   review_source: z.literal('guardian').optional(),
   review_outcome: z.enum(['allow', 'deny', 'error']).optional(),
@@ -69,7 +70,22 @@ function jsonResult(value) {
   };
 }
 
+function adminRetryHint(value) {
+  if (value.exit_code === undefined || value.exit_code === 0 ||
+      value.approval_required || value.administrator_agent || value.run_as_admin) return null;
+  const output = value.output || '';
+  const protectedAdminPipe = output.toLowerCase().includes(
+    '\\pipe\\protectedprefix\\administrators\\',
+  );
+  const explicitElevationError =
+    /\b(?:ERROR_ELEVATION_REQUIRED|the requested operation requires elevation|a required privilege is not held by the client|this (?:command|operation) requires administrator privileges)\b/i.test(output);
+  if (!protectedAdminPipe && !explicitElevationError) return null;
+  return 'Possible Windows administrator-token requirement. If the task authorizes this operation, consider retrying exec_command with run_as_admin=true (one-shot Guardian/human approval). This is distinct from sandbox_permissions=require_escalated; generic access, network or path errors are not sufficient evidence.';
+}
+
 function execResult(value) {
+  const hint = adminRetryHint(value);
+  const result = hint ? { ...value, permission_hint: hint } : value;
   const lines = [];
   if (value.approval_required) {
     lines.push('Approval required: yes');
@@ -105,9 +121,10 @@ function execResult(value) {
   }
   lines.push('Output:');
   if (value.output) lines.push(value.output);
+  if (hint) lines.push('Permission hint: ' + hint);
   return {
     content: [{ type: 'text', text: lines.join('\n') }],
-    structuredContent: value,
+    structuredContent: result,
   };
 }
 
@@ -819,6 +836,7 @@ export function registerCoreTools(registry, runtime) {
       "For repeatable build/test/dev escalation, proactively supply a practical prefix_rule: stable executable, subcommand, script and fixed options, excluding variable suffixes. Do not use a bare generic shell/interpreter. Always allow saves the prefix across Workers; do not pass prefix_rule on ordinary commands.",
       "Timed Full Access: use the supplied claimed full_access_grant_id per command, or call claim_full_access only if the owner unlocked without providing the ID. No grant changes Worker baseline or renews expiry.",
       "Windows run_as_admin=true uses an unrestricted administrator Agent after one-shot Guardian/human approval. It cannot combine with escalation, grants or prefix_rule; saved rules cannot authorize admin. Preserve verified absolute targets for destructive file operations.",
+      "After a completed Windows command fails with clear administrator-token/elevation evidence (e.g., a ProtectedPrefix\\Administrators pipe), proactively consider run_as_admin=true when the task authorizes it; do not stop at the first denial or ask the user to open admin PowerShell. Distinguish generic Access is denied, sandbox, path and network errors; never automatically elevate. The retry needs its own one-shot approval.",
       "Host Script/tool failures without a structured CCM result are not evidence that CCM rejected or dispatched a command. Distinguish these from process exit errors, network/target-site errors and Worker connectivity before retrying; do not silently start a replacement session.",
     ].join('\n\n'),
     inputSchema: {

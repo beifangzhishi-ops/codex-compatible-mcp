@@ -162,6 +162,8 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const commandTool = listed.tools.find((tool) => tool.name === 'exec_command');
     assert.match(commandTool.description, /proactively supply a practical prefix_rule/);
     assert.match(commandTool.description, /run_as_admin=true uses an unrestricted administrator Agent after one-shot Guardian\/human approval/);
+    assert.match(commandTool.description, /proactively consider run_as_admin=true/);
+    assert.match(commandTool.description, /Distinguish generic Access is denied, sandbox, path and network errors/);
     assert.match(commandTool.description, /Native Codex ExecPolicy/);
     assert.match(commandTool.description, /do not silently start a replacement session/);
     assert.ok(commandTool.description.length < 2500, 'exec_command description should stay compact');
