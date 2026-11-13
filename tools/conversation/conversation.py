@@ -21,6 +21,7 @@ UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][
 SHARE_ID = re.compile(r"^share:([A-Za-z0-9_.-]{1,128}):([a-f0-9]{64})$")
 LOCAL_ID = re.compile(r"^codex:([A-Za-z0-9_.-]{1,128}):([0-9a-fA-F-]{36})$")
 ACTIONS = ("import", "thread/read", "thread/turns/list", "thread/items/list", "export")
+TOOL_AUDIT_FIELDS = ('public_tool_record_count', 'redacted_tool_result_count')
 
 
 def check(value, message):
@@ -64,6 +65,10 @@ def save_atomic(path, obj):
             os.unlink(temp)
 
 
+def tool_audit_metadata(doc):
+    return {key: doc[key] for key in TOOL_AUDIT_FIELDS if key in doc}
+
+
 def import_share(args, env):
     branch = args.get("branch", "active")
     check(branch in ("active", "all"), "Invalid branch")
@@ -102,6 +107,12 @@ def import_share(args, env):
            "environment_id": env, "branch": branch, "title": title,
            "revision": str(uuid.uuid4()), "imported_at": datetime.now(timezone.utc).isoformat(),
            "records": records, "active_ids": active, "raw": raw}
+    if kind == 'chatgpt':
+        tool_records = [r for r in records if r.get('role') == 'tool']
+        doc['public_tool_record_count'] = len(tool_records)
+        doc['redacted_tool_result_count'] = sum(
+            (r.get('text') or '').strip() == 'The output of this plugin was redacted.'
+            for r in tool_records)
     if kind == 'chatgpt-rendered':
         doc['source_completeness'] = 'rendered-messages-only'
     save_atomic(store_path(digest), doc)
@@ -110,6 +121,7 @@ def import_share(args, env):
             "revision": doc["revision"], "title": title, "total_items": len(records),
             "active_items": sum(item in present_ids for item in active),
             "imported_at": doc["imported_at"],
+            **tool_audit_metadata(doc),
             "source_completeness": doc.get('source_completeness', 'public-share-snapshot')}
 
 
@@ -295,6 +307,7 @@ def page(doc, args, action):
     return {"conversation_id": doc["conversation_id"], "revision": doc["revision"],
             "items": subset, "total": len(items), "returned": len(subset),
             "source_completeness": metadata(doc)['source_completeness'],
+            **tool_audit_metadata(doc),
             "next_cursor": cursor_next(doc["revision"], page_kind, direction, nxt) if nxt < len(items) else None}
 
 
@@ -309,7 +322,8 @@ def metadata(doc):
             "source_completeness": doc.get('source_completeness') or (
                 "local-log" if doc["source_type"] == "codex-local" else "public-share-snapshot"),
             "upstream_tool_calls_available": False if doc['source_type'] == 'chatgpt-rendered' else None,
-            "alternative_branches_available": False if doc['source_type'] == 'chatgpt-rendered' else None}
+            "alternative_branches_available": False if doc['source_type'] == 'chatgpt-rendered' else None,
+            **tool_audit_metadata(doc)}
 
 
 def export(doc, args):

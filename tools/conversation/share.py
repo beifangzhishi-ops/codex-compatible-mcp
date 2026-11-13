@@ -160,7 +160,13 @@ class _RenderedMessages(HTMLParser):
     def handle_starttag(self, tag, attrs):
         attributes = dict(attrs)
         parent_hidden = self.stack[-1]['hidden'] if self.stack else False
-        hidden = (parent_hidden or tag in ('script', 'style', 'svg', 'template', 'noscript')
+        # Cloud Share SSR places the *actual assistant answer* inside a
+        # <noscript> fallback within the message. The client hydrates that
+        # content in the browser; treating every noscript as hidden silently
+        # drops the entire answer and leaves only the thinking-duration label.
+        # Keep noscript outside a recognized message excluded.
+        hidden = (parent_hidden or tag in ('script', 'style', 'svg', 'template')
+                  or (tag == 'noscript' and self.current is None)
                   or 'hidden' in attributes or attributes.get('aria-hidden') == 'true'
                   or 'data-assistant-placeholder-slot' in attributes
                   or 'data-message-actions' in attributes

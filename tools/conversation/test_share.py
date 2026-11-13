@@ -39,6 +39,27 @@ class ParserTests(unittest.TestCase):
   self.assertNotIn('Secret',str(records))
   self.assertEqual(records[1]['parent'],'u1')
   self.assertEqual(records[1]['children'],['u2'])
+ def test_rendered_assistant_noscript_ssr_keeps_answer_but_excludes_controls(self):
+  html='''<body>
+  <noscript>Enable JavaScript to continue</noscript>
+  <li data-message-role="user" id="u"><p>Question</p></li>
+  <li data-message-role="assistant" id="a">
+    <span>Thought for 1m 2s</span>
+    <noscript><div><p>Complete answer <strong>with evidence</strong>.</p>
+      <ul><li>First result</li><li>Second result</li></ul>
+    </div></noscript>
+    <div data-message-actions=""><button>Copy</button></div>
+    <span aria-hidden="true">Hidden decoration</span>
+  </li></body>'''
+  records=e.rendered_share_records(html)
+  self.assertEqual(len(records),2)
+  answer=records[1]['text']
+  self.assertIn('Thought for 1m 2s',answer)
+  self.assertIn('Complete answer with evidence.',answer)
+  self.assertIn('First result',answer)
+  self.assertIn('Second result',answer)
+  self.assertNotIn('Copy',answer)
+  self.assertNotIn('Hidden decoration',answer)
  def test_rendered_share_fails_closed_on_shell_and_recovery_placeholders(self):
   for html in ('<body>Not a share</body>',
                '<li data-message-role="assistant" data-conversation-recovery="">Retry</li>',

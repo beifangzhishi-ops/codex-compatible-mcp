@@ -9,6 +9,41 @@ import conversation as c
 
 
 class ConversationTests(unittest.TestCase):
+    def test_public_share_tool_records_report_redaction_not_original_output(self):
+        def node(role, text, name=None):
+            return {'parent': None, 'children': [], 'message': {
+                'author': {'role': role, 'name': name},
+                'content': {'content_type': 'text', 'parts': [text]}}}
+        nodes = {
+            'u': node('user', 'Check the result'),
+            'c': node('assistant', '', None),
+            'tool': node('tool', 'The output of this plugin was redacted.', 'functions.exec'),
+            'final': node('assistant', 'Task finished'),
+        }
+        with (patch.object(c.share, 'fetch', return_value='<html>fixture</html>'),
+              patch.object(c.share, 'extract_payload', return_value=['mapping', {}]),
+              patch.object(c.share, 'unpack', return_value=nodes),
+              patch.object(c.share, 'conversation_meta', return_value={
+                  'current_node': 'final', 'title': 'Redacted public share'})):
+            imported = c.execute({'action': 'import',
+                                  'share_url': 'https://chatgpt.com/share/redacted-test',
+                                  'environment_id': '6v', 'branch': 'all'})
+        self.assertEqual(imported['public_tool_record_count'], 1)
+        self.assertEqual(imported['redacted_tool_result_count'], 1)
+        ref = imported['conversation_id']
+        read = c.execute({'action': 'thread/read', 'conversation_id': ref,
+                          'environment_id': '6v'})
+        self.assertEqual(read['redacted_tool_result_count'], 1)
+        items = c.execute({'action': 'thread/items/list', 'conversation_id': ref,
+                           'environment_id': '6v', 'mode': 'full'})
+        self.assertEqual(items['redacted_tool_result_count'], 1)
+        exported = c.execute({'action': 'export', 'conversation_id': ref,
+                              'environment_id': '6v', 'mode': 'full', 'format': 'json'})
+        data = json.loads(Path(exported['output_path']).read_text(encoding='utf-8'))
+        self.assertEqual(data['metadata']['redacted_tool_result_count'], 1)
+        self.assertEqual(next(r['text'] for r in data['messages'] if r['role'] == 'tool'),
+                         'The output of this plugin was redacted.')
+
     def test_rendered_work_share_offline_read_list_and_export_are_scoped(self):
         html = '''<html><head><title>Work test - ChatGPT</title></head><body>
         <li data-message-role="user" id="user-1"><p>Read my file</p></li>

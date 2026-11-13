@@ -391,7 +391,7 @@ export function registerSpecializedTools(registry, runtime) {
     supportsParallel: true,
     description: [
       "Read ChatGPT shared conversation links (聊天分享链接、共享对话), Codex shares and local Codex thread history. No workspace entry needed. For https://chatgpt.com/share/... or https://chatgpt.com/s/cx_... first import, then use conversation_id for thread/read, list or export. Re-import only to refresh.",
-      "Cloud Work shares may expose only rendered messages, not tool calls or alternate branches; source_completeness identifies this limit. Local Codex history uses thread_id and owning environment_id. Lists are paginated, and exports support Markdown/JSON. Do not use web search, browsing or BMG to retrieve shares; unavailable upstream content cannot be reconstructed.",
+      "Cloud Work shares may expose only rendered messages. Serialized ChatGPT shares can include tool records whose actual outputs are redacted: check redacted_tool_result_count, never treat a tool record as its original result. Local Codex history uses thread_id and environment_id. Lists are paginated; exports support Markdown/JSON. Do not use web search, browsing or BMG to retrieve shares; unavailable upstream content cannot be reconstructed.",
     ].join('\n\n'),
     inputSchema: {
       action: z.enum(['import', 'thread/read', 'thread/turns/list', 'thread/items/list', 'export']),
