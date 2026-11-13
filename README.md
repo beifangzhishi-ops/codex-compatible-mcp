@@ -10,7 +10,7 @@ Before modifying this repository, read and follow [AGENTS.md](AGENTS.md) for rep
 
 The Controller exposes one short MCP introduction (`src/controller/mcp-http-server.mjs`) and peer-tool descriptions in `src/tools/`. The introduction contains only CCM identity and the user's general Host-facing development preferences; task-specific discovery keywords, invocation instructions and safety-critical constraints belong in the corresponding tool descriptions. This avoids contaminating unrelated tool-search entries when a Host indexes server instructions alongside each tool. It does not guarantee Host discovery or model selection. Zod input/output schemas, MCP App visibility, execution policy, approvals, and Worker routing are unchanged by this prompt-only reduction.
 
-**Current source measurements (2026-11-13):** Controller introduction **1,036 characters**; descriptions of all **32 tools: 17,411 characters**, including **1,338** for `plan_patch`. These are source prompt/description characters, excluding JSON Schema payloads; they are not measured billable tokens or latency. Refresh/reconnect the Host plugin after deploying the Controller to load revised descriptions.
+**Current source measurements (2026-11-13):** Controller introduction **1,036 characters**; descriptions of all **27 tools: 14,703 characters**, including **1,338** for `plan_patch`. These are source prompt/description characters, excluding JSON Schema payloads; they are not measured billable tokens or latency. Refresh/reconnect the Host plugin after deploying the Controller to load revised descriptions.
 
 The MCP introduction also provides concise Host-facing work preferences: prefer native/API/CLI operations over keyboard and mouse automation; try an available proxy when overseas sites fail; request a decision before adding historical compatibility; remove obsolete project names/implementations and defensive documentation; read applicable `AGENTS.md` before project work; maintain `README.md` for current state and `AGENTS.md` for rules; give user-facing terminal commands with verified absolute paths. Documentation should state concrete work and results without repetitive disclaimers or self-justification. Root-cause fixes and focused-first validation are preferred. These preferences guide the Host model; they do not change sandbox, approvals or tool-discovery ownership.
 
@@ -193,7 +193,7 @@ persisted plan     -> may outlive MCP session lifetime
 When adding stateful features, choose an identity according to the feature's real lifecycle. Do not key durable intent solely by `Mcp-Session-Id` merely because it is convenient at the transport layer.
 
 ## MCP tools
-All 31 registered tools are equal peers in MCP `tools/list`. The Host controls discovery, selection, ordering, and parallel invocation. The public MCP wire names omit the namespace; the table below uses the qualified names for clarity. All can be invoked directly without a CCM discovery/dispatch wrapper.
+All 27 registered tools are equal peers in MCP `tools/list`. The Host controls discovery, selection, ordering, and parallel invocation. The public MCP wire names omit the namespace; the table below uses the qualified names for clarity. All can be invoked directly without a CCM discovery/dispatch wrapper.
 
 | Function | Tools |
 | --- | --- |
@@ -203,28 +203,15 @@ All 31 registered tools are equal peers in MCP `tools/list`. The Host controls d
 | Verification | `ccm.request_verification_input`, `ccm.get_verification_input_status`, `ccm.submit_verification_input` |
 | Plans and restarts | `ccm.plan_patch`, `ccm.plan_read`, `ccm.restart` |
 | File transfer and publishing | `ccm-extra.transfer_path`, `ccm-extra.transfer_status`, `ccm-extra.transfer_cancel`, `ccm-extra.publish`, `ccm-extra.publish_card`, `ccm-extra.import_chatgpt_file` |
-| External workflows | `ccm-extra.conversation`, `ccm-extra.quark_upload`, `ccm-extra.bilibili_download_dash`, `ccm-extra.qq`, `ccm-extra.wechat`, `ccm-extra.transcribe`, `ccm-extra.sjtu_mail` |
+| External workflows | `ccm-extra.conversation`, `ccm-extra.quark_upload` |
 
 The approval-status/resolution and verification-status/submission bridges are registered in the same MCP list but marked `ui.visibility=["app"]`, so only their corresponding MCP Apps should invoke them. `request_approval` and `request_verification_input` are model-callable tools that present those Apps. The tools themselves retain their original authorization, argument validation and file-safety contracts.
 
 Ordinary repository inspection, search, Git, builds, tests, and diagnostics should use `exec_command`.
 
-### Local CLI passthrough (QQ, WeChat, transcription, SJTU email)
+### On-demand local app Skills
 
-Four dedicated top-level tools expose the local application CLIs without asking the model to construct PowerShell:
-
-| MCP tool | Target | Arguments and routing |
-| --- | --- | --- |
-| `qq` | 6v `C:\\Users\\Songjx\\Documents\\ChatGPT\\QQBridge\\qq.exe` | `args: ["recent", "count=10"]`, or any documented QQBridge CLI tokens |
-| `wechat` | 6v `C:\\Users\\Songjx\\Documents\\ChatGPT\\WXBridge\\WXBridge.exe` | `args: ["chats"]` or `["messages", "--chat", "name"]`; read-only Bridge |
-| `sjtu_mail` | 6v `C:\\Users\\Songjx\\AppData\\Local\\Programs\\himalaya\\himalaya.exe` | `args: ["envelope", "list"]`; no Gmail proxy/fallback |
-| `transcribe` | Windows Worker Python 3.9 Faster Whisper | `args: ["D:\\\\audio.wav", "--language", "ja"]`; 6v default, `environment_id` may select another installed Worker |
-
-`transcribe` uses only a minimal bundled command-line entry (`tools/faster-whisper/transcribe.py`), defaults to the `large-v3-turbo` model, and writes JSON segments with `start`, `end`, and `text` to stdout. The caller provides an existing local audio file; neither the tool nor this shim downloads media. Normal Python/Faster Whisper traceback text remains on stderr.
-
-Each integration pins its executable: the model passes an **array of argument tokens**, not a shell command, executable path or script. The Worker starts that process with `shell=false`, captures its stdout and stderr without parsing, and returns them as separate MCP text blocks plus the original exit code in structured content. Nonzero exits are errors; if the executable (or the transcription entry file) is absent, the result is exactly `不存在`. The Worker does not retry sends or mutate the output. There is a 20 MiB aggregate capture limit and caller-controlled timeout; larger MCP responses are additionally subject to the Controller/Host result-size limits.
-
-These are explicit, owner-authorized application adapters: **they use Worker-side subprocess execution rather than the `exec_command` workspace sandbox and approval flow**. They accept only the fixed programs above, strip `CCM_*` bootstrap environment variables, and do not permit an arbitrary executable. The three messaging/mail adapters are routed to 6v only; the transcription adapter needs Python 3.9 with `faster_whisper` installed on the selected Windows Worker. Refresh ChatGPT's tool list after deploying these new MCP peers. A disconnected Worker cannot be validated or used until it reconnects.
+QQ, WeChat, SJTU Mail, local transcription, BMG browser and Bilibili DASH now use the six independently discoverable Skills in `plugins/local-computer-tools/skills/` (private **Local Computer Tools** plugin). They expose no CCM MCP adapters. Codex installs the same Skill files in `%USERPROFILE%\.codex\skills`. Keep the four basic CLI Skills limited to computer and path; BMG and Bilibili include their local invocation and permission-sensitive handoff instructions. Use `exec_command` on 6v only when the user requests one of these workflows; `quark_upload` stays directly callable.
 
 ### Verification input card
 
@@ -306,7 +293,7 @@ CCM exposes optional specialized workflows as ordinary peer tools alongside its 
 - `ccm-extra.transfer_status({transfer_id})` reports file/byte progress and terminal state; `ccm-extra.transfer_cancel({transfer_id})` requests cancellation and safe cleanup. Transfers run in a Controller-owned task independent of the Controller result lifetime; terminal status is retained for up to 24 hours. On a failure, cancellation, or restart, cleanup removes only objects that can still be proven to belong to this transfer; unsafe or externally modified leftovers are preserved and reported. Initial version does not resume interrupted copies.
 - File contents take the Worker A → Controller/WorkerHub → Worker B route as bounded, ordered 4 MiB Base64 chunks over the existing JSON-RPC WorkerHub connection (24 MiB message ceiling). Each chunk is acknowledged before the next, with socket backpressure, bounded task concurrency, source change checks, and full-file SHA-256 verification. File contents are neither exposed in ChatGPT tool results nor placed into the Controller's public download cache. WorkerHub's underlying TCP protocol is not itself TLS; remote link encryption depends on the deployment (for example Tailscale/WireGuard). No extra HTTP listener, certificate, port forwarding, or Tailscale-specific address is required by this tool. Both Workers must be connected to the same Controller.
 - `ccm-extra.quark_upload` is a peer tool, submits one or more files through that local Quark desktop session, and can wait for verified completion.
-- `ccm-extra.bilibili_download_dash` uses BMGCTL in the logged-in Bilibili browser on 6v to select real account-authorized DASH representations, then a one-shot localhost `tools/bilibili-download/bridge.py` to hand signed URLs and selected video height into an ignored local file. BMGCTL redacts signed URLs in tool results: do not pass these through the model. The browser currently rejects loopback CORS requests: POST a JSON body using `mode: 'no-cors'` and `Content-Type: text/plain`, then **require `BRIDGE_RECEIVED`** from the local Bridge (an opaque browser response cannot confirm success). Invoke the tool with **required `browser_tab_id`** from `get_windows_and_tabs` and `output_path` as a filename (e.g. `video.mp4`, not an absolute path), plus optional timeout. **Before downloading**, `pause_video.py` verifies the exact Bilibili tab and automatically pauses/acknowledges its video elements via BMGCTL; missing tab, browser outage, or unverifiable pause **fails closed before transfer**, and the one-shot handoff is deleted. BMGCTL subprocess output must be decoded as UTF-8 on Windows. The 6v projectless Worker writes the MP4 inside the returned `workspace_root`; use the returned `workspace_handle` to access or publish it subject to the Controller file-size limit. Python downloads with curl.exe, remuxes via `ffmpeg -c copy`, checks resolution and audio with ffprobe. Verified a 1920x1080 HEVC + AAC MP4 with automatic pause in a real logged-in 6v browser on 2026-11-05. See `tools/bilibili-download/README.md`.
+- Bilibili authenticated DASH downloading is documented by the on-demand `bilibili-dash` Skill and `tools/bilibili-download/README.md`. The local `bridge.py` and `download-dash.py` remain available via CCM `exec_command` with the same 6v projectless workspace. The browser-local POST must be confirmed by `BRIDGE_RECEIVED`, and the downloader verifies/pauses the exact Bilibili tab before downloading, remuxing, and checking audio/resolution.
 
 All specialized tools are direct MCP peers. The Host handles their selection and orchestration. Continue live process sessions directly with `write_stdin`.
 

@@ -5,7 +5,6 @@ import {
 } from './protocol.mjs';
 import { sendWorkerMessage as send } from './message-send.mjs';
 import { runConversationAction } from './conversation-service.mjs';
-import { runCliPassthrough } from './cli-passthrough.mjs';
 
 
 class RemoteWorkerDispatchError extends Error {
@@ -215,8 +214,6 @@ export class RemoteWorkerClient {
         return { accepted: true };
       case 'exec_command':
         return this.runtime.processManager.execCommand(params);
-      case 'cli_passthrough':
-        return runCliPassthrough(params);
       case 'write_stdin':
         return this.runtime.processManager.writeStdin(params);
       case 'apply_patch':
