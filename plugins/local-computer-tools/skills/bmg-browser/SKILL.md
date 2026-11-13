@@ -1,9 +1,18 @@
 ---
 name: bmg-browser
-description: "Use when the user explicitly asks to use BMG or its managed Edge browser to visit, read or interact with websites."
+description: "Use BMG for 知乎 (Zhihu) links, 闲鱼 (Xianyu) product searches, 微信公众号 (WeChat Official Account) articles, or when the user explicitly requests BMG. For other tasks prefer lighter tools."
 ---
 
 # BMG local browser
+
+## Tool selection and authorization
+
+- BMG is relatively slow and resource-heavy. For tasks outside this Skill's `description`, prefer lighter Web, API, and CLI options.
+- When the task matches the scenarios in `description`, or the user explicitly asks for BMG, use BMG directly without asking for separate tool-use permission. Continue using BMG for follow-up tasks in the same category without repeated confirmation. When the task changes to another category, choose tools again; do not carry the BMG preference across categories.
+- For other categories, do not automatically switch to BMG even if lighter tools fail. If BMG is genuinely necessary, ask the user and use it only after they agree.
+- Choosing BMG does not authorize unrelated actions. Follow the user's instructions and all underlying CCM execution and approval requirements; do not add a separate BMG usage-approval step. Check current CLI/browser availability instead of assuming that a previous successful call guarantees availability.
+
+## Local invocation
 
 - Computer: **6v** (`DESKTOP-KFL6V1F`)
 - CLI: `C:\Users\Songjx\Documents\ChatGPT\browser-mcp-gateway\bmgctl.cmd`
