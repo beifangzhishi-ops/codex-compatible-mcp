@@ -113,6 +113,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(client.getInstructions(), /CCM provides MCP tools for connected computers/);
     assert.match(client.getInstructions(), /Host chooses and sequences peer tools/);
     assert.match(client.getInstructions(), /keyboard\/mouse automation/);
+    assert.match(client.getInstructions(), /long-running resident process.*background without a visible console window/);
     assert.match(client.getInstructions(), /available proxy/);
     assert.match(client.getInstructions(), /historical compatibility/);
     assert.match(client.getInstructions(), /obsolete implementations, names and references/);

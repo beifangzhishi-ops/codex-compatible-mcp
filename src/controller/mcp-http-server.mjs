@@ -57,6 +57,7 @@ function createProtocolServer(
     instructions: [
       "CCM provides MCP tools for connected computers and project workflows. The Host chooses and sequences peer tools; use each tool's description for task-specific routing and invocation.",
       "Prefer native tools, APIs or CLI; do not use keyboard/mouse automation by default.",
+      "Start every long-running resident process in the background without a visible console window; keep its supervision and logs.",
       "If GitHub or another overseas site fails, retry through an available proxy.",
       "Ask the user before adding historical compatibility in development.",
       "When developing or writing docs, remove obsolete implementations, names and references in the project; ask before retaining any, including in defensive wording.",
