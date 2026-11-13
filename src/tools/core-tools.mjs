@@ -831,6 +831,7 @@ export function registerCoreTools(registry, runtime) {
     supportsParallel: true,
     description: [
       "Run a shell command using pipes (tty=true for PTY); return output or a session_id for write_stdin. Reuse workspace_handle for routing/cwd and session ownership; its read scope follows the Worker, while ordinary writes follow the workspace sandbox.",
+      "Start all resident/long-running processes in the background without visible console windows. On Windows, use a no-console process launch mode, not merely a hidden parent terminal. Keep supervision and logs.",
       "Native Codex ExecPolicy .rules decides Allow (Full Access), Prompt (approval), Forbidden (deny); unmatched commands remain sandboxed. Trusted package scripts are workspace/script-hash bound.",
       "For a command requiring escalation, set sandbox_permissions=require_escalated, give justification and accurate review_context. When enabled, Guardian may allow one frozen execution, deny it, or fall back to a human approval card. If approval_required=true call request_approval, never reissue the action.",
       "For repeatable build/test/dev escalation, proactively supply a practical prefix_rule: stable executable, subcommand, script and fixed options, excluding variable suffixes. Do not use a bare generic shell/interpreter. Always allow saves the prefix across Workers; do not pass prefix_rule on ordinary commands.",

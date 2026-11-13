@@ -113,7 +113,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(client.getInstructions(), /CCM provides MCP tools for connected computers/);
     assert.match(client.getInstructions(), /Host chooses and sequences peer tools/);
     assert.match(client.getInstructions(), /keyboard\/mouse automation/);
-    assert.match(client.getInstructions(), /long-running resident process.*background without a visible console window/);
+    assert.doesNotMatch(client.getInstructions(), /resident\/long-running processes|visible console windows/);
     assert.match(client.getInstructions(), /available proxy/);
     assert.match(client.getInstructions(), /historical compatibility/);
     assert.match(client.getInstructions(), /obsolete implementations, names and references/);
@@ -161,6 +161,8 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(toolDescription('unregister_workspace'), /Always requires a one-shot CCM approval card/);
     assert.match(toolDescription('request_approval'), /Do not recreate or retry/);
     const commandTool = listed.tools.find((tool) => tool.name === 'exec_command');
+    assert.match(commandTool.description, /resident\/long-running processes in the background without visible console windows/);
+    assert.match(commandTool.description, /no-console process launch mode, not merely a hidden parent terminal/);
     assert.match(commandTool.description, /proactively supply a practical prefix_rule/);
     assert.match(commandTool.description, /run_as_admin=true uses an unrestricted administrator Agent after one-shot Guardian\/human approval/);
     assert.match(commandTool.description, /proactively consider run_as_admin=true/);
