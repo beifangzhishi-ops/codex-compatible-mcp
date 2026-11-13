@@ -76,25 +76,41 @@ def import_share(args, env):
         title = original.get("title") or "Codex shared conversation"
         raw = {"snapshot": original}
     else:
-        original = share.extract_payload(payload)
-        nodes = share.unpack(original)
-        meta = share.conversation_meta(original)
-        records = [share.message_record(key, value) for key, value in nodes.items()]
-        records = [r for r in records if r]
-        active = share.active_branch(nodes, meta.get("current_node"))
-        title = meta.get("title") or meta.get("og_title") or share.title_from_html(payload)
-        raw = {"indexed_payload": original, "metadata": meta}
+        try:
+            original = share.extract_payload(payload)
+        except RuntimeError as error:
+            if str(error) != 'No supported ChatGPT Share serialized conversation payload found':
+                raise
+            # Cloud Work shares can expose rendered messages without a serialized
+            # mapping. This must not be presented as the full upstream thread.
+            records = share.rendered_share_records(payload)
+            kind = 'chatgpt-rendered'
+            active = [r['id'] for r in records]
+            title = share.title_from_html(payload)
+            raw = {'format': 'rendered-messages', 'upstream_tool_calls_available': False,
+                   'alternative_branches_available': False}
+        else:
+            nodes = share.unpack(original)
+            meta = share.conversation_meta(original)
+            records = [share.message_record(key, value) for key, value in nodes.items()]
+            records = [r for r in records if r]
+            active = share.active_branch(nodes, meta.get("current_node"))
+            title = meta.get("title") or meta.get("og_title") or share.title_from_html(payload)
+            raw = {"indexed_payload": original, "metadata": meta}
     digest = hashlib.sha256((env + "\n" + branch + "\n" + url).encode()).hexdigest()
     doc = {"schema_version": 1, "source_type": kind, "source_url": url,
            "environment_id": env, "branch": branch, "title": title,
            "revision": str(uuid.uuid4()), "imported_at": datetime.now(timezone.utc).isoformat(),
            "records": records, "active_ids": active, "raw": raw}
+    if kind == 'chatgpt-rendered':
+        doc['source_completeness'] = 'rendered-messages-only'
     save_atomic(store_path(digest), doc)
     present_ids = {record["id"] for record in records}
     return {"conversation_id": f"share:{env}:{digest}", "source_type": kind,
             "revision": doc["revision"], "title": title, "total_items": len(records),
             "active_items": sum(item in present_ids for item in active),
-            "imported_at": doc["imported_at"]}
+            "imported_at": doc["imported_at"],
+            "source_completeness": doc.get('source_completeness', 'public-share-snapshot')}
 
 
 def find_local(thread_id):
@@ -278,6 +294,7 @@ def page(doc, args, action):
     nxt = offset + len(subset)
     return {"conversation_id": doc["conversation_id"], "revision": doc["revision"],
             "items": subset, "total": len(items), "returned": len(subset),
+            "source_completeness": metadata(doc)['source_completeness'],
             "next_cursor": cursor_next(doc["revision"], page_kind, direction, nxt) if nxt < len(items) else None}
 
 
@@ -289,7 +306,10 @@ def metadata(doc):
             "imported_at": doc.get("imported_at"), "thread_metadata": doc.get("meta"),
             "branch": doc.get("branch"), "file_bytes": doc.get("file_bytes"),
             "last_modified_at": doc.get("last_modified_at"),
-            "source_completeness": "local-log" if doc["source_type"] == "codex-local" else "public-share-snapshot"}
+            "source_completeness": doc.get('source_completeness') or (
+                "local-log" if doc["source_type"] == "codex-local" else "public-share-snapshot"),
+            "upstream_tool_calls_available": False if doc['source_type'] == 'chatgpt-rendered' else None,
+            "alternative_branches_available": False if doc['source_type'] == 'chatgpt-rendered' else None}
 
 
 def export(doc, args):
@@ -314,6 +334,9 @@ def export(doc, args):
         content = json.dumps(data, ensure_ascii=False, indent=2)
     else:
         lines = ["# " + doc["title"], ""]
+        if doc['source_type'] == 'chatgpt-rendered':
+            lines.extend(["> Source: rendered ChatGPT Work/Share messages only. Tool calls,"
+                          " hidden content, timestamps and alternative branches are not available.", ""])
         for rec in records:
             lines.extend(["## " + (rec.get("role") or "item"), "", rec.get("visible_text") or rec.get("text") or "", ""])
             if mode == "full":

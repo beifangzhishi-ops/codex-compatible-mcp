@@ -9,6 +9,42 @@ import conversation as c
 
 
 class ConversationTests(unittest.TestCase):
+    def test_rendered_work_share_offline_read_list_and_export_are_scoped(self):
+        html = '''<html><head><title>Work test - ChatGPT</title></head><body>
+        <li data-message-role="user" id="user-1"><p>Read my file</p></li>
+        <li data-message-role="assistant" id="assistant-1"><p>Completed &amp; checked</p></li>
+        <li data-message-role="assistant" data-conversation-recovery="">Retry</li>
+        <script>const sensitive = "should not persist";</script></body></html>'''
+        with patch.object(c.share, "fetch", return_value=html):
+            imported = c.execute({"action": "import", "share_url": "https://chatgpt.com/share/work-test",
+                                  "environment_id": "6v", "branch": "all"})
+        ref = imported["conversation_id"]
+        self.assertEqual(imported["source_type"], "chatgpt-rendered")
+        self.assertEqual(imported["total_items"], 2)
+        self.assertEqual(imported["source_completeness"], "rendered-messages-only")
+        with patch.object(c.share, "fetch", side_effect=RuntimeError("Offline read refetched")):
+            info = c.execute({"action": "thread/read", "conversation_id": ref, "environment_id": "6v"})
+            self.assertEqual(info["turn_count"], 1)
+            self.assertFalse(info["upstream_tool_calls_available"])
+            self.assertFalse(info["alternative_branches_available"])
+            items = c.execute({"action": "thread/items/list", "conversation_id": ref,
+                               "environment_id": "6v", "mode": "full"})
+            self.assertEqual(items["total"], 2)
+            self.assertEqual(items["source_completeness"], "rendered-messages-only")
+            turns = c.execute({"action": "thread/turns/list", "conversation_id": ref,
+                               "environment_id": "6v"})
+            self.assertEqual(turns["items"][0]["item_count"], 2)
+            exported = c.execute({"action": "export", "conversation_id": ref,
+                                  "environment_id": "6v", "mode": "full", "format": "json"})
+            data = json.loads(Path(exported["output_path"]).read_text(encoding="utf-8"))
+            self.assertEqual(len(data["messages"]), 2)
+            self.assertEqual(data["source_data"]["format"], "rendered-messages")
+            self.assertNotIn("should not persist", json.dumps(data))
+            markdown = c.execute({"action": "export", "conversation_id": ref,
+                                  "environment_id": "6v", "format": "md"})
+            md = Path(markdown["output_path"]).read_text(encoding="utf-8")
+            self.assertIn("rendered ChatGPT Work/Share messages only", md)
+            self.assertIn("Completed & checked", md)
     def setUp(self):
         # Stable ignored fixture root avoids restricted Windows temp-directory ACLs.
         self.root = Path(__file__).resolve().parents[2] / ".cache" / "conversation-tests"

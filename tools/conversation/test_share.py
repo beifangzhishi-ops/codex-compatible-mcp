@@ -16,6 +16,35 @@ def temporary_output(suffix):
  finally:out.unlink(missing_ok=True)
 
 class ParserTests(unittest.TestCase):
+ def test_rendered_work_share_extracts_only_visible_message_containers(self):
+  html='''<!doctype html><title>Work &amp; Share</title><body><ul>
+   <li data-message-role="user" id="u1"><h4 aria-label="You said:"></h4><p>Hi &amp; welcome</p><img alt="" /></li>
+   <li data-message-role="assistant" id="a1"><h4 aria-label="ChatGPT said:"></h4>
+      <p>Answer <strong>one</strong></p><pre>line 1\nline 2</pre>
+      <div data-message-actions=""><button>Copy</button></div>
+      <script>secret = 'data-message-role="user"'</script></li>
+   <li data-message-role="assistant" data-conversation-recovery="">Retry</li>
+   <li aria-hidden="true" data-message-role="assistant" id="hidden">Secret</li>
+   <li data-message-role="user" id="u2"><p>Next question</p></li>
+  </ul></body>'''
+  records=e.rendered_share_records(html)
+  self.assertEqual([r['id'] for r in records],['u1','a1','u2'])
+  self.assertEqual([r['role'] for r in records],['user','assistant','user'])
+  self.assertEqual([r['turn_index'] for r in records],[0,0,1])
+  self.assertIn('Hi & welcome',records[0]['text'])
+  self.assertIn('Answer one',records[1]['text'])
+  self.assertIn('line 1\nline 2',records[1]['text'])
+  self.assertNotIn('Copy',records[1]['text'])
+  self.assertNotIn('Retry',str(records))
+  self.assertNotIn('Secret',str(records))
+  self.assertEqual(records[1]['parent'],'u1')
+  self.assertEqual(records[1]['children'],['u2'])
+ def test_rendered_share_fails_closed_on_shell_and_recovery_placeholders(self):
+  for html in ('<body>Not a share</body>',
+               '<li data-message-role="assistant" data-conversation-recovery="">Retry</li>',
+               '<script>"data-message-role=\\"user\\""</script>'):
+   with self.subTest(html=html),self.assertRaises(RuntimeError):
+    e.rendered_share_records(html)
  def test_ca_bundle_prefers_explicit_environment_file(self):
   with tempfile.NamedTemporaryFile() as f:
    with patch.dict(os.environ,{'SSL_CERT_FILE':f.name},clear=False):

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import importlib, json, os, re, ssl, time
+from html.parser import HTMLParser
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
@@ -130,6 +131,113 @@ def extract_payload(html):
             j+=1
         start=html.find(marker,start+len(marker))
     raise RuntimeError('No supported ChatGPT Share serialized conversation payload found')
+
+
+_RENDERED_BLOCKS = frozenset((
+    'article', 'blockquote', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'li', 'ol', 'p', 'pre', 'section', 'table', 'tr', 'ul',
+))
+_RENDERED_VOID = frozenset((
+    'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+    'link', 'meta', 'param', 'source', 'track', 'wbr',
+))
+
+
+class _RenderedMessages(HTMLParser):
+    """Read only explicit, server-rendered Share message containers.
+
+    This is not a substitute for an upstream conversation snapshot: tool calls,
+    other branches, timestamps and hidden message content may not be rendered.
+    CSS class names and localized attribution labels are intentionally ignored.
+    """
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.stack = []
+        self.current = None
+        self.messages = []
+
+    def handle_starttag(self, tag, attrs):
+        attributes = dict(attrs)
+        parent_hidden = self.stack[-1]['hidden'] if self.stack else False
+        hidden = (parent_hidden or tag in ('script', 'style', 'svg', 'template', 'noscript')
+                  or 'hidden' in attributes or attributes.get('aria-hidden') == 'true'
+                  or 'data-assistant-placeholder-slot' in attributes
+                  or 'data-message-actions' in attributes
+                  or 'data-copy-message' in attributes
+                  or 'data-conversation-recovery' in attributes)
+        role = attributes.get('data-message-role')
+        root = (self.current is None and not hidden and role in ('user', 'assistant'))
+        self.stack.append({'tag': tag, 'hidden': hidden, 'root': root})
+        if root:
+            self.current = {'id': attributes.get('id'), 'role': role,
+                            'parts': [], 'images': 0}
+        elif self.current is not None and not hidden:
+            if tag in _RENDERED_BLOCKS or tag in ('br', 'hr'):
+                self.current['parts'].append('\n')
+            if tag == 'img':
+                self.current['images'] += 1
+            if tag in ('td', 'th'):
+                self.current['parts'].append('\t')
+        if tag in _RENDERED_VOID:
+            self.stack.pop()
+
+    def handle_endtag(self, tag):
+        index = next((i for i in range(len(self.stack) - 1, -1, -1)
+                      if self.stack[i]['tag'] == tag), None)
+        if index is None:
+            return
+        for frame in reversed(self.stack[index:]):
+            if self.current is not None and not frame['hidden'] and frame['tag'] in _RENDERED_BLOCKS:
+                self.current['parts'].append('\n')
+            if frame['root']:
+                self._finish()
+        del self.stack[index:]
+
+    def handle_data(self, value):
+        if self.current is not None and self.stack and not self.stack[-1]['hidden']:
+            self.current['parts'].append(value)
+
+    def _finish(self):
+        message = self.current
+        self.current = None
+        body = ''.join(message['parts']).replace('\r', '')
+        body = re.sub(r'[ \t]+\n', '\n', body)
+        body = re.sub(r'\n[ \t]+', '\n', body)
+        body = re.sub(r'\n{3,}', '\n\n', body).strip()
+        if not body and message['images']:
+            body = '[image]'
+        if body:
+            self.messages.append((message['id'], message['role'], body))
+
+
+def rendered_share_records(html):
+    """Extract visible messages from newer Cloud Work / SSR ChatGPT Shares.
+
+    No HTML, scripts, cookies or other page state are persisted: only the
+    normalized visible message text and stable message IDs are retained.
+    """
+    if not isinstance(html, str) or 'data-message-role' not in html:
+        raise RuntimeError('No supported ChatGPT Share serialized conversation or rendered messages found')
+    parser = _RenderedMessages()
+    parser.feed(html)
+    parser.close()
+    if not parser.messages or not any(role == 'user' for _, role, _ in parser.messages):
+        raise RuntimeError('ChatGPT Share has no readable rendered conversation messages')
+    records, used_ids, turn = [], set(), -1
+    for index, (original_id, role, body) in enumerate(parser.messages):
+        mid = original_id if original_id and original_id not in used_ids else f'rendered-{index}'
+        used_ids.add(mid)
+        if role == 'user' or turn < 0:
+            turn += 1
+        records.append({'id': mid, 'role': role, 'type': 'rendered_message',
+                        'turn_index': turn, 'text': body, 'visible_text': body,
+                        'content': {'content_type': 'rendered_text', 'text': body},
+                        'metadata': {'rendered_only': True}})
+    for index, record in enumerate(records):
+        record['parent'] = records[index - 1]['id'] if index else None
+        record['children'] = [records[index + 1]['id']] if index + 1 < len(records) else []
+    return records
 
 def unpack(D):
     cache={}
