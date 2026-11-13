@@ -1,10 +1,10 @@
 # CCM Conversation Tool
 
-The single deferred tool **ccm-extra.conversation** handles public ChatGPT shares, including cloud Work conversations, Codex sharing links, and local Codex threads. No browser automation or BMG is used for importing.
+The single deferred tool **ccm-extra.conversation** handles public ChatGPT shares, including cloud Work conversations, Codex sharing links, and local Codex threads. The implementations are separated into one web Chat/Work parser (`share.py`) and one Codex parser (`codex.py`), including Codex JSON share turns and native local JSONL sessions. The shared URL classifier and HTTP fetcher remain in `share.py`; there is no third Work parser. No browser automation or BMG is used for importing.
 
 - Import a public share with action `import`, `share_url`, and optional `environment_id` and `branch`. The selected Worker fetches and validates the source, then atomically persists original data and normalized records under ignored `.state/conversations/`. A successful import returns `conversation_id`.
 - Read the saved snapshot offline using `thread/read`, `thread/turns/list`, or `thread/items/list` with the returned ID and the same Worker. Lists support `cursor`, `limit`, `sort_direction`, and items support `turn_id` and `mode`. Re-importing refreshes the snapshot; old cursors are rejected.
-- For local Codex, supply `thread_id` (UUID) and the Worker environment instead of importing. The configured `codex.home` (default `~/.codex`) restricts lookups to native Codex session and archived-session files.
+- For local Codex, supply `thread_id` as the session UUID or the official `codex://threads/<uuid>` deep link, plus the owning Worker environment. A naked UUID or deep link is also accepted in `conversation_id` for read/list/export. The deep link is interpreted as a read-only local session reference: CCM does not invoke or open the Codex app. The configured `codex.home` (default `~/.codex`) restricts lookups to native Codex session and archived-session files. `codex://threads/new` is not a stored session; unrelated/decorated links are rejected.
 - Export an imported or local thread with `action=export` and `format=md/json`, `mode=text/full`. Export output is stored under ignored `.cache/conversation/`. It can subsequently be published using `ccm-extra.publish`.
 
 Public-share imports inherit the selected Worker's dynamically reloaded child proxy policy and machine-local CA bundle. Proxy mode provides the same HTTP(S) proxy environment as ordinary commands; direct mode explicitly disables Python's Windows-registry proxy fallback. An explicit import proxy overrides the Worker mode for that request.
@@ -22,4 +22,5 @@ Example inputs:
 {"action":"thread/read","conversation_id":"share:worker-id:<hash>","environment_id":"worker-id"}
 {"action":"thread/turns/list","conversation_id":"share:worker-id:<hash>","environment_id":"worker-id","limit":20}
 {"action":"thread/items/list","thread_id":"01a1ad26-84a2-7b91-87bc-32b31a875889","environment_id":"DESKTOP-KFL6V1F","mode":"full","limit":5}
+{"action":"thread/read","thread_id":"codex://threads/01a1ad26-84a2-7b91-87bc-32b31a875889","environment_id":"DESKTOP-KFL6V1F"}
 ```

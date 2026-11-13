@@ -12,12 +12,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 
+import codex
 import share
 
 ROOT = Path(__file__).resolve().parents[2]
 STORE = ROOT / ".state" / "conversations"
 EXPORTS = ROOT / ".cache" / "conversation"
-UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$")
 SHARE_ID = re.compile(r"^share:([A-Za-z0-9_.-]{1,128}):([a-f0-9]{64})$")
 LOCAL_ID = re.compile(r"^codex:([A-Za-z0-9_.-]{1,128}):([0-9a-fA-F-]{36})$")
 ACTIONS = ("import", "thread/read", "thread/turns/list", "thread/items/list", "export")
@@ -76,7 +76,7 @@ def import_share(args, env):
     payload = share.fetch(url)
     if kind == "codex":
         original = json.loads(payload)
-        records = share.codex_records(original)
+        records = codex.share_records(original)
         active = [r["id"] for r in records]
         title = original.get("title") or "Codex shared conversation"
         raw = {"snapshot": original}
@@ -125,80 +125,11 @@ def import_share(args, env):
             "source_completeness": doc.get('source_completeness', 'public-share-snapshot')}
 
 
-def find_local(thread_id):
-    check(isinstance(thread_id, str) and UUID.fullmatch(thread_id), "thread_id must be a valid UUID")
-    matches = []
-    for base in (codex_home() / "sessions", codex_home() / "archived_sessions"):
-        if not base.is_dir():
-            continue
-        for path in base.rglob("*.jsonl"):
-            if path.name.lower().endswith(thread_id.lower() + ".jsonl"):
-                resolved = path.resolve()
-                check(resolved.is_relative_to(base.resolve()), "Codex session path escapes its home")
-                matches.append(resolved)
-    check(len(matches) == 1, "Codex thread not found" if not matches else "Duplicate Codex thread UUID")
-    return matches[0]
-
-
-def local_text(payload):
-    kind = payload.get("type")
-    if kind == "message":
-        result = []
-        for part in payload.get("content") or []:
-            if isinstance(part, dict):
-                if isinstance(part.get("text"), str):
-                    result.append(part["text"])
-                elif part.get("type") in ("input_image", "image"):
-                    result.append("[image]")
-        return "\n".join(result)
-    if kind == "custom_tool_call":
-        return str(payload.get("name") or "") + " " + str(payload.get("input") or "")
-    if kind in ("custom_tool_call_output", "function_call_output"):
-        return str(payload.get("output") or "")
-    if kind == "reasoning":
-        return "\n".join(str(p.get("text") or "") for p in payload.get("summary") or [] if isinstance(p, dict))
-    return ""
-
-
-def local_history(thread_id):
-    path = find_local(thread_id)
-    stat = path.stat()
-    records, turn, turns, metadata = [], None, [], {}
-    with path.open("rb") as stream:
-        fingerprint = hashlib.sha256(stream.read(min(stat.st_size, 65536))).hexdigest()
-        stream.seek(0)
-        for num, line in enumerate(stream, 1):
-            if not line.endswith(b"\n"):
-                break
-            row = json.loads(line)
-            payload = row.get("payload") or {}
-            if row.get("type") == "session_meta":
-                metadata = {k: payload.get(k) for k in ("id", "timestamp", "cwd", "cli_version", "source", "model_provider")}
-            if row.get("type") == "event_msg" and payload.get("type") == "task_started":
-                turn = str(payload.get("turn_id") or f"turn-{len(turns)}")
-                turns.append(turn)
-            kind = row.get("type")
-            text = local_text(payload) if kind == "response_item" else ""
-            role = payload.get("role") if kind == "response_item" and payload.get("type") == "message" else "tool"
-            records.append({"id": str(payload.get("id") or f"line-{num}"),
-                            "role": role or "tool",
-                            "type": payload.get("type") or kind, "source_type": kind,
-                            "channel": payload.get("phase"),
-                            "turn_id": turn, "create_time": row.get("timestamp"),
-                            "line": num, "text": text, "visible_text": text, "content": payload,
-                            "raw": row})
-    return {"source_type": "codex-local", "title": "Codex " + thread_id,
-            "records": records, "meta": metadata, "turn_ids": turns,
-            "revision": fingerprint + ":" + str(stat.st_dev) + ":" + str(stat.st_ino),
-            "thread_id": thread_id, "source_path": str(path), "file_bytes": stat.st_size,
-            "last_modified_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()}
-
-
 def load(args, env):
     ref = args.get("conversation_id") or args.get("thread_id")
     check(isinstance(ref, str), "conversation_id or thread_id is required")
-    if UUID.fullmatch(ref):
-        ref = f"codex:{env}:{ref.lower()}"
+    if ref.startswith("codex://") or codex.UUID.fullmatch(ref):
+        ref = f"codex:{env}:{codex.thread_uuid(ref)}"
     match = SHARE_ID.fullmatch(ref)
     if match:
         check(match[1] == env, "Shared conversation belongs to another environment")
@@ -210,7 +141,7 @@ def load(args, env):
         match = LOCAL_ID.fullmatch(ref)
         check(match is not None, "Invalid conversation ID")
         check(match[1] == env, "Codex conversation belongs to another environment")
-        doc = local_history(match[2])
+        doc = codex.local_history(match[2], codex_home())
     doc["conversation_id"] = ref
     doc["environment_id"] = env
     return doc

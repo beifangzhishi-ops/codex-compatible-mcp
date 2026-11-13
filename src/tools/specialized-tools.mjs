@@ -391,14 +391,14 @@ export function registerSpecializedTools(registry, runtime) {
     supportsParallel: true,
     description: [
       "Read ChatGPT shared conversation links (聊天分享链接、共享对话), Codex shares and local Codex thread history. No workspace entry needed. For https://chatgpt.com/share/... or https://chatgpt.com/s/cx_... first import, then use conversation_id for thread/read, list or export. Re-import only to refresh.",
-      "Cloud Work shares may expose only rendered messages. Serialized ChatGPT shares can include tool records whose actual outputs are redacted: check redacted_tool_result_count, never treat a tool record as its original result. Local Codex history uses thread_id and environment_id. Lists are paginated; exports support Markdown/JSON. Do not use web search, browsing or BMG to retrieve shares; unavailable upstream content cannot be reconstructed.",
+      "Chat and Work share one web parser; Codex uses a separate parser. Serialized ChatGPT shares may redact tool outputs: check redacted_tool_result_count. Local Codex sessions accept bare UUID or codex://threads/<uuid> via thread_id, without importing or opening the app; environment_id chooses the owning Worker. Lists are paginated, exports support Markdown/JSON. Do not use web search, browsing or BMG to retrieve shares; unavailable upstream content cannot be reconstructed.",
     ].join('\n\n'),
     inputSchema: {
       action: z.enum(['import', 'thread/read', 'thread/turns/list', 'thread/items/list', 'export']),
       share_url: z.string().url().optional().describe('Public ChatGPT or Codex share URL, required for import.'),
       proxy: z.string().url().optional().describe('Optional HTTP(S) proxy for importing a public shared conversation.'),
-      conversation_id: z.string().min(1).optional().describe('Opaque conversation ID returned by import or thread/read.'),
-      thread_id: z.string().uuid().optional().describe('Local Codex thread UUID; alternative to conversation_id for read/export.'),
+      conversation_id: z.string().min(1).optional().describe('Opaque conversation ID returned by import/read; also accepts a local Codex UUID or codex://threads/<uuid> deep link for direct reads.'),
+      thread_id: z.string().min(1).optional().describe('Local Codex session UUID or official codex://threads/<uuid> deep link for read/list/export. Resolved on the selected Worker; no share import needed.'),
       environment_id: z.string().optional().describe('CCM Worker storing the snapshot or local Codex history.'),
       branch: z.enum(['active', 'all']).optional().describe('ChatGPT share branch selection at import time; both branches are retained in the raw snapshot.'),
       turn_id: z.string().optional().describe('Filter thread/items/list to one turn.'),

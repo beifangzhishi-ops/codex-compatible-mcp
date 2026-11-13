@@ -207,6 +207,19 @@ class ConversationTests(unittest.TestCase):
         value = c.execute({"action": "thread/read", **request})
         self.assertEqual(value["item_count"], 6)
         self.assertEqual(value["turn_count"], 1)
+        self.assertEqual(value["conversation_id"], "codex:6v:" + thread_id)
+        deep_link = "codex://threads/" + thread_id
+        for reference in ({"thread_id": deep_link}, {"conversation_id": deep_link}):
+            with self.subTest(reference=reference):
+                linked = c.execute({"action": "thread/read",
+                                    "environment_id": "6v", **reference})
+                self.assertEqual(linked["conversation_id"], value["conversation_id"])
+                self.assertEqual(linked["revision"], value["revision"])
+                linked_items = c.execute({"action": "thread/items/list",
+                                          "environment_id": "6v", **reference})
+                self.assertEqual([item["text"] for item in linked_items["items"]], ["Hi"])
+        self.assertEqual(c.execute({"action": "thread/read", "environment_id": "6v",
+                                    "thread_id": deep_link.upper().replace("CODEX://THREADS/", "codex://threads/")})["item_count"], 6)
         text_items = c.execute({"action": "thread/items/list", **request})
         self.assertEqual([i["text"] for i in text_items["items"]], ["Hi"])
         full = c.execute({"action": "thread/items/list", "mode": "full", **request})
@@ -218,6 +231,19 @@ class ConversationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             c.execute({"action": "thread/read", "environment_id": "6v",
                        "thread_id": "../" + thread_id})
+        for bad_reference in (
+            "codex://threads/new",
+            "codex://threads/" + thread_id + "/",
+            "codex://threads/" + thread_id + "?path=other",
+            "codex://threads/" + thread_id + "#fragment",
+            "codex://settings/" + thread_id,
+            "codex://other/" + thread_id,
+            "codex://threads/" + thread_id + "/../../other",
+            "https://example.com/" + thread_id,
+        ):
+            with self.subTest(bad_reference=bad_reference), self.assertRaises(ValueError):
+                c.execute({"action": "thread/read", "environment_id": "6v",
+                           "thread_id": bad_reference})
         with self.assertRaisesRegex(ValueError, "not found"):
             c.execute({"action": "thread/read", "environment_id": "6v",
                        "thread_id": "00000000-0000-4000-8000-000000000001"})

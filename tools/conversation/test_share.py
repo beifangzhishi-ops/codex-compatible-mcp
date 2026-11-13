@@ -6,6 +6,8 @@ from unittest.mock import patch
 P=Path(__file__).with_name('share.py')
 spec=importlib.util.spec_from_file_location('share_export',P)
 e=importlib.util.module_from_spec(spec); spec.loader.exec_module(e)
+codex_spec=importlib.util.spec_from_file_location('codex_parser',P.with_name('codex.py'))
+codex=importlib.util.module_from_spec(codex_spec); codex_spec.loader.exec_module(codex)
 
 @contextmanager
 def temporary_output(suffix):
@@ -138,7 +140,7 @@ class ParserTests(unittest.TestCase):
    {'type':'futureItem','data':{'保留':'原始内容'}},
   ]},{'items':[{'type':'userMessage','content':[{'type':'image','url':'codex:shared-image-unavailable'}]}]}]}
  def test_codex_records_preserve_order_types_and_raw_items(self):
-  snapshot=self.codex_snapshot(); recs=e.codex_records(snapshot)
+  snapshot=self.codex_snapshot(); recs=codex.share_records(snapshot)
   self.assertEqual(len(recs),9)
   self.assertEqual([r['content'] for r in recs], [i for t in snapshot['turns'] for i in t['items']])
   self.assertEqual(recs[1]['channel'],'commentary')
@@ -150,7 +152,7 @@ class ParserTests(unittest.TestCase):
   self.assertEqual(len({r['id'] for r in recs}),9)
  def test_codex_rejects_unsupported_and_malformed_snapshots(self):
   for snapshot in ({'version':2,'turns':[]},{'version':True,'turns':[]},{'version':1,'turns':[{}]},{'version':1,'turns':[{'items':[None]}]}, {'version':1,'turns':[{'items':[{'type':'userMessage','content':'错误'}]}]}):
-   with self.subTest(snapshot=snapshot),self.assertRaises(ValueError):e.codex_records(snapshot)
+   with self.subTest(snapshot=snapshot),self.assertRaises(ValueError):codex.share_records(snapshot)
  def test_deleted_share_loader_error_is_reported_clearly(self):
   D=[
    {'_1':2},

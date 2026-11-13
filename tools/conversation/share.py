@@ -279,39 +279,6 @@ def message_record(mid,node):
     text='\n'.join(x for x in parts if isinstance(x,str)).strip() if isinstance(parts,list) else ''; nontext=[x for x in parts if isinstance(x,dict)] if isinstance(parts,list) else []; visible_text=text or ('[image]' if any(x.get('content_type')=='image_asset_pointer' for x in nontext) else ('[attachment]' if nontext else ''))
     return {'id':mid,'parent':node.get('parent'),'children':node.get('children') or [],'role':role,'author':a,'create_time':m.get('create_time'),'update_time':m.get('update_time'),'content':c,'text':text,'visible_text':visible_text,'status':m.get('status'),'end_turn':m.get('end_turn'),'weight':m.get('weight'),'metadata':m.get('metadata') or {},'recipient':m.get('recipient'),'channel':m.get('channel')}
 
-def codex_records(snapshot):
-    if not isinstance(snapshot,dict) or type(snapshot.get('version')) is not int or snapshot['version']!=1 or not isinstance(snapshot.get('turns'),list):
-        raise ValueError('不支持的 Codex 共享快照：需要 version=1 和 turns 数组')
-    recs=[]
-    for turn_index,turn in enumerate(snapshot['turns']):
-        if not isinstance(turn,dict) or not isinstance(turn.get('items'),list):
-            raise ValueError('Codex 共享快照的每个轮次必须包含 items 数组')
-        for item_index,item in enumerate(turn['items']):
-            if not isinstance(item,dict) or not isinstance(item.get('type'),str):
-                raise ValueError('Codex 共享快照包含无效消息项')
-            kind=item['type']; role='tool'; channel=None
-            if kind=='userMessage':
-                role='user'; content=item.get('content')
-                if not isinstance(content,list) or any(not isinstance(p,dict) for p in content):
-                    raise ValueError('Codex 用户消息的 content 必须是对象数组')
-                text='\n'.join(p.get('text','') for p in content if p.get('type')=='text')
-                visible='\n'.join(p.get('text','') if p.get('type')=='text' else '[图片：'+str(p.get('url','不可用'))+']' if p.get('type')=='image' else '[附件]' for p in content)
-            elif kind=='agentMessage':
-                role='assistant'; text=item.get('text',''); visible=text
-                channel='final' if item.get('phase')=='final_answer' else item.get('phase')
-            elif kind=='reasoning':
-                role='assistant'; channel='analysis'; text=item.get('summary',''); visible=text
-            elif kind=='fileChange':
-                text='\n\n'.join(str(change.get('path','文件修改'))+'\n'+str(change.get('diff','')) for change in item.get('changes',[])); visible=text or '[文件修改]'
-            elif kind in ('imageView','imageGeneration'):
-                text=''; visible='[图片：'+str(item.get('url',item.get('result','不可用')))+']'
-            else:
-                text=''; visible='[未识别的 Codex 消息项：'+kind+']'
-            if not isinstance(text,str) or not isinstance(visible,str):
-                raise ValueError('Codex 共享快照中的消息文本必须是字符串')
-            recs.append({'id':f'turn-{turn_index}-item-{item_index}','role':role,'channel':channel,'create_time':None,'text':text,'visible_text':visible,'type':kind,'turn_index':turn_index,'item_index':item_index,'duration_ms':turn.get('durationMs'),'content':item})
-    return recs
-
 def active_branch(nodes,current_node=None):
     if current_node in nodes:
         path=[]; seen=set(); cur=current_node

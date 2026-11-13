@@ -379,6 +379,11 @@ test('conversation tool advertises unified import and read actions', async () =>
   const local = await tool.handler({ action: 'thread/read', thread_id: '01a1ad26-84a2-7b91-87bc-32b31a875889' });
   assert.equal(local.isError, undefined);
   assert.equal(runtime.calls[2].args.thread_id, '01a1ad26-84a2-7b91-87bc-32b31a875889');
+  const deepLink = 'codex://threads/01a1ad26-84a2-7b91-87bc-32b31a875889';
+  const deepRead = await tool.handler({ action: 'thread/read', thread_id: deepLink });
+  assert.equal(deepRead.isError, undefined);
+  assert.equal(runtime.calls[3].args.thread_id, deepLink);
+  assert.match(tool.description, /codex:\/\/threads\//);
 });
 
 test('conversation capability guard does not invoke an old Worker or trigger quarantine', async () => {
