@@ -1,0 +1,9 @@
+[package]
+name = "codex-exec-server"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[dependencies]
+codex-utils-path-uri = { path = "../path-uri" }
+tokio = { version = "1", features = ["fs"] }

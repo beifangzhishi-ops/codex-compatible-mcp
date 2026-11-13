@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { applySingleFilePatchToText } from '../runtime/filesystem/apply-patch.mjs';
+import { applySingleFilePatchToText } from '../runtime/filesystem/plan-patch.mjs';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_READ_LINES = 400;

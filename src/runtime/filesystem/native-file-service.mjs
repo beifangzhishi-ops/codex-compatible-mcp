@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { applyPatchToEnvironment } from './apply-patch.mjs';
+import { applyPatchToEnvironment } from './codex-apply-patch-bridge.mjs';
 import {
   DEFAULT_MAX_VIEW_IMAGE_BYTES,
   viewImageFromEnvironment,

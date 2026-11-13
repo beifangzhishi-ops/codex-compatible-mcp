@@ -235,7 +235,7 @@ test('Worker patching uses full-access only for explicitly approved internal dis
     const patch = '*** Begin Patch\n*** Add File: ' + outside + '\n+outside\n*** End Patch';
     await assert.rejects(workerFiles.applyPatch({
       environment_id: '6v', patch,
-    }), /workspace-write forbids/);
+    }), /Failed to write file/);
     assert.equal(existsSync(outside), false);
     await workerFiles.applyPatch({
       environment_id: '6v', patch, sandbox_permissions: 'approved_escalated',

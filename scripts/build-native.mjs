@@ -198,3 +198,4 @@ buildRustHelper('pty-proxy', 'ccm-pty-proxy');
 buildRustHelper('codex-powershell-parser', 'ccm-codex-powershell-parser');
 buildRustHelper('codex-execpolicy', 'ccm-codex-execpolicy',
   ['ccm-codex-execpolicy-bridge']);
+buildRustHelper('codex-apply-patch', 'ccm-codex-apply-patch');
