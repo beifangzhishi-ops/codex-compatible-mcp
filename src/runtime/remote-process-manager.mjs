@@ -509,7 +509,11 @@ export class RemoteProcessManager {
           );
           return {
             chunk_id: 'approval', wall_time_seconds: 0,
-            output: 'Guardian reviewer denied this command: ' + assessment.rationale,
+            output: [
+              'This action was rejected due to unacceptable risk.',
+              'Reason: ' + assessment.rationale,
+              'The agent must not attempt to achieve the same outcome via workaround, indirect execution, or policy circumvention. Proceed only with a materially safer alternative, or if the user explicitly approves the action after being informed of the risk. Otherwise, stop and request user input.',
+            ].join('\n'),
             approval_required: false, ...denied, ...workspaceHandle,
             review_source: 'guardian', review_outcome: 'deny',
             review_risk_level: assessment.risk_level,

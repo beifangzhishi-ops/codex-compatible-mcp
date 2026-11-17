@@ -246,6 +246,11 @@ test('Guardian allow dispatches frozen escalation once; deny never dispatches', 
   const rejected = await deny.processManager.execCommand(args);
   assert.equal(rejected.review_outcome, 'deny');
   assert.equal(rejected.approval_required, false);
+  assert.equal(rejected.output, [
+    'This action was rejected due to unacceptable risk.',
+    'Reason: outside scope',
+    'The agent must not attempt to achieve the same outcome via workaround, indirect execution, or policy circumvention. Proceed only with a materially safer alternative, or if the user explicitly approves the action after being informed of the risk. Otherwise, stop and request user input.',
+  ].join('\n'));
   assert.equal(deny.workerHub.calls.length, 0);
 });
 
