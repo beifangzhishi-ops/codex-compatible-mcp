@@ -63,6 +63,7 @@ export function guardianReviewPrompt({ action, reviewContext }) {
     'Exact command and execution identity:',
     JSON.stringify({
       cmd: action.cmd, shell: action.shell, workdir: action.workdir,
+      workspace_handle: action.workspace_handle,
       workspace_root: action.workspace_root, environment_id: action.environment_id,
       workspace_id: action.workspace_id,
       run_as_admin: action.run_as_admin === true,

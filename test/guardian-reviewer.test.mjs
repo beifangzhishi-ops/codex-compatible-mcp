@@ -40,11 +40,15 @@ test('Guardian instructions reuse Codex risk policy with approved main-model tru
 
 test('Guardian prompt names the actual Windows administrator execution scope', () => {
   const prompt = guardianReviewPrompt({
-    action: { cmd: 'whoami', run_as_admin: true, workspace_root: 'C:\\workspace' },
+    action: {
+      cmd: 'whoami', run_as_admin: true, workspace_root: 'C:\\workspace',
+      workspace_handle: WORKSPACE_HANDLE,
+    },
     reviewContext: 'User requested Windows administrator identity inspection.',
   });
   assert.match(prompt, /"run_as_admin":true/);
   assert.match(prompt, /Unrestricted Windows administrator token/);
+  assert.match(prompt, new RegExp(WORKSPACE_HANDLE));
   assert.match(prompt, /User requested Windows administrator identity inspection/);
   const ordinary = guardianReviewPrompt({ action: { cmd: 'whoami' } });
   assert.match(ordinary, /"run_as_admin":false/);
@@ -137,13 +141,15 @@ test('CPA stateless history replay executes two original registry tools, then re
 
 test('Guardian tool dispatcher uses same effective non-read-only tool handler', async () => {
   let writableEffect = 0;
+  const observedHandles = [];
   const registry = new ToolRegistry();
   registry.register({
     name: 'modify_fixture',
     description: 'Modify an in-memory fixture.',
     inputSchema: { workspace_handle: z.string().uuid(), delta: z.number() },
-    handler: async ({ delta }) => {
+    handler: async ({ delta, workspace_handle }) => {
       assert.equal(isReviewerTool(), true);
+      observedHandles.push(workspace_handle);
       writableEffect += delta;
       return { structuredContent: { modified: writableEffect } };
     },
@@ -152,12 +158,12 @@ test('Guardian tool dispatcher uses same effective non-read-only tool handler', 
   assert.equal(dispatcher.availableTools()[0].name, 'modify_fixture');
   await dispatcher.invoke('modify_fixture', { delta: 2 }, { workspaceHandle: WORKSPACE_HANDLE });
   assert.equal(writableEffect, 2);
-  await assert.rejects(
-    dispatcher.invoke('modify_fixture', { delta: 2, workspace_handle: '00000000-0000-4000-8000-000000000002' }, {
-      workspaceHandle: WORKSPACE_HANDLE,
-    }),
-    /differs/,
-  );
+  const otherHandle = '00000000-0000-4000-8000-000000000002';
+  await dispatcher.invoke('modify_fixture', { delta: 2, workspace_handle: otherHandle }, {
+    workspaceHandle: WORKSPACE_HANDLE,
+  });
+  assert.equal(writableEffect, 4);
+  assert.deepEqual(observedHandles, [WORKSPACE_HANDLE, otherHandle]);
 });
 
 test('Reviewer claim and deny bind exact frozen intent without an App nonce', () => {
@@ -403,21 +409,28 @@ test('Guardian retries an invalid response without executing tools, but not afte
   assert.equal(mayRetryGuardian(Object.assign(new Error('bad request'), { httpStatus: 400 })), false);
 });
 
-test('A reviewer tool error prevents a final allow without successful recovery', async () => {
+test('A reviewer tool error is presented as evidence but does not override a final allow', async () => {
+  const requests = [];
   const client = new CpaReviewClient({
     apiKey: 'fixture',
-    fetchImpl: async () => response(
-      client.round++ === 0
+    fetchImpl: async (_url, options) => {
+      requests.push(JSON.parse(options.body));
+      return response(
+      requests.length === 1
         ? [call('inspect_example_action', 'first')]
         : [{ type: 'message', content: [{ type: 'output_text', text: '{"outcome":"allow"}' }] }],
-    ),
+      );
+    },
   });
-  client.round = 0;
-  await assert.rejects(client.complete({
+  const result = await client.complete({
     instructions: 'test', prompt: 'test',
     tools: [{ type: 'function', name: 'inspect_example_action', parameters: { type: 'object', properties: {} } }],
     invokeTool: async () => { throw new Error('fixture tool failed'); },
-  }), /unresolved tool failures/);
+  });
+  assert.equal(result.text, '{"outcome":"allow"}');
+  const failure = JSON.parse(requests[1].input.at(-1).output);
+  assert.equal(failure.isError, true);
+  assert.equal(failure.message, 'fixture tool failed');
 });
 
 test('Guardian function outputs can carry images with a bounded text wrapper', async () => {

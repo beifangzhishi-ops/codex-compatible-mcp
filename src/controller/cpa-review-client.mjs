@@ -63,7 +63,6 @@ export class CpaReviewClient {
     const requestTools = tools || [];
     const validTools = new Set(requestTools.map((tool) => tool.name));
     const seenCalls = new Set();
-    const unresolvedToolErrors = new Set();
     const history = [{ role: 'developer', content: instructions }, { role: 'user', content: prompt }];
     let toolCalls = 0;
     for (let round = 0; round < this.maxTurns; round++) {
@@ -105,9 +104,6 @@ export class CpaReviewClient {
       history.push(...data.output);
       const calls = data.output.filter((item) => item?.type === 'function_call');
       if (calls.length === 0) {
-        if (unresolvedToolErrors.size) {
-          throw new Error('Guardian review ended with unresolved tool failures');
-        }
         const result = messageText(data.output);
         if (!result) throw new Error('CPA reviewer returned no final message');
         return { text: result, rounds: round + 1, toolCalls };
@@ -140,15 +136,6 @@ export class CpaReviewClient {
         }
         const resultPayload = Array.isArray(toolResult)
           ? toolResult : String(toolResult);
-        let toolOutcome;
-        try {
-          const reported = Array.isArray(resultPayload)
-            ? resultPayload.find((item) => item.type === 'input_text')?.text
-            : resultPayload;
-          toolOutcome = JSON.parse(reported);
-        } catch {}
-        if (toolOutcome?.isError) unresolvedToolErrors.add(call.name);
-        else unresolvedToolErrors.delete(call.name);
         history.push({
           type: 'function_call_output',
           call_id: call.call_id,

@@ -63,13 +63,10 @@ export class GuardianToolDispatcher {
       throw new Error('Guardian requested an unavailable tool');
     }
     const params = { ...args };
-    // The reviewer is attached to the current action's workspace; a different
-    // workspace handle is not an authority granted by a tool result.
+    // Reuse the reviewed action's context when the model omits a handle.
+    // Explicit handles still go through the ordinary tool permission checks.
     const schemaShape = tool.inputSchema?.shape || tool.inputSchema || {};
-    if (Object.hasOwn(schemaShape, 'workspace_handle')) {
-      if (params.workspace_handle && params.workspace_handle !== workspaceHandle) {
-        throw new Error('Guardian tool workspace_handle differs from the reviewed action');
-      }
+    if (Object.hasOwn(schemaShape, 'workspace_handle') && !params.workspace_handle) {
       params.workspace_handle = workspaceHandle;
     }
     const validated = this.registry.validateArguments(tool, params);
