@@ -491,15 +491,23 @@ export class RemoteProcessManager {
             reviewContext: args.review_context || args.justification || '',
           });
         } catch (error) {
-          this.#emit('review_fallback_human', {
+          const retrySafe = !(error?.guardianReviewToolInvocations > 0);
+          const failed = this.approvalManager.failReviewerExecution(
+            approval.approval_id, approval.intent_sha256,
+          );
+          this.#emit('review_failed', {
             approval_id: approval.approval_id,
             intent_sha256: approval.intent_sha256,
             error_name: error?.name || 'Error',
           });
           return {
             chunk_id: 'approval', wall_time_seconds: 0,
-            output: 'Guardian review could not be completed; human approval is required.',
-            approval_required: true, ...approval, ...workspaceHandle,
+            output: retrySafe
+              ? 'Automatic approval failed before command dispatch. The model may retry this exec_command once. If automatic approval fails again, stop retrying and tell the user to continue when the automatic reviewer responds again. Do not switch to human approval.'
+              : 'Automatic approval failed before command dispatch, but the reviewer invoked tools that may have side effects. Do not retry the review or switch to human approval; tell the user to continue when the automatic reviewer responds again.',
+            approval_required: false, action_failed: true,
+            review_retryable: retrySafe,
+            ...failed, ...workspaceHandle,
             review_source: 'guardian', review_outcome: 'error',
           };
         }
@@ -528,7 +536,7 @@ export class RemoteProcessManager {
           });
           return {
             ...result, review_source: 'guardian',
-            review_outcome: result.approval_required ? 'error' : 'allow',
+            review_outcome: result.state === 'review_failed' ? 'error' : 'allow',
             review_risk_level: assessment.risk_level,
           };
         }
@@ -705,7 +713,7 @@ export class RemoteProcessManager {
       }
     } catch (error) {
       const retryable = claimed.reviewerSource
-        ? this.approvalManager.returnReviewerToHuman(approvalId)
+        ? this.approvalManager.failReviewerExecution(approvalId, claimed.request.intent_sha256)
         : this.approvalManager.markAppExecutionRetryable(approvalId);
       this.#emit('approval_dispatch_failed_prestart', {
         approval_id: approvalId,
@@ -715,7 +723,7 @@ export class RemoteProcessManager {
         workspace_id: action.workspace_id,
         error_name: error?.name || 'Error',
       });
-      return this.#approvalStatusResult(
+      const failure = this.#approvalStatusResult(
         retryable,
         workspaceHandle || {
           workspace_handle: action.workspace_handle,
@@ -727,6 +735,9 @@ export class RemoteProcessManager {
         'Escalated execution was not dispatched: ' +
           String(error?.message || error),
       );
+      return claimed.reviewerSource
+        ? { ...failure, action_failed: true, review_retryable: true, output: failure.output + '\nNo human approval fallback. The model may retry once; after another failure, tell the user to continue when automatic approval responds.' }
+        : failure;
     }
 
     const requestedYieldMs = clampInitialExecYield(action.yield_time_ms);
@@ -763,7 +774,7 @@ export class RemoteProcessManager {
       );
     } catch (error) {
       const retryable = claimed.reviewerSource
-        ? this.approvalManager.returnReviewerToHuman(approvalId)
+        ? this.approvalManager.failReviewerExecution(approvalId, claimed.request.intent_sha256)
         : this.approvalManager.markAppExecutionRetryable(approvalId);
       this.#emit('approval_dispatch_failed_prestart', {
         approval_id: approvalId,
@@ -773,12 +784,15 @@ export class RemoteProcessManager {
         workspace_id: workspaceHandle.workspace_id,
         error_name: error?.name || 'Error',
       });
-      return this.#approvalStatusResult(
+      const failure = this.#approvalStatusResult(
         retryable,
         workspaceHandle,
         'Escalated execution was not dispatched: ' +
           String(error?.message || error),
       );
+      return claimed.reviewerSource
+        ? { ...failure, action_failed: true, review_retryable: true, output: failure.output + '\nNo human approval fallback. The model may retry once; after another failure, tell the user to continue when automatic approval responds.' }
+        : failure;
     }
 
     let result;

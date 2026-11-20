@@ -286,7 +286,7 @@ test('Guardian administrator allow uses only the elevated agent and never a save
   assert.equal(rig.workerHub.calls[0].params.sandbox_permissions, 'admin_elevated');
 });
 
-test('Guardian administrator deny blocks execution; review failure falls back to the same human card', async (t) => {
+test('Guardian administrator deny blocks execution; review failure does not fall back to human approval', async (t) => {
   const denied = fixtureManager({
     isEnabled: () => true,
     review: async () => ({ outcome: 'deny', risk_level: 'high', rationale: 'outside scope' }),
@@ -302,17 +302,14 @@ test('Guardian administrator deny blocks execution; review failure falls back to
     review: async () => { throw new Error('CPA unavailable'); },
   });
   t.after(() => failed.processManager.close());
-  const pending = await failed.processManager.execCommand(args);
-  assert.equal(pending.approval_required, true);
-  assert.equal(pending.run_as_admin, true);
+  const failedReview = await failed.processManager.execCommand(args);
+  assert.equal(failedReview.approval_required, false);
+  assert.equal(failedReview.state, 'review_failed');
+  assert.equal(failedReview.action_failed, true);
+  assert.equal(failedReview.review_retryable, true);
+  assert.equal(failedReview.run_as_admin, true);
   assert.equal(failed.workerHub.calls.length, 0);
-  const card = failed.approvalManager.prepareAppApproval(pending.approval_id);
-  assert.equal(card.request.run_as_admin, true);
-  const executed = await failed.processManager.resolvePendingExecution({
-    approval_id: pending.approval_id, approval_nonce: card.approvalNonce, decision: 'approve',
-  });
-  assert.equal(executed.administrator_agent, true);
-  assert.equal(failed.workerHub.calls[0].params.sandbox_permissions, 'admin_elevated');
+  assert.throws(() => failed.approvalManager.prepareAppApproval(failedReview.approval_id), /state=review_failed/);
 });
 
 test('Administrator Always allow is rejected without dispatch and its frozen mode is retained', async (t) => {
@@ -361,21 +358,30 @@ test('Administrator dispatch loss after Guardian allow becomes unknown without r
   assert.equal(count, 1);
 });
 
-test('Guardian failure retains the same frozen pending request for human approval', async (t) => {
+test('Consecutive Guardian review failures remain terminal, with model retry and user notification guidance', async (t) => {
   const testRig = fixtureManager({
     isEnabled: () => true,
     review: async () => { throw new Error('CPA unavailable'); },
   });
   t.after(() => testRig.processManager.close());
-  const result = await testRig.processManager.execCommand({
+  const args = {
     workspace_handle: WORKSPACE_HANDLE, cmd: 'Write-Output harmless',
     sandbox_permissions: 'require_escalated',
-  });
-  assert.equal(result.review_outcome, 'error');
-  assert.equal(result.approval_required, true);
+  };
+  const result = await testRig.processManager.execCommand(args);
+  const retried = await testRig.processManager.execCommand(args);
+  for (const failure of [result, retried]) {
+    assert.equal(failure.review_outcome, 'error');
+    assert.equal(failure.state, 'review_failed');
+    assert.equal(failure.approval_required, false);
+    assert.equal(failure.action_failed, true);
+    assert.equal(failure.review_retryable, true);
+    assert.match(failure.output, /retry this exec_command once/i);
+    assert.match(failure.output, /continue when the automatic reviewer responds again/i);
+    assert.throws(() => testRig.approvalManager.prepareAppApproval(failure.approval_id), /state=review_failed/);
+  }
+  assert.notEqual(result.approval_id, retried.approval_id);
   assert.equal(testRig.workerHub.calls.length, 0);
-  const card = testRig.approvalManager.prepareAppApproval(result.approval_id);
-  assert.equal(card.request.approval_id, result.approval_id);
 });
 
 test('Guardian retries an invalid response without executing tools, but not after tool side effects', async () => {
@@ -452,7 +458,7 @@ test('Guardian function outputs can carry images with a bounded text wrapper', a
   assert.equal(result[1].image_url, 'data:image/png;base64,AA==');
 });
 
-test('Reviewer pre-dispatch failures reopen the same frozen human approval', async (t) => {
+test('Reviewer pre-dispatch failures end the frozen approval without opening a human card', async (t) => {
   const rig = fixtureManager({
     isEnabled: () => true,
     review: async () => ({ outcome: 'allow', risk_level: 'low' }),
@@ -465,10 +471,34 @@ test('Reviewer pre-dispatch failures reopen the same frozen human approval', asy
     sandbox_permissions: 'require_escalated',
   });
   assert.equal(output.review_outcome, 'error');
-  assert.equal(output.state, 'pending');
-  assert.equal(output.approval_required, true);
-  const card = rig.approvalManager.prepareAppApproval(output.approval_id);
-  assert.equal(card.request.state, 'pending');
+  assert.equal(output.state, 'review_failed');
+  assert.equal(output.approval_required, false);
+  assert.equal(output.action_failed, true);
+  assert.equal(output.review_retryable, true);
+  assert.throws(() => rig.approvalManager.prepareAppApproval(output.approval_id), /state=review_failed/);
+});
+
+test('Guardian errors after reviewer tool calls do not advise model replay', async (t) => {
+  const rig = fixtureManager({
+    isEnabled: () => true,
+    review: async () => {
+      const error = new Error('reviewer response lost after helper invocation');
+      error.guardianReviewToolInvocations = 1;
+      throw error;
+    },
+  });
+  t.after(() => rig.processManager.close());
+  const result = await rig.processManager.execCommand({
+    workspace_handle: WORKSPACE_HANDLE,
+    cmd: 'Write-Output harmless',
+    sandbox_permissions: 'require_escalated',
+  });
+  assert.equal(result.review_outcome, 'error');
+  assert.equal(result.state, 'review_failed');
+  assert.equal(result.review_retryable, false);
+  assert.equal(result.approval_required, false);
+  assert.match(result.output, /Do not retry the review/i);
+  assert.equal(rig.workerHub.calls.length, 0);
 });
 
 test('In-flight Worker failure after reviewer allow remains unknown and never retries', async (t) => {

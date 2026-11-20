@@ -71,6 +71,8 @@ test('health exposes connected abnormal environments as degraded', async () => {
 test('MCP lists and calls tools through a Remote Worker', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-mcp-'));
   const runtime = createControllerRuntime({
+    // Test the explicit manual-approval path independently of the host's live Guardian setting.
+    guardianReviewer: { isEnabled: () => false },
     workerPort: 0,
     auditLogFile: path.join(tempRoot, 'audit.jsonl'),
     codexPolicyStateFile: path.join(tempRoot, 'rules', 'default.rules'),
@@ -164,7 +166,9 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(commandTool.description, /resident\/long-running processes in the background without visible console windows/);
     assert.match(commandTool.description, /no-console process launch mode, not merely a hidden parent terminal/);
     assert.match(commandTool.description, /proactively supply a practical prefix_rule/);
-    assert.match(commandTool.description, /run_as_admin=true uses an unrestricted administrator Agent after one-shot Guardian\/human approval/);
+    assert.match(commandTool.description, /run_as_admin=true uses an unrestricted administrator Agent after one-shot Guardian approval/);
+    assert.match(commandTool.description, /state=review_failed, approval_required=false/);
+    assert.match(commandTool.description, /If approval_required=true, call request_approval/);
     assert.match(commandTool.description, /proactively consider run_as_admin=true/);
     assert.match(commandTool.description, /Distinguish generic Access is denied, sandbox, path and network errors/);
     assert.match(commandTool.description, /Native Codex ExecPolicy/);

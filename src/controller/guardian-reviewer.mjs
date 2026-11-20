@@ -115,6 +115,10 @@ export class GuardianReviewer {
       });
       return assessment;
         } catch (error) {
+          // A model-initiated retry must not replay reviewer tool side effects.
+          if (toolInvocations > 0 && error && typeof error === 'object') {
+            error.guardianReviewToolInvocations = toolInvocations;
+          }
           if (controller.signal.aborted || attempt === maxAttempts ||
               !mayRetryGuardian(error, { toolInvocations })) throw error;
           this.audit?.({

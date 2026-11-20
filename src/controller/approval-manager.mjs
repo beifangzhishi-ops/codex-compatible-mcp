@@ -359,20 +359,20 @@ export class ApprovalManager {
     return this.#publicRequest(request);
   }
 
-  returnReviewerToHuman(approvalId) {
+  failReviewerExecution(approvalId, expectedIntentHash) {
     this.#prune();
     const request = this.requests.get(String(approvalId));
     if (!request || request.kind !== 'execution' ||
-        request.decisionSource !== 'reviewer' ||
-        request.state !== 'dispatching' || request.approvalNonceHash) {
-      throw new Error('Guardian dispatch cannot safely return to human approval.');
+        !['pending', 'dispatching'].includes(request.state) ||
+        (request.state === 'dispatching' && request.decisionSource !== 'reviewer') ||
+        request.approvalNonceHash || request.intentHash !== expectedIntentHash) {
+      throw new Error('Guardian failed review identity or state is invalid.');
     }
-    // This method is only callable before any Worker dispatch is attempted.
-    request.state = 'pending';
-    request.decisionSource = null;
-    request.approvedAt = null;
-    request.dispatchStartedAt = null;
-    this.#emit('review_fallback_human', request);
+    // Only before Worker dispatch: a review failure is terminal, never an App approval.
+    request.state = 'review_failed';
+    request.decisionSource = 'reviewer';
+    request.respondedAt = this.now();
+    this.#emit('review_failed', request);
     return this.#publicRequest(request);
   }
 
