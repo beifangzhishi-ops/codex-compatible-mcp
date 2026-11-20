@@ -17,7 +17,6 @@ import {
 const MAX_BODY_BYTES = 1024 * 1024;
 const UPSTREAM_TIMEOUT_MS = 120000;
 const MAX_UPSTREAM_RESPONSE_BYTES = 8 * 1024 * 1024;
-const MAX_DOWNLOAD_BYTES = 12 * 1024 * 1024;
 const DOWNLOAD_ROUTE = /^\/ccm\/(download|preview)\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i;
 const MCP_SESSION_HEADER = 'mcp-session-id';
 const REQUEST_HOP_HEADERS = new Set([
@@ -684,7 +683,7 @@ function proxyPublishedFile(request, response, url, runtime) {
       return;
     }
     const length = Number(source.headers['content-length']);
-    if (![200, 206].includes(status) || !Number.isSafeInteger(length) || length < 0 || length > MAX_DOWNLOAD_BYTES ||
+    if (![200, 206].includes(status) || !Number.isSafeInteger(length) || length < 0 ||
         (status === 206 && !/^bytes \d+-\d+\/\d+$/.test(String(source.headers['content-range'] || '')))) {
       source.destroy();
       if (!response.headersSent) sendJson(response, 502, { error: 'invalid_upstream' }, { noStore: true });
@@ -700,7 +699,7 @@ function proxyPublishedFile(request, response, url, runtime) {
     let total = 0;
     source.on('data', (chunk) => {
       total += chunk.length;
-      if (total > length || total > MAX_DOWNLOAD_BYTES) {
+      if (total > length) {
         source.destroy();
         response.destroy();
       }

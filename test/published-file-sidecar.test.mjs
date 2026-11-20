@@ -7,10 +7,10 @@ import path from 'node:path';
 import { createConfig } from '../ccm-sidecar/config.mjs';
 import { createCcmOAuthServer, listenCcmOAuthServer, closeCcmOAuthServer } from '../ccm-sidecar/server.mjs';
 
-test('HTTPS file sidecar streams 12 MiB without OAuth and redacts URL tokens', async () => {
+test('HTTPS file sidecar streams 16 MiB without OAuth and redacts URL tokens', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-publish-proxy-'));
   const token = '12345678-1234-4234-8234-123456789abc';
-  const bytes = Buffer.alloc(12 * 1024 * 1024, 0x61);
+  const bytes = Buffer.alloc(16 * 1024 * 1024, 0x61);
   const upstream = http.createServer((req, res) => {
     if (req.url !== '/ccm/download/' + token) { res.writeHead(404); res.end(); return; }
     res.writeHead(200, { 'Content-Type': 'application/octet-stream',
@@ -47,13 +47,13 @@ test('HTTPS file sidecar streams 12 MiB without OAuth and redacts URL tokens', a
   }
 });
 
-test('File sidecar blocks oversized upstream Content-Length and redirects', async () => {
+test('File sidecar blocks invalid upstream Content-Length and redirects', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-publish-limit-'));
   const token = '12345678-1234-4234-8234-123456789abc';
   let redirect = false;
   const upstream = http.createServer((_req, res) => {
     if (redirect) { res.writeHead(302, { location: 'https://example.com' }); res.end(); }
-    else { res.writeHead(200, { 'content-length': 13 * 1024 * 1024 }); res.end(); }
+    else { res.writeHead(200, { 'content-length': String(Number.MAX_SAFE_INTEGER + 1) }); res.end(); }
   });
   await new Promise((resolve) => upstream.listen(0, '127.0.0.1', resolve));
   const config = createConfig({ rootDir: root, readConfigFile: false, port: 0, allowEphemeral: true,
