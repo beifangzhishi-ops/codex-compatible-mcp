@@ -107,9 +107,8 @@ test('publish is a peer MCP tool and yields an HTTPS URL', async () => {
   const cardTool = registry.get('ccm-extra.publish_card');
   assert.equal(cardTool.mcpMeta.ui.resourceUri, PUBLISHED_FILE_UI_URI);
   assert.equal(cardTool.mcpMeta['openai/outputTemplate'], PUBLISHED_FILE_UI_URI);
-  assert.match(publish.description, /default 12 MiB limit/);
-  assert.match(publish.description, /larger files proactively call quark_upload.*without explicit Quark request/);
-  assert.match(publish.description, /no share link is needed/);
+  assert.match(publish.description, /Large files are transferred in chunks/);
+  assert.doesNotMatch(publish.description, /quark_upload|12 MiB/i);
   assert.match(publish.description, /Honor an explicitly requested delivery method/);
   assert.equal(publish.supportsParallel, false);
   assert.equal(registry.get('ccm-extra.send_file'), null);
@@ -160,6 +159,45 @@ test('publish and publish_card reuse a published image without re-uploading', as
   assert.equal(result.structuredContent.filename, 'portrait.png');
   assert.equal(result.structuredContent.download_url, 'https://example.test/ccm/download/' + token);
   assert.ok(runtime.fileTransferStore.get(token));
+  runtime.fileTransferStore.close();
+});
+
+test('publish transfers files larger than WorkerHub message capacity in chunks', async () => {
+  const runtime = fakeRuntime();
+  const bytes = Buffer.alloc(25 * 1024 * 1024, 0x5a);
+  const expectedHash = (await import('node:crypto')).createHash('sha256').update(bytes).digest('hex');
+  const operations = [];
+  runtime.fileService.sendFile = async () => {
+    throw new Error('file exceeds CCM send_file limit (26214400 > 12582912 bytes): large.bin');
+  };
+  runtime.workerHub = {
+    async call(_environmentId, method, args) {
+      operations.push(method);
+      if (method === 'transfer_inspect') return {
+        kind: 'file', source_path: '/temp/large.bin',
+        entries: [{ path: '', type: 'file', size: bytes.length, mtime_ms: 1000 }],
+      };
+      if (method === 'transfer_digest') return { sha256: expectedHash };
+      if (method === 'transfer_read') return {
+        data: bytes.subarray(args.offset, args.offset + args.length).toString('base64'),
+        byte_length: args.length,
+      };
+      throw new Error('Unknown Worker call: ' + method);
+    },
+  };
+  const registry = new ToolRegistry();
+  registerSpecializedTools(registry, runtime);
+  const result = await registry.get('ccm-extra.publish').handler({
+    path: 'large.bin', workspace_handle: '00000000-0000-4000-8000-000000000001',
+  });
+  assert.equal(result.isError, undefined);
+  assert.equal(result.structuredContent.byte_length, bytes.length);
+  assert.equal(result.structuredContent.sha256, expectedHash);
+  assert.equal(operations.filter(x => x === 'transfer_read').length, 7);
+  const entry = runtime.fileTransferStore.get(result.structuredContent.publication_id);
+  const card = await registry.get('ccm-extra.publish_card').handler({ publication_id: entry.token });
+  assert.equal(card.structuredContent.publication_id, entry.token);
+  assert.equal(card.structuredContent.sha256, expectedHash);
   runtime.fileTransferStore.close();
 });
 

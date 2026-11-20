@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 
 export const FILE_TTL_MS = 72 * 60 * 60 * 1000;
-export const MAX_FILE_BYTES = 12 * 1024 * 1024;
 const DEFAULT_MAX_TOTAL_BYTES = 1024 * 1024 * 1024;
 export const FILE_TOKEN_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -13,7 +12,6 @@ function valid(entry, token, now) {
     typeof entry.filename === 'string' && !!entry.filename &&
     typeof entry.mime_type === 'string' && !!entry.mime_type &&
     Number.isSafeInteger(entry.byte_length) && entry.byte_length >= 0 &&
-    entry.byte_length <= MAX_FILE_BYTES &&
     Number.isFinite(entry.createdAt) && Number.isFinite(entry.expiresAt) &&
     entry.expiresAt === entry.createdAt + FILE_TTL_MS && entry.expiresAt > now &&
     !Object.hasOwn(entry, 'data');
@@ -95,7 +93,7 @@ export class FileTransferStore {
   put(value, { environmentId } = {}) {
     if (!value?.filename || !value?.mime_type || typeof value.data !== 'string' || !Number.isSafeInteger(Number(value.byte_length))) throw new Error('Invalid file transfer.');
     const bytes = Buffer.from(value.data, 'base64');
-    if (bytes.length !== Number(value.byte_length) || bytes.length > MAX_FILE_BYTES || bytes.length > this.maxTotalBytes) throw new Error('File size exceeds transfer limit or does not match metadata.');
+    if (bytes.length !== Number(value.byte_length) || bytes.length > this.maxTotalBytes) throw new Error('File size exceeds transfer limit or does not match metadata.');
     const sha256 = createHash('sha256').update(bytes).digest('hex');
     if (/^[a-f0-9]{64}$/i.test(String(value.sha256)) && sha256.toLowerCase() !== value.sha256.toLowerCase()) throw new Error('File checksum mismatch.');
     const token = randomUUID();
@@ -114,6 +112,57 @@ export class FileTransferStore {
       return entry;
     } catch (error) {
       for (const name of [binTemp, jsonTemp, this.#name(token, '.bin'), this.#name(token, '.json')]) fs.rmSync(name, { force: true });
+      throw error;
+    }
+  }
+  async putChunks(value, chunks, { environmentId } = {}) {
+    const expectedLength = Number(value?.byte_length);
+    if (!value?.filename || !value?.mime_type || !Number.isSafeInteger(expectedLength) ||
+        expectedLength < 0 || expectedLength > this.maxTotalBytes) {
+      throw new Error('File size exceeds transfer limit or does not match metadata.');
+    }
+    const token = randomUUID();
+    const binTemp = this.#name(token, '.bin.tmp');
+    const jsonTemp = this.#name(token, '.json.tmp');
+    let fd;
+    try {
+      fd = fs.openSync(binTemp, 'wx');
+      const hash = createHash('sha256');
+      let received = 0;
+      for await (const chunk of chunks) {
+        if (!Buffer.isBuffer(chunk) || received + chunk.length > expectedLength) {
+          throw new Error('Invalid file-transfer chunk.');
+        }
+        let offset = 0;
+        while (offset < chunk.length) offset += fs.writeSync(fd, chunk, offset, chunk.length - offset);
+        hash.update(chunk);
+        received += chunk.length;
+      }
+      fs.closeSync(fd);
+      fd = null;
+      if (received !== expectedLength) throw new Error('Incomplete file transfer.');
+      const sha256 = hash.digest('hex');
+      if (/^[a-f0-9]{64}$/i.test(String(value.sha256)) && sha256.toLowerCase() !== value.sha256.toLowerCase()) {
+        throw new Error('File checksum mismatch.');
+      }
+      const now = this.clock();
+      const entry = Object.freeze({
+        token, environment_id: environmentId || null,
+        filename: String(value.filename), mime_type: String(value.mime_type),
+        byte_length: received, sha256, createdAt: now, expiresAt: now + FILE_TTL_MS,
+      });
+      fs.writeFileSync(jsonTemp, JSON.stringify(entry) + '\n', { flag: 'wx' });
+      fs.renameSync(binTemp, this.#name(token, '.bin'));
+      fs.renameSync(jsonTemp, this.#name(token, '.json'));
+      this.#evict(received);
+      this.entries.set(token, entry);
+      this.totalBytes += received;
+      return entry;
+    } catch (error) {
+      if (fd != null) fs.closeSync(fd);
+      for (const name of [binTemp, jsonTemp, this.#name(token, '.bin'), this.#name(token, '.json')]) {
+        fs.rmSync(name, { force: true });
+      }
       throw error;
     }
   }

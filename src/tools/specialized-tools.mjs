@@ -1,4 +1,7 @@
 import * as z from 'zod/v4';
+import path from 'node:path';
+import { TRANSFER_CHUNK_BYTES } from '../runtime/filesystem/transfer-worker.mjs';
+import { mimeTypeFor } from '../runtime/filesystem/send-file.mjs';
 import { PUBLISHED_FILE_UI_URI } from '../ui/published-file-app.mjs';
 import { textPreviewFromBase64 } from '../controller/text-file-preview.mjs';
 import { publishedPreviewKind } from '../controller/published-file-preview.mjs';
@@ -58,7 +61,7 @@ async function fileResourceResult(value, environmentId, runtime, metadata = {}, 
   const url = origin + '/ccm/download/' + transfer.token;
   const previewUrl = previewKind && previewKind !== 'text'
     ? origin + '/ccm/preview/' + transfer.token : undefined;
-  const textPreview = (previewKind === 'text' || previewKind === 'markdown')
+  const textPreview = (previewKind === 'text' || previewKind === 'markdown') && typeof value.data === 'string'
     ? textPreviewFromBase64(value.data, transfer.mime_type) : null;
   const textUrl = previewKind === 'text' && textPreview
     ? origin + '/ccm/preview/' + transfer.token : undefined;
@@ -113,6 +116,11 @@ async function publishedCardResult(runtime, publicationId) {
   const acquired = runtime.fileTransferStore?.acquire(publicationId);
   if (!acquired) throw new Error('Publication not found or expired; call publish again.');
   try {
+    if (acquired.entry.byte_length > 2 * 1024 * 1024 ||
+        !['text', 'markdown'].includes(publishedPreviewKind(acquired.entry.mime_type))) {
+      return await fileResourceResult(acquired.entry, acquired.entry.environment_id, runtime,
+        {}, { existingTransfer: acquired.entry });
+    }
     const chunks = [];
     for await (const chunk of acquired.stream) chunks.push(chunk);
     const bytes = Buffer.concat(chunks);
@@ -126,6 +134,43 @@ async function publishedCardResult(runtime, publicationId) {
   } finally {
     acquired.release();
   }
+}
+
+async function publishChunkedWorkerFile(runtime, args) {
+  const context = runtime.workspaceHandleManager.resolve(args.workspace_handle);
+  const base = { workspace_id: context.workspace_id, expected_workspace_root: context.workspace_root };
+  const invoke = (method, params, timeoutMs = 120_000) =>
+    runtime.workerHub.call(context.environment_id, method, params, { timeoutMs });
+  const inspected = await invoke('transfer_inspect', { ...base, source_path: args.path });
+  if (inspected.kind !== 'file' || inspected.entries?.length !== 1 ||
+      inspected.entries[0].type !== 'file') throw new Error('Publish source must be a regular file.');
+  const entry = inspected.entries[0];
+  const mime = mimeTypeFor(inspected.source_path);
+  if (publishedPreviewKind(mime) === 'markdown') {
+    throw new Error('Markdown exceeds the visual-inspection size limit and cannot be published without review.');
+  }
+  if (entry.size > runtime.fileTransferStore.maxTotalBytes) {
+    throw new Error('File exceeds CCM publication cache capacity.');
+  }
+  const source = { ...base, source_path: args.path, size: entry.size, mtime_ms: entry.mtime_ms };
+  const digest = await invoke('transfer_digest', { ...source, relative: '' }, 600_000);
+  const chunks = (async function* () {
+    for (let offset = 0; offset < entry.size;) {
+      const length = Math.min(TRANSFER_CHUNK_BYTES, entry.size - offset);
+      const chunk = await invoke('transfer_read', { ...source, relative: '', offset, length });
+      if (chunk.byte_length !== length) throw new Error('Worker transfer chunk length mismatch.');
+      const bytes = Buffer.from(chunk.data, 'base64');
+      if (bytes.length !== length) throw new Error('Worker transfer chunk is incomplete.');
+      yield bytes;
+      offset += length;
+    }
+  })();
+  const transfer = await runtime.fileTransferStore.putChunks({
+    filename: path.basename(inspected.source_path), mime_type: mime,
+    byte_length: entry.size, sha256: digest.sha256,
+  }, chunks, { environmentId: context.environment_id });
+  return fileResourceResult(transfer, context.environment_id, runtime,
+    {}, { existingTransfer: transfer });
 }
 
 function receivedFileResult(value, environmentId) {
@@ -260,7 +305,7 @@ export function registerSpecializedTools(registry, runtime) {
     description: [
       "Publish an immutable snapshot without an MCP App card: plan_id alone OR workspace_handle plus path. Returns publication_id, bearer-accessible HTTPS links (up to 72 hours), and Markdown screenshots/diagnostics.",
       "Deliver links by default; only publish_card(publication_id) displays the same cached snapshot. Summarize Plans rather than pasting them. Publishing does not authorize implementation.",
-      "For Worker files at or below the default 12 MiB limit use publish; for larger files proactively call quark_upload even without explicit Quark request (no share link is needed). Honor an explicitly requested delivery method; report upload failures.",
+      "Use publish for Worker files of any size within the configured publication-cache capacity. Large files are transferred in chunks. Honor an explicitly requested delivery method.",
       "MANDATORY Markdown/Plan gate: inspect actual screenshots and render_inspection before sharing ANY link or calling publish_card. Check formulas, line breaks, tables, overflow and coverage. Automatic pass is insufficient. If screenshots are missing, review is incomplete or defects remain, withhold all links; fix/re-publish or report blocked review.",
       "Non-Markdown files need no visual gate. Office files are download-only; Worker paths resolve from the context root. Not a native ChatGPT attachment.",
     ].join('\n\n'),
@@ -286,7 +331,15 @@ export function registerSpecializedTools(registry, runtime) {
             data: bytes.toString('base64'),
           }, null, runtime, { plan_id: args.plan_id });
         }
-        const value = await runtime.fileService.sendFile({ workspace_handle: args.workspace_handle, path: args.path });
+        let value;
+        try {
+          value = await runtime.fileService.sendFile({ workspace_handle: args.workspace_handle, path: args.path });
+        } catch (error) {
+          if (/^file exceeds CCM send_file limit \(\d+ > \d+ bytes\)/.test(String(error?.message || error))) {
+            return await publishChunkedWorkerFile(runtime, args);
+          }
+          throw error;
+        }
         return await fileResourceResult(
           value,
           value.environment_id,

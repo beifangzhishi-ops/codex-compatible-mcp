@@ -54,7 +54,7 @@ function resolveFilePath(environment, requestedPath) {
     : path.resolve(environment.cwd, requestedPath);
 }
 
-function mimeTypeFor(filePath) {
+export function mimeTypeFor(filePath) {
   return MIME_BY_EXTENSION.get(path.extname(filePath).toLowerCase()) ||
     'application/octet-stream';
 }

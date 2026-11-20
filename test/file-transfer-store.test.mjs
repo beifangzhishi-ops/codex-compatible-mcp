@@ -96,3 +96,15 @@ test('Failed publish does not evict an existing valid file', async () => withDir
   assert.ok(store.get(existing.token));
   store.close();
 }));
+
+test('Chunked publication rejects incomplete or changed content without losing existing files', async () => withDir(async (dir) => {
+  const store = new FileTransferStore({ stateDir: dir, maxTotalBytes: 32 });
+  const old = store.put(encoded('old'));
+  await assert.rejects(store.putChunks({ filename: 'new.bin', mime_type: 'application/octet-stream',
+    byte_length: 5 }, (async function* () { yield Buffer.from('no'); })()), /incomplete/i);
+  await assert.rejects(store.putChunks({ filename: 'new.bin', mime_type: 'application/octet-stream',
+    byte_length: 2, sha256: '0'.repeat(64) }, (async function* () { yield Buffer.from('no'); })()), /checksum/i);
+  assert.ok(store.get(old.token));
+  assert.deepEqual((await fs.readdir(dir)).sort(), [old.token + '.bin', old.token + '.json'].sort());
+  store.close();
+}));
