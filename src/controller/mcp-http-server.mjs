@@ -260,7 +260,7 @@ export function createHttpController({
   const protocolServers = new Map();
 
   const download = async (req, res) => {
-    const match = /^\/ccm\/(download|preview)\/([^/]+)$/.exec(req.path);
+    const match = /^\/ccm\/(get|download|preview)\/([^/]+)$/.exec(req.path);
     if (!match || !FILE_TOKEN_RE.test(match[2])) {
       res.status(404).end();
       return;
@@ -272,6 +272,25 @@ export function createHttpController({
     }
     const entryInfo = runtime.fileTransferStore?.get(match[2]);
     if (!entryInfo) { res.status(404).end(); return; }
+    if (match[1] === 'get') {
+      const safeName = String(entryInfo.filename).replace(/[\r\n\\/"\x00-\x1f\x7f]/g, '_');
+      const escape = (value) => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+      const fileUrl = '/ccm/download/' + match[2];
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Referrer-Policy', 'no-referrer');
+      res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+      res.status(200).type('html').send(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>下载文件</title><style>
+        :root{color-scheme:light dark}body{font:16px/1.6 system-ui,sans-serif;max-width:540px;margin:12vh auto;padding:0 24px}
+        h1{font-size:22px}p{overflow-wrap:anywhere}a{display:inline-block;margin:12px 0;padding:12px 22px;background:#1677ff;color:white;text-decoration:none;border-radius:9px}
+        small{display:block;opacity:.7}
+      </style></head><body><h1>文件已准备好</h1><p>${escape(entryInfo.filename)}</p>
+        <a href="${fileUrl}" download="${escape(safeName)}" target="ccm-download-target">开始下载</a>
+        <iframe name="ccm-download-target" title="文件下载" hidden></iframe>
+        <small>下载开始后，可在浏览器下载列表查看进度并关闭此页面。</small></body></html>`);
+      return;
+    }
     const preview = match[1] === 'preview';
     const kind = preview ? publishedPreviewKind(entryInfo.mime_type) : null;
     if (preview && !kind) { res.status(404).end(); return; }
@@ -326,7 +345,7 @@ export function createHttpController({
     res.on('close', () => stream.destroy());
     stream.pipe(res);
   };
-  app.all(/^\/ccm\/(?:download|preview)(?:\/.*)?$/, download);
+  app.all(/^\/ccm\/(?:get|download|preview)(?:\/.*)?$/, download);
 
   app.get('/ccm/health', (_req, res) => {
     const extraHealth = typeof healthProvider === 'function'

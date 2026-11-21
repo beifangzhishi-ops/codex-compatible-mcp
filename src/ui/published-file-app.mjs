@@ -146,7 +146,7 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
         }
         });
       }
-      enableExternalLink(link, 'download');
+      enableExternalLink(link, 'get');
       enableExternalLink(fullLink, 'preview');
       enableExternalLink(imageLink, 'preview');
       enableExternalLink(previewLink, 'preview');
@@ -154,7 +154,7 @@ export const PUBLISHED_FILE_UI_HTML = String.raw`<!doctype html>
         const value = result?.structuredContent || result;
         if (value?.capability !== 'publish') return;
         const downloadUrl = value.download_url;
-        if (!validUrl(downloadUrl, 'download')) {
+        if (!validUrl(downloadUrl, 'get')) {
           status.textContent = 'Invalid CCM download URL.';
           sizeChanged();
           return;
