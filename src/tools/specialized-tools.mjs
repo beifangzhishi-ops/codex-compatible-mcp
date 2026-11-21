@@ -58,7 +58,7 @@ async function fileResourceResult(value, environmentId, runtime, metadata = {}, 
     renderCheck = await inspectMarkdownRender(markdownSource, value.filename);
   }
   const transfer = options.existingTransfer || fileTransferStore.put(value, { environmentId });
-  const url = origin + '/ccm/get/' + transfer.token;
+  const url = origin + '/ccm/download/start/' + transfer.token;
   const previewUrl = previewKind && previewKind !== 'text'
     ? origin + '/ccm/preview/' + transfer.token : undefined;
   const textPreview = (previewKind === 'text' || previewKind === 'markdown') && typeof value.data === 'string'

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
 import { PUBLISHED_FILE_UI_HTML, PUBLISHED_FILE_UI_URI } from '../src/ui/published-file-app.mjs';
 
-const downloadUrl = 'https://example.test/ccm/get/12345678-1234-4234-8234-123456789abc';
+const downloadUrl = 'https://example.test/ccm/download/start/12345678-1234-4234-8234-123456789abc';
 const previewUrl = 'https://example.test/ccm/preview/12345678-1234-4234-8234-123456789abc';
 const fullTextUrl = 'https://example.test/ccm/preview/12345678-1234-4234-8234-123456789abc';
 

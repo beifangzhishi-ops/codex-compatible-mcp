@@ -260,7 +260,7 @@ export function createHttpController({
   const protocolServers = new Map();
 
   const download = async (req, res) => {
-    const match = /^\/ccm\/(get|download|preview)\/([^/]+)$/.exec(req.path);
+    const match = /^\/ccm\/(download\/start|download|preview)\/([^/]+)$/.exec(req.path);
     if (!match || !FILE_TOKEN_RE.test(match[2])) {
       res.status(404).end();
       return;
@@ -272,7 +272,7 @@ export function createHttpController({
     }
     const entryInfo = runtime.fileTransferStore?.get(match[2]);
     if (!entryInfo) { res.status(404).end(); return; }
-    if (match[1] === 'get') {
+    if (match[1] === 'download/start') {
       const safeName = String(entryInfo.filename).replace(/[\r\n\\/"\x00-\x1f\x7f]/g, '_');
       const escape = (value) => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;')
         .replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
@@ -345,7 +345,7 @@ export function createHttpController({
     res.on('close', () => stream.destroy());
     stream.pipe(res);
   };
-  app.all(/^\/ccm\/(?:get|download|preview)(?:\/.*)?$/, download);
+  app.all(/^\/ccm\/(?:download|preview)(?:\/.*)?$/, download);
 
   app.get('/ccm/health', (_req, res) => {
     const extraHealth = typeof healthProvider === 'function'

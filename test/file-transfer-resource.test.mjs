@@ -54,7 +54,7 @@ test('Controller streams original file bytes and safe attachment headers', async
 test('Published download entry uses a same-origin user click without navigating the page', async () => withController(async ({ store, origin }) => {
   const bytes = Buffer.from('file data');
   const entry = put(store, bytes);
-  const url = origin + '/ccm/get/' + entry.token;
+  const url = origin + '/ccm/download/start/' + entry.token;
   const response = await fetch(url + '?utm_source=chatgpt.com');
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type'), /^text\/html/);
@@ -65,7 +65,7 @@ test('Published download entry uses a same-origin user click without navigating 
   assert.match(html, /<iframe name="ccm-download-target"/);
   assert.doesNotMatch(html, /<script|fetch\(|\.click\(/);
   assert.equal((await fetch(url, { method: 'POST' })).status, 405);
-  assert.equal((await fetch(origin + '/ccm/get/not-a-token')).status, 404);
+  assert.equal((await fetch(origin + '/ccm/download/start/not-a-token')).status, 404);
   const direct = await fetch(origin + '/ccm/download/' + entry.token);
   assert.match(direct.headers.get('content-disposition'), /^attachment/);
   assert.deepEqual(Buffer.from(await direct.arrayBuffer()), bytes);

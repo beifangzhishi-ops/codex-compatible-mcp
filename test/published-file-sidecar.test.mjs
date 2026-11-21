@@ -12,7 +12,7 @@ test('HTTPS file sidecar streams 16 MiB without OAuth and redacts URL tokens', a
   const token = '12345678-1234-4234-8234-123456789abc';
   const bytes = Buffer.alloc(16 * 1024 * 1024, 0x61);
   const upstream = http.createServer((req, res) => {
-    if (req.url === '/ccm/get/' + token) {
+    if (req.url === '/ccm/download/start/' + token) {
       const html = Buffer.from('<a href="/ccm/download/' + token + '" download>Download</a>');
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': html.length });
       res.end(html);
@@ -33,7 +33,7 @@ test('HTTPS file sidecar streams 16 MiB without OAuth and redacts URL tokens', a
     await listenCcmOAuthServer(server, 0);
     const base = 'http://127.0.0.1:' + server.server.address().port;
     const url = base + '/ccm/download/' + token;
-    const landing = await fetch(base + '/ccm/get/' + token + '?utm_source=chatgpt.com');
+    const landing = await fetch(base + '/ccm/download/start/' + token + '?utm_source=chatgpt.com');
     assert.equal(landing.status, 200);
     assert.match(landing.headers.get('content-type'), /^text\/html/);
     assert.match(await landing.text(), /download/);
