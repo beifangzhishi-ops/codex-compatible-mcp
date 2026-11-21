@@ -51,7 +51,7 @@ test('Controller streams original file bytes and safe attachment headers', async
   assert.equal((await fetch(origin + '/ccm/preview/' + entry.token, { method: 'POST' })).status, 405);
 }));
 
-test('Published download entry uses a same-origin user click without navigating the page', async () => withController(async ({ store, origin }) => {
+test('Published download entry automatically loads the original attachment in a hidden frame', async () => withController(async ({ store, origin }) => {
   const bytes = Buffer.from('file data');
   const entry = put(store, bytes);
   const url = origin + '/ccm/download/start/' + entry.token;
@@ -61,8 +61,8 @@ test('Published download entry uses a same-origin user click without navigating 
   assert.match(response.headers.get('content-security-policy'), /frame-src 'self'/);
   assert.equal(response.headers.get('cache-control'), 'no-store');
   const html = await response.text();
+  assert.match(html, /<iframe src="\/ccm\/download\/[0-9a-f-]+" name="ccm-download-target"/);
   assert.match(html, /href="\/ccm\/download\/[0-9a-f-]+" download="中文__file\.txt" target="ccm-download-target"/);
-  assert.match(html, /<iframe name="ccm-download-target"/);
   assert.doesNotMatch(html, /<script|fetch\(|\.click\(/);
   assert.equal((await fetch(url, { method: 'POST' })).status, 405);
   assert.equal((await fetch(origin + '/ccm/download/start/not-a-token')).status, 404);

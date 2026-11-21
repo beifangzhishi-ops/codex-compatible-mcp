@@ -285,10 +285,10 @@ export function createHttpController({
         :root{color-scheme:light dark}body{font:16px/1.6 system-ui,sans-serif;max-width:540px;margin:12vh auto;padding:0 24px}
         h1{font-size:22px}p{overflow-wrap:anywhere}a{display:inline-block;margin:12px 0;padding:12px 22px;background:#1677ff;color:white;text-decoration:none;border-radius:9px}
         small{display:block;opacity:.7}
-      </style></head><body><h1>文件已准备好</h1><p>${escape(entryInfo.filename)}</p>
-        <a href="${fileUrl}" download="${escape(safeName)}" target="ccm-download-target">开始下载</a>
-        <iframe name="ccm-download-target" title="文件下载" hidden></iframe>
-        <small>下载开始后，可在浏览器下载列表查看进度并关闭此页面。</small></body></html>`);
+      </style></head><body><h1>正在启动下载</h1><p>${escape(entryInfo.filename)}</p>
+        <iframe src="${fileUrl}" name="ccm-download-target" title="文件下载" hidden></iframe>
+        <small>下载将自动开始，可在浏览器下载列表查看进度并关闭此页面。</small>
+        <p><a href="${fileUrl}" download="${escape(safeName)}" target="ccm-download-target">没有开始？点此下载</a></p></body></html>`);
       return;
     }
     const preview = match[1] === 'preview';
