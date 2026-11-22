@@ -6,7 +6,6 @@ import path from 'node:path';
 import { registerSpecializedTools } from '../src/tools/specialized-tools.mjs';
 import { ToolRegistry } from '../src/tools/tool-registry.mjs';
 import { FileTransferStore } from '../src/controller/file-transfer-store.mjs';
-import { PUBLISHED_FILE_UI_URI } from '../src/ui/published-file-app.mjs';
 import { PlanManager } from '../src/controller/plan-manager.mjs';
 
 function fakeRuntime() {
@@ -104,12 +103,9 @@ test('publish is a peer MCP tool and yields an HTTPS URL', async () => {
   registerSpecializedTools(registry, runtime);
   const publish = registry.get('ccm-extra.publish');
   assert.ok(publish);
-  assert.equal(publish.mcpMeta, undefined, 'publish must not attach a card');
-  assert.match(publish.description, /without an MCP App card/);
+  assert.equal(publish.mcpMeta, undefined, 'publish must only return links');
+  assert.match(publish.description, /as HTTPS links/);
   assert.match(publish.description, /before sharing ANY link/);
-  const cardTool = registry.get('ccm-extra.publish_card');
-  assert.equal(cardTool.mcpMeta.ui.resourceUri, PUBLISHED_FILE_UI_URI);
-  assert.equal(cardTool.mcpMeta['openai/outputTemplate'], PUBLISHED_FILE_UI_URI);
   assert.match(publish.description, /Large files are transferred in chunks/);
   assert.doesNotMatch(publish.description, /quark_upload|12 MiB/i);
   assert.match(publish.description, /Honor an explicitly requested delivery method/);
@@ -126,14 +122,8 @@ test('publish is a peer MCP tool and yields an HTTPS URL', async () => {
   const token = direct.structuredContent.download_url.split('/').at(-1);
   assert.equal(direct.structuredContent.publication_id, token);
   assert.equal(runtime.fileTransferStore.get(token).byte_length, 4);
-  const card = await cardTool.handler({ publication_id: token });
-  assert.equal(card.isError, undefined);
-  assert.equal(card.structuredContent.capability, 'publish');
-  assert.equal(card.structuredContent.publication_id, token);
-  assert.equal(card.structuredContent.download_url, direct.structuredContent.download_url);
-  assert.equal(card.structuredContent.sha256, direct.structuredContent.sha256);
-  assert.equal(runtime.calls.filter((call) => call.sendFile).length, 1, 'card must not re-read Worker');
-  assert.equal(runtime.fileTransferStore.entries.size, 1, 'card must reuse original cache entry');
+  assert.equal(runtime.calls.filter((call) => call.sendFile).length, 1);
+  assert.equal(runtime.fileTransferStore.entries.size, 1);
   const second = await publish.handler(args);
   assert.equal(second.isError, undefined);
   assert.equal(second.structuredContent.capability, 'publish');
@@ -145,7 +135,7 @@ test('publish is a peer MCP tool and yields an HTTPS URL', async () => {
   runtime.fileTransferStore.close();
 });
 
-test('publish and publish_card reuse a published image without re-uploading', async () => {
+test('publish returns an image preview link without a card', async () => {
   const runtime = fakeRuntime();
   const registry = new ToolRegistry();
   registerSpecializedTools(registry, runtime);
@@ -159,9 +149,7 @@ test('publish and publish_card reuse a published image without re-uploading', as
     path: 'portrait.png', workspace_handle: '00000000-0000-4000-8000-000000000001',
   });
   const token = result.structuredContent.download_url.split('/').at(-1);
-  const card = await registry.get('ccm-extra.publish_card').handler({ publication_id: token });
-  assert.equal(card.structuredContent.preview_url, result.structuredContent.preview_url);
-  assert.equal(card.structuredContent.sha256, result.structuredContent.sha256);
+  assert.equal(result.structuredContent.preview_kind, 'image');
   assert.equal(result.structuredContent.preview_url, 'https://example.test/ccm/preview/' + token);
   assert.equal(result.structuredContent.filename, 'portrait.png');
   assert.equal(result.structuredContent.download_url, 'https://example.test/ccm/download/start/' + token);
@@ -202,9 +190,7 @@ test('publish transfers files larger than WorkerHub message capacity in chunks',
   assert.equal(result.structuredContent.sha256, expectedHash);
   assert.equal(operations.filter(x => x === 'transfer_read').length, 7);
   const entry = runtime.fileTransferStore.get(result.structuredContent.publication_id);
-  const card = await registry.get('ccm-extra.publish_card').handler({ publication_id: entry.token });
-  assert.equal(card.structuredContent.publication_id, entry.token);
-  assert.equal(card.structuredContent.sha256, expectedHash);
+  assert.equal(entry.sha256, expectedHash);
   runtime.fileTransferStore.close();
 });
 
@@ -262,12 +248,7 @@ test('publish accepts exclusive Plan or Worker modes, with a complete immutable 
     assert.match(result.structuredContent.preview_url, /^https:\/\/example\.test\/ccm\/preview\//);
     const token = result.structuredContent.download_url.split('/').at(-1);
     assert.equal(result.structuredContent.publication_id, token);
-    const card = await registry.get('ccm-extra.publish_card').handler({ publication_id: token });
-    assert.equal(card.structuredContent.download_url, result.structuredContent.download_url);
-    assert.equal(card.structuredContent.preview_url, result.structuredContent.preview_url);
-    assert.equal(card.structuredContent.sha256, result.structuredContent.sha256);
-    assert.equal(card.structuredContent.markdown_preview, result.structuredContent.markdown_preview);
-    assert.equal(card.content.filter((item) => item.type === 'image').length, 0, 'card must not re-render screenshots');
+    assert.equal(result.structuredContent.publication_id, token);
     assert.equal(runtime.fileTransferStore.entries.size, 1);
     const snapshot = runtime.fileTransferStore.acquire(token);
     assert.ok(snapshot);
@@ -282,8 +263,7 @@ test('publish accepts exclusive Plan or Worker modes, with a complete immutable 
     ].join('\n'));
     const updated = await publish.handler({ plan_id: planId });
     assert.notEqual(updated.structuredContent.download_url, result.structuredContent.download_url);
-    const previousCard = await registry.get('ccm-extra.publish_card').handler({ publication_id: token });
-    assert.equal(previousCard.structuredContent.download_url, result.structuredContent.download_url, 'original card must remain pinned after Plan edits');
+    assert.equal(runtime.fileTransferStore.get(token)?.sha256, result.structuredContent.sha256, 'original publication remains pinned after Plan edits');
     assert.match(updated.structuredContent.markdown_preview, /^<h1>Updated Plan 标题<\/h1>/);
     const original = runtime.fileTransferStore.acquire(token);
     const originalChunks = [];
@@ -326,28 +306,6 @@ test('publish rejects invalid Markdown bytes before making a publication', async
     assert.equal(result.structuredContent, undefined);
     assert.equal(runtime.fileTransferStore.entries.size, 0);
   }
-  runtime.fileTransferStore.close();
-});
-
-test('publish_card rejects missing and expired publications without creating a new snapshot', async () => {
-  let now = 1000;
-  const runtime = fakeRuntime();
-  runtime.fileTransferStore.close();
-  runtime.fileTransferStore = new FileTransferStore({ clock: () => now });
-  const registry = new ToolRegistry();
-  registerSpecializedTools(registry, runtime);
-  const card = registry.get('ccm-extra.publish_card');
-  const missing = await card.handler({ publication_id: '00000000-0000-4000-8000-000000000099' });
-  assert.equal(missing.isError, true);
-  assert.match(missing.content[0].text, /not found or expired/);
-  const result = await registry.get('ccm-extra.publish').handler({
-    path: 'report.docx', workspace_handle: '00000000-0000-4000-8000-000000000001',
-  });
-  now += 72 * 60 * 60 * 1000 + 1;
-  const expired = await card.handler({ publication_id: result.structuredContent.publication_id });
-  assert.equal(expired.isError, true);
-  assert.match(expired.content[0].text, /not found or expired/);
-  assert.equal(runtime.fileTransferStore.entries.size, 0);
   runtime.fileTransferStore.close();
 });
 

@@ -4,10 +4,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { constantTimeEqual } from '../../ccm-sidecar/oauth.mjs';
 import { readCcmSection } from '../runtime/ccm-config.mjs';
-import {
-  PUBLISHED_FILE_UI_HTML,
-  PUBLISHED_FILE_UI_URI,
-} from '../ui/published-file-app.mjs';
 import { publishedPreviewKind, ISOLATED_MARKUP_CSP } from './published-file-preview.mjs';
 import { renderMarkdownDocument } from './markdown-preview.mjs';
 import { FILE_TOKEN_RE } from './file-transfer-store.mjs';
@@ -109,35 +105,6 @@ function createProtocolServer(
         uri: PREVIOUS_APPROVAL_UI_URI,
         mimeType: 'text/html;profile=mcp-app',
         text: APPROVAL_UI_HTML,
-      }],
-    }),
-  );
-
-  server.registerResource(
-    'ccm-published-file-ui',
-    PUBLISHED_FILE_UI_URI,
-    {
-      title: 'CCM published file',
-      mimeType: 'text/html;profile=mcp-app',
-    },
-    async () => ({
-      contents: [{
-        uri: PUBLISHED_FILE_UI_URI,
-        mimeType: 'text/html;profile=mcp-app',
-        text: PUBLISHED_FILE_UI_HTML,
-        _meta: {
-          'openai/widgetCSP': {
-            redirect_domains: typeof runtime.fileDownloadOrigin === 'function'
-              ? [runtime.fileDownloadOrigin()] : [],
-          },
-          ui: {
-            prefersBorder: true,
-            csp: {
-              resourceDomains: typeof runtime.fileDownloadOrigin === 'function'
-                ? [runtime.fileDownloadOrigin()] : [],
-            },
-          },
-        },
       }],
     }),
   );

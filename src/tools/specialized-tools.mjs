@@ -2,7 +2,6 @@ import * as z from 'zod/v4';
 import path from 'node:path';
 import { TRANSFER_CHUNK_BYTES } from '../runtime/filesystem/transfer-worker.mjs';
 import { mimeTypeFor } from '../runtime/filesystem/send-file.mjs';
-import { PUBLISHED_FILE_UI_URI } from '../ui/published-file-app.mjs';
 import { textPreviewFromBase64 } from '../controller/text-file-preview.mjs';
 import { publishedPreviewKind } from '../controller/published-file-preview.mjs';
 import { renderMarkdownFragment } from '../controller/markdown-preview.mjs';
@@ -76,7 +75,7 @@ async function fileResourceResult(value, environmentId, runtime, metadata = {}, 
         (previewUrl ? '\nPreview: ' + previewUrl : '') +
         '\nExpires: ' + new Date(transfer.expiresAt).toISOString() +
         (renderCheck ? '\nRender inspection: ' + JSON.stringify(renderCheck.inspection) +
-          '\nModel: You MUST actually inspect the returned screenshots and diagnostics before sharing ANY Markdown download/preview link or calling publish_card. ' +
+          '\nModel: You MUST actually inspect the returned screenshots and diagnostics before sharing ANY Markdown download/preview link. ' +
           'If screenshots are unavailable, incomplete for required content, or show defects, DO NOT deliver the links. ' +
           'Correct defects and re-publish; report unavailable visual review without handing off an unverified Markdown link. ' +
           'Automated checks passing does not mean the model visually reviewed the document.' : '') },
@@ -110,30 +109,6 @@ async function fileResourceResult(value, environmentId, runtime, metadata = {}, 
       expires_at: new Date(transfer.expiresAt).toISOString(),
     },
   };
-}
-
-async function publishedCardResult(runtime, publicationId) {
-  const acquired = runtime.fileTransferStore?.acquire(publicationId);
-  if (!acquired) throw new Error('Publication not found or expired; call publish again.');
-  try {
-    if (acquired.entry.byte_length > 2 * 1024 * 1024 ||
-        !['text', 'markdown'].includes(publishedPreviewKind(acquired.entry.mime_type))) {
-      return await fileResourceResult(acquired.entry, acquired.entry.environment_id, runtime,
-        {}, { existingTransfer: acquired.entry });
-    }
-    const chunks = [];
-    for await (const chunk of acquired.stream) chunks.push(chunk);
-    const bytes = Buffer.concat(chunks);
-    if (bytes.length !== acquired.entry.byte_length) throw new Error('Published snapshot is incomplete; call publish again.');
-    return await fileResourceResult({
-      filename: acquired.entry.filename,
-      mime_type: acquired.entry.mime_type,
-      byte_length: bytes.length,
-      data: bytes.toString('base64'),
-    }, acquired.entry.environment_id, runtime, {}, { existingTransfer: acquired.entry });
-  } finally {
-    acquired.release();
-  }
 }
 
 async function publishChunkedWorkerFile(runtime, args) {
@@ -312,10 +287,10 @@ export function registerSpecializedTools(registry, runtime) {
     tags: ['file', 'attachment', 'transfer', 'gpt'],
     supportsParallel: false,
     description: [
-      "Publish an immutable snapshot without an MCP App card: plan_id alone OR Worker file path (workspace_handle optional). Without a handle, CCM creates a projectless context on the primary Worker or environment_id. Returns publication_id, bearer-accessible HTTPS links (up to 72 hours), and Markdown screenshots/diagnostics.",
-      "Deliver links by default; only publish_card(publication_id) displays the same cached snapshot. Summarize Plans rather than pasting them. Publishing does not authorize implementation.",
+      "Publish an immutable snapshot as HTTPS links: plan_id alone OR Worker file path (workspace_handle optional). Without a handle, CCM creates a projectless context on the primary Worker or environment_id. Returns publication_id, bearer-accessible HTTPS links (up to 72 hours), and Markdown screenshots/diagnostics.",
+      "Deliver download/preview links. Summarize Plans rather than pasting them. Publishing does not authorize implementation.",
       "Use publish for Worker files of any size within the configured publication-cache capacity. Large files are transferred in chunks. Honor an explicitly requested delivery method.",
-      "MANDATORY Markdown/Plan gate: inspect actual screenshots and render_inspection before sharing ANY link or calling publish_card. Check formulas, line breaks, tables, overflow and coverage. Automatic pass is insufficient. If screenshots are missing, review is incomplete or defects remain, withhold all links; fix/re-publish or report blocked review.",
+      "MANDATORY Markdown/Plan gate: inspect actual screenshots and render_inspection before sharing ANY link. Check formulas, line breaks, tables, overflow and coverage. Automatic pass is insufficient. If screenshots are missing, review is incomplete or defects remain, withhold all links; fix/re-publish or report blocked review.",
       "Non-Markdown files need no visual gate. Office files are download-only; Worker paths resolve from the context root. Not a native ChatGPT attachment.",
     ].join('\n\n'),
     inputSchema: z.object({
@@ -360,33 +335,6 @@ export function registerSpecializedTools(registry, runtime) {
           runtime,
           { workspace_handle: workspaceHandle.workspace_handle },
         );
-      } catch (error) {
-        return toolError(error);
-      }
-    },
-  });
-
-  registry.register({
-    namespace: 'ccm-extra',
-    name: 'publish_card',
-    provider: 'ccm-specialized',
-    provenance: 'ccm-https-file-publishing',
-    tags: ['file', 'attachment', 'transfer', 'gpt', 'card'],
-    mcpMeta: {
-      ui: { resourceUri: PUBLISHED_FILE_UI_URI },
-      'openai/outputTemplate': PUBLISHED_FILE_UI_URI,
-    },
-    supportsParallel: false,
-    description: [
-      "Show an MCP App card for an existing immutable publication_id from publish. Reuses the cached snapshot and URLs; never re-reads the source.",
-      "For Markdown/Plans, call ONLY after actual screenshot/diagnostic review passes, including adequate coverage. If expired, re-publish and review again; never show an unreviewed Markdown card.",
-    ].join('\n\n'),
-    inputSchema: z.object({
-      publication_id: z.string().uuid().describe('Exact immutable publication_id returned by publish; expires with its cached file.'),
-    }).strict(),
-    handler: async ({ publication_id }) => {
-      try {
-        return await publishedCardResult(runtime, publication_id);
       } catch (error) {
         return toolError(error);
       }
