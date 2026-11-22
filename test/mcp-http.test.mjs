@@ -131,7 +131,8 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const listed = await client.listTools();
     const names = listed.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, registry.list().map((tool) => tool.name).sort());
-    assert.equal(names.length, 27);
+    assert.equal(names.length, 26);
+    assert.equal(names.includes('create_projectless_handle'), false);
     for (const name of ['list_projects','claim_full_access','select_workspace','register_workspace','unregister_workspace',
       'plan_patch','plan_read','restart','import_chatgpt_file','conversation','quark_upload','publish','publish_card',
       'transfer_path','transfer_status','transfer_cancel']) {
@@ -146,7 +147,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(toolDescription('list_projects'), /project_directory_hint.*display only/);
     assert.match(toolDescription('select_workspace'), /explicitly requested entry\/switch/);
     assert.match(toolDescription('register_workspace'), /explicit user registration request/);
-    assert.match(toolDescription('create_projectless_handle'), /Never use it to bypass/);
+    assert.match(toolDescription('exec_command'), /omitted handles auto-create a projectless context/);
     assert.match(toolDescription('write_stdin'), /Empty chars polls are read-only/);
     assert.match(toolDescription('request_verification_input'), /automatic code-free follow-up/);
     assert.match(toolDescription('request_verification_input'), /Do NOT inspect or request the code/);
@@ -210,14 +211,15 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(fileResource.contents[0].text, /openExternal/);
 
     const projectless = await client.callTool({
-      name: 'create_projectless_handle',
-      arguments: {},
+      name: 'exec_command',
+      arguments: { cmd: 'Write-Output AUTO_CONTEXT_OK' },
     });
     assert.equal(projectless.isError, undefined);
     const projectlessResult = projectless.structuredContent;
     const workspaceHandle = projectlessResult.workspace_handle;
     const workspaceRoot = projectlessResult.workspace_root;
     assert.equal(projectlessResult.workspace_kind, 'projectless');
+    assert.match(projectlessResult.output, /AUTO_CONTEXT_OK/);
 
     const completeProjectDiscovery = await client.callTool({
       name: 'list_projects', arguments: { all: true },

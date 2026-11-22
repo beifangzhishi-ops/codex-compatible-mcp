@@ -23,6 +23,9 @@ function fakeRuntime() {
       },
     },
     workspaceHandleManager: {
+      async resolveOrCreate(handleId, environmentId = null) {
+        return handleId ? this.resolve(handleId) : this.createProjectless(environmentId);
+      },
       async createProjectless(environmentId = null) {
         const context = {
           workspace_handle: '00000000-0000-4000-8000-000000000001',
@@ -135,6 +138,10 @@ test('publish is a peer MCP tool and yields an HTTPS URL', async () => {
   assert.equal(second.isError, undefined);
   assert.equal(second.structuredContent.capability, 'publish');
   assert.ok(!second.content.some((item) => item.type === 'resource_link'));
+  const automatic = await publish.handler({ path: 'report.docx' });
+  assert.equal(automatic.isError, undefined);
+  assert.equal(automatic.structuredContent.workspace_handle, '00000000-0000-4000-8000-000000000001');
+  assert.equal(runtime.calls.at(-1).sendFile.workspace_handle, '00000000-0000-4000-8000-000000000001');
   runtime.fileTransferStore.close();
 });
 
@@ -286,11 +293,12 @@ test('publish accepts exclusive Plan or Worker modes, with a complete immutable 
     assert.equal(runtime.calls.filter((call) => call.sendFile).length, 0);
 
     const workerArgs = { workspace_handle: '00000000-0000-4000-8000-000000000001', path: 'report.docx' };
-    for (const invalid of [{}, { plan_id: planId, ...workerArgs }, { plan_id: planId, path: 'x' }, { path: 'x' }, { workspace_handle: workerArgs.workspace_handle }, { plan_id: 'bad' }]) {
+    for (const invalid of [{}, { plan_id: planId, ...workerArgs }, { plan_id: planId, path: 'x' }, { workspace_handle: workerArgs.workspace_handle }, { plan_id: 'bad' }, { path: 'x', workspace_handle: workerArgs.workspace_handle, environment_id: 'worker-a' }]) {
       assert.throws(() => registry.validateArguments(publish, invalid));
     }
     assert.deepEqual(registry.validateArguments(publish, { plan_id: planId }), { plan_id: planId });
     assert.deepEqual(registry.validateArguments(publish, workerArgs), workerArgs);
+    assert.deepEqual(registry.validateArguments(publish, { path: 'x' }), { path: 'x' });
     const missing = await publish.handler({ plan_id: '00000000-0000-4000-8000-000000000099' });
     assert.equal(missing.isError, true);
     assert.match(missing.content[0].text, /Unknown plan_id/);

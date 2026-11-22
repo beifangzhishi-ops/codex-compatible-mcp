@@ -141,7 +141,12 @@ function runtimeStub() {
             expires_at: new Date(Date.now() + 60_000).toISOString(),
             intent_sha256: 'a'.repeat(64),
           })
-        : ({ wall_time_seconds: 0, output: '', exit_code: 0 }),
+        : ({ wall_time_seconds: 0, output: '', exit_code: 0,
+            workspace_handle: args.workspace_handle || '00000000-0000-4000-8000-000000000001',
+            environment_id: args.environment_id || 'primary',
+            workspace_kind: args.workspace_handle ? 'registered' : 'projectless',
+            workspace_id: args.workspace_handle ? 'project' : 'projectless-test',
+          }),
       writeStdin: async () => ({ wall_time_seconds: 0, output: '', exit_code: 0 }),
       resolvePendingExecution: async () => ({
         wall_time_seconds: 0,
@@ -231,7 +236,6 @@ test('core tool surface returns workspace handles while retaining approval cards
   assert.deepEqual(direct, [
     'apply_patch',
     'claim_full_access',
-    'create_projectless_handle',
     'exec_command',
     'get_approval_status',
     'get_verification_input_status',
@@ -261,18 +265,7 @@ test('core tool surface returns workspace handles while retaining approval cards
     registry.get('list_projects').description,
     /sandbox_read_scope.*sandbox_write_scope/,
   );
-  assert.match(
-    registry.get('create_projectless_handle').description,
-    /absolute paths outside the projectless root/,
-  );
-  assert.match(
-    registry.get('create_projectless_handle').description,
-    /Never use it to bypass a pending explicit workspace-entry approval/i,
-  );
-  assert.match(
-    registry.get('create_projectless_handle').description,
-    /permitted absolute-path reads/i,
-  );
+  assert.equal(registry.get('create_projectless_handle'), null);
   assert.match(
     registry.get('select_workspace').description,
     /explicitly requested entry\/switch AND there is no usable workspace_handle/i,
@@ -301,7 +294,10 @@ test('core tool surface returns workspace handles while retaining approval cards
     registry.get('exec_command').inputSchema.workspace_handle.description,
     /If user\/project instructions supply one.*reuse it directly/,
   );
-  assert.equal(Object.hasOwn(registry.get('exec_command').inputSchema, 'environment_id'), false);
+  assert.equal(Object.hasOwn(registry.get('exec_command').inputSchema, 'environment_id'), true);
+  for (const name of ['exec_command', 'apply_patch', 'view_image']) {
+    assert.equal(registry.get(name).inputSchema.workspace_handle.isOptional(), true);
+  }
   assert.match(
     registry.get('register_workspace').description,
     /Do not expose pending\/failed handles, retry the frozen action, or bypass it/i,
@@ -330,7 +326,7 @@ test('core tool surface returns workspace handles while retaining approval cards
   );
   assert.match(
     registry.get('apply_patch').description,
-    /Never select\/register implicitly or bypass pending approval/i,
+    /Select\/register only with explicit authorization/i,
   );
   assert.match(
     registry.get('view_image').description,
@@ -439,16 +435,16 @@ test('core tool surface returns workspace handles while retaining approval cards
   assert.equal(strictProjects.isError, true);
   assert.match(strictProjects.content[0].text, /Unknown Remote Worker method/);
 
-  const created = await registry.get('create_projectless_handle').handler({
-    environment_id: 'noha',
-  });
-  assert.equal(created.structuredContent.environment_id, 'noha');
-
   const missingContext = await registry.get('exec_command').handler({
-    cmd: 'Write-Output should-not-run',
+    cmd: 'Write-Output auto-projectless',
   });
-  assert.equal(missingContext.isError, true);
-  assert.match(missingContext.content[0].text, /requires workspace_handle/);
+  assert.equal(missingContext.isError, undefined);
+  assert.equal(missingContext.structuredContent.workspace_kind, 'projectless');
+  assert.equal(missingContext.structuredContent.workspace_handle, '00000000-0000-4000-8000-000000000001');
+  const chosenWorker = await registry.get('exec_command').handler({
+    environment_id: 'noha', cmd: 'Write-Output auto-noha',
+  });
+  assert.equal(chosenWorker.structuredContent.environment_id, 'noha');
 
   const escalation = await registry.get('exec_command').handler({
     workspace_handle: '00000000-0000-4000-8000-000000000001',
@@ -495,7 +491,7 @@ test('core tool surface returns workspace handles while retaining approval cards
 
   assert.ok(registry.list().some((tool) => tool.name === 'claim_full_access'));
   assert.equal((await registry.get('claim_full_access').handler({})).structuredContent.claimed, false);
-  const projectless = await registry.get('create_projectless_handle').handler({ environment_id: 'noha' });
+  const projectless = await registry.get('exec_command').handler({ environment_id: 'noha', cmd: 'Write-Output noha' });
   assert.equal(projectless.structuredContent.environment_id, 'noha');
   const nohaProjects = await registry.get('list_projects').handler({ environment_id: 'noha', all: true });
   assert.equal(nohaProjects.structuredContent.environments[0].id, 'noha');

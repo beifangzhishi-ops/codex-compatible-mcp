@@ -9,20 +9,17 @@ export class RemoteFileService {
     this.webFullAccess = webFullAccess;
   }
 
-  #resolveExecution(args) {
-    if (!args.workspace_handle) {
-      throw new Error('File operation requires workspace_handle.');
-    }
-    if (args.environment_id) {
+  async #resolveExecution(args) {
+    if (args.environment_id && args.workspace_handle) {
       throw new Error(
-        'File operation does not accept environment_id; workspace_handle already determines the environment.',
+        'File operation cannot combine environment_id with workspace_handle; the handle already determines the environment.',
       );
     }
     if (!this.workspaceHandleManager) {
       throw new Error('Workspace handle manager is not available.');
     }
-    const workspaceHandle = this.workspaceHandleManager.resolve(
-      args.workspace_handle,
+    const workspaceHandle = await this.workspaceHandleManager.resolveOrCreate(
+      args.workspace_handle, args.environment_id,
     );
     const environment = this.environmentRegistry.resolve(
       workspaceHandle.environment_id,
@@ -35,7 +32,7 @@ export class RemoteFileService {
   }
 
   async applyPatch(args) {
-    const execution = this.#resolveExecution(args);
+    const execution = await this.#resolveExecution(args);
     const environment = execution.environment;
     const timedFullAccess = this.webFullAccess?.authorize(args.full_access_grant_id) || false;
     if (!environment.capabilities?.applyPatch) {
@@ -63,7 +60,7 @@ export class RemoteFileService {
     return { ...result, ...(execution.workspaceHandle || {}) };
   }
   async viewImage(args) {
-    const execution = this.#resolveExecution(args);
+    const execution = await this.#resolveExecution(args);
     const environment = execution.environment;
     if (!environment.capabilities?.viewImage) {
       throw new Error(
@@ -88,7 +85,7 @@ export class RemoteFileService {
   }
 
   async sendFile(args) {
-    const execution = this.#resolveExecution(args);
+    const execution = await this.#resolveExecution(args);
     const environment = execution.environment;
     if (!environment.capabilities?.sendFile) {
       throw new Error(
@@ -111,7 +108,7 @@ export class RemoteFileService {
   }
 
   async receiveFile(args) {
-    const execution = this.#resolveExecution(args);
+    const execution = await this.#resolveExecution(args);
     const environment = execution.environment;
     if (!environment.capabilities?.receiveFile) {
       throw new Error(

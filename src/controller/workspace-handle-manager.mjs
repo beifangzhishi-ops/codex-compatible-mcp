@@ -91,6 +91,11 @@ export class WorkspaceHandleManager {
     return this.#create(environment.id, workspace);
   }
 
+  async resolveOrCreate(handleId, environmentId = null) {
+    if (handleId) return this.resolve(handleId);
+    return this.createProjectless(environmentId);
+  }
+
   createRegistered(environmentId, workspace) {
     return this.#create(environmentId, workspace);
   }

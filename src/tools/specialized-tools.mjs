@@ -164,13 +164,17 @@ async function publishChunkedWorkerFile(runtime, args) {
       yield bytes;
       offset += length;
     }
+      workspace_handle: value.workspace_handle,
+      workspace_id: value.workspace_id,
+      workspace_kind: value.workspace_kind,
+      workspace_root: value.workspace_root,
   })();
   const transfer = await runtime.fileTransferStore.putChunks({
     filename: path.basename(inspected.source_path), mime_type: mime,
     byte_length: entry.size, sha256: digest.sha256,
   }, chunks, { environmentId: context.environment_id });
   return fileResourceResult(transfer, context.environment_id, runtime,
-    {}, { existingTransfer: transfer });
+    { workspace_handle: context.workspace_handle }, { existingTransfer: transfer });
 }
 
 function receivedFileResult(value, environmentId) {
@@ -258,12 +262,12 @@ async function run(runtime, args, command) {
 export function registerSpecializedTools(registry, runtime) {
   for (const [name, schema, handler, description] of [
     ['transfer_path', {
-      source_handle: z.string().uuid(),
+      source_handle: z.string().uuid().optional(),
       source_path: z.string().min(1),
-      target_handle: z.string().uuid(),
+      target_handle: z.string().uuid().optional(),
       target_path: z.string().min(1),
     }, args => runtime.transferTaskManager.start(args),
-    'Copy a regular file or recursive directory between two existing CCM workspace handles over WorkerHub. Source may be an absolute readable path; target must be relative to the target workspace and MUST NOT already exist. Never overwrites or deletes source; returns transfer_id to monitor.'],
+    'Copy a regular file or recursive directory between two CCM workspace handles over WorkerHub. An omitted handle creates a new projectless context on the primary Worker; use explicit handles for non-primary Workers or registered projects. Source may be an absolute readable path; target must be relative to the target workspace and MUST NOT already exist. Never overwrites or deletes source; returns transfer_id to monitor.'],
     ['transfer_status', { transfer_id: z.string().uuid() },
       args => runtime.transferTaskManager.status(args.transfer_id),
       'Read progress and final outcome of a WorkerHub file/directory transfer by transfer_id.'],
@@ -273,6 +277,10 @@ export function registerSpecializedTools(registry, runtime) {
   ]) {
     registry.register({
       namespace: 'ccm-extra',
+        const workspaceHandle = await runtime.workspaceHandleManager.resolveOrCreate(
+          args.workspace_handle, args.environment_id,
+        );
+        const workerArgs = { path: args.path, workspace_handle: workspaceHandle.workspace_handle };
       name,
       provider: 'ccm-specialized',
       provenance: 'ccm-workerhub-file-transfer',
@@ -283,7 +291,13 @@ export function registerSpecializedTools(registry, runtime) {
       inputSchema: schema,
       handler: async args => {
         try {
-          const value = handler(args);
+          const resolvedArgs = name === 'transfer_path' ? {
+            ...args,
+            source_handle: (await runtime.workspaceHandleManager.resolveOrCreate(args.source_handle)).workspace_handle,
+          { workspace_handle: workspaceHandle.workspace_handle },
+            target_handle: (await runtime.workspaceHandleManager.resolveOrCreate(args.target_handle)).workspace_handle,
+          } : args;
+          const value = await handler(resolvedArgs);
           return {
             content: [{ type: 'text', text: JSON.stringify(value) }],
             structuredContent: value,
@@ -303,7 +317,7 @@ export function registerSpecializedTools(registry, runtime) {
     tags: ['file', 'attachment', 'transfer', 'gpt'],
     supportsParallel: false,
     description: [
-      "Publish an immutable snapshot without an MCP App card: plan_id alone OR workspace_handle plus path. Returns publication_id, bearer-accessible HTTPS links (up to 72 hours), and Markdown screenshots/diagnostics.",
+      "Publish an immutable snapshot without an MCP App card: plan_id alone OR Worker file path (workspace_handle optional). Without a handle, CCM creates a projectless context on the primary Worker or environment_id. Returns publication_id, bearer-accessible HTTPS links (up to 72 hours), and Markdown screenshots/diagnostics.",
       "Deliver links by default; only publish_card(publication_id) displays the same cached snapshot. Summarize Plans rather than pasting them. Publishing does not authorize implementation.",
       "Use publish for Worker files of any size within the configured publication-cache capacity. Large files are transferred in chunks. Honor an explicitly requested delivery method.",
       "MANDATORY Markdown/Plan gate: inspect actual screenshots and render_inspection before sharing ANY link or calling publish_card. Check formulas, line breaks, tables, overflow and coverage. Automatic pass is insufficient. If screenshots are missing, review is incomplete or defects remain, withhold all links; fix/re-publish or report blocked review.",
@@ -311,12 +325,13 @@ export function registerSpecializedTools(registry, runtime) {
     ].join('\n\n'),
     inputSchema: z.object({
       plan_id: z.string().uuid().optional().describe('To publish a Controller Plan: supply only this durable Plan UUID.'),
-      path: z.string().min(1).optional().describe('To publish a Worker file: supply its path and workspace_handle, without plan_id.'),
-      workspace_handle: z.string().uuid().optional().describe('Required with path for Worker file publishing; forbidden with plan_id.'),
+      path: z.string().min(1).optional().describe('To publish a Worker file: supply its path without plan_id.'),
+      workspace_handle: z.string().uuid().optional().describe('Existing context for Worker file publishing. Omit for automatic projectless creation; forbidden with plan_id.'),
+      environment_id: z.string().optional().describe('Worker for automatic projectless creation when workspace_handle is omitted; forbidden with plan_id or workspace_handle.'),
     }).strict().superRefine((args, ctx) => {
-      if (args.plan_id != null ? (args.path != null || args.workspace_handle != null) :
-          (args.path == null || args.workspace_handle == null)) {
-        ctx.addIssue({ code: 'custom', message: 'Supply either plan_id alone, or both workspace_handle and path.' });
+      if (args.plan_id != null ? (args.path != null || args.workspace_handle != null || args.environment_id != null) :
+          (args.path == null || (args.workspace_handle != null && args.environment_id != null))) {
+        ctx.addIssue({ code: 'custom', message: 'Supply either plan_id alone, or path with an optional workspace_handle or environment_id.' });
       }
     }),
     handler: async (args) => {
@@ -333,10 +348,10 @@ export function registerSpecializedTools(registry, runtime) {
         }
         let value;
         try {
-          value = await runtime.fileService.sendFile({ workspace_handle: args.workspace_handle, path: args.path });
+          value = await runtime.fileService.sendFile(workerArgs);
         } catch (error) {
           if (/^file exceeds CCM send_file limit \(\d+ > \d+ bytes\)/.test(String(error?.message || error))) {
-            return await publishChunkedWorkerFile(runtime, args);
+            return await publishChunkedWorkerFile(runtime, workerArgs);
           }
           throw error;
         }
@@ -347,6 +362,7 @@ export function registerSpecializedTools(registry, runtime) {
         );
       } catch (error) {
         return toolError(error);
+      environment_id: z.string().optional().describe('Worker for automatic projectless creation without a handle. Do not combine with workspace_handle.'),
       }
     },
   });
@@ -358,6 +374,7 @@ export function registerSpecializedTools(registry, runtime) {
     provenance: 'ccm-https-file-publishing',
     tags: ['file', 'attachment', 'transfer', 'gpt', 'card'],
     mcpMeta: {
+          ...(args.environment_id ? { environment_id: args.environment_id } : {}),
       ui: { resourceUri: PUBLISHED_FILE_UI_URI },
       'openai/outputTemplate': PUBLISHED_FILE_UI_URI,
     },
@@ -391,11 +408,11 @@ export function registerSpecializedTools(registry, runtime) {
     },
     supportsParallel: false,
     description: [
-      'Import exactly one ChatGPT file into the Worker selected by workspace_handle; multiple imports must be sequential.',
+      'Import exactly one ChatGPT file. Reuse workspace_handle, or omit it to create a projectless context on the primary Worker (or environment_id). Multiple imports must be sequential.',
       'For an ordinary conversation attachment, bind the native file directly to the file parameter.',
       'For a ChatGPT Library file, materialize it as raw_file with ChatGPT Files, then bind the native file directly to the file parameter.',
       'Do not pass a Library/file ID, ref, or URI in place of the native file object.',
-      'workspace_handle is required and determines the Worker and context root. Imports write only inside that root. destination must be relative; absolute paths and workspace escapes are rejected.',
+      'A supplied workspace_handle determines the Worker and context root. Imports write only inside that root. destination must be relative; absolute paths and workspace escapes are rejected.',
       'If destination is omitted, the sanitized ChatGPT file_name is used at the context root. Existing files are not replaced unless overwrite=true.',
       'The Worker downloads the temporary ChatGPT URL directly; CCM does not route the file bytes through BMG or the Controller file-transfer cache.',
     ].join('\\n\\n'),
@@ -408,8 +425,8 @@ export function registerSpecializedTools(registry, runtime) {
       }).strict().describe(
         'Exactly one ChatGPT file object. For multiple files, invoke import_chatgpt_file sequentially once per file; do not call in parallel.',
       ),
-      workspace_handle: z.string().uuid().describe(
-        'Existing workspace handle used to determine the target Worker and context root.',
+      workspace_handle: z.string().uuid().optional().describe(
+        'Existing workspace handle used to determine the target Worker and context root. Omit to create a projectless handle.',
       ),
       destination: z.string().min(1).optional().describe(
         'Optional path relative to the selected context root. Absolute paths and workspace escapes are rejected. Defaults to the sanitized ChatGPT file_name.',

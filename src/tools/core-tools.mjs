@@ -614,34 +614,6 @@ export function registerCoreTools(registry, runtime) {
   });
 
   registry.register({
-    name: 'create_projectless_handle',
-    provider: 'ccm-core',
-
-    tags: ['workspace', 'projectless', 'context', 'environment'],
-    supportsParallel: true,
-    description: [
-      'Create a projectless workspace_handle for operations that do not belong to a registered project.',
-      'Use when no suitable handle exists for genuinely projectless work or permitted absolute-path reads. Never use it to bypass a pending explicit workspace-entry approval or to write into a registered project. If environment_id is omitted, CCM uses the primary environment.',
-      'The returned workspace_handle supplies Worker routing and the context root for subsequent CCM operations. Read-scope decisions, including whether absolute paths outside the projectless root are readable, belong to list_projects and exec_command rather than this lifecycle tool.',
-    ].join('\n\n'),
-    inputSchema: {
-      environment_id: z.string().optional().describe('Environment on which to create the projectless workspace. Omit to use the primary environment.'),
-    },
-    handler: async (args) => {
-      try {
-        if (!runtime.workspaceHandleManager) {
-          throw new Error('Workspace handle manager is not available.');
-        }
-        return jsonResult(
-          await runtime.workspaceHandleManager.createProjectless(args.environment_id),
-        );
-      } catch (error) {
-        return toolError(error);
-      }
-    },
-  });
-
-  registry.register({
     name: 'select_workspace',
     provider: 'ccm-core',
 
@@ -832,7 +804,7 @@ export function registerCoreTools(registry, runtime) {
     environmentRequirements: { capabilities: ['exec'] },
     supportsParallel: true,
     description: [
-      "Run a shell command using pipes (tty=true for PTY); return output or a session_id for write_stdin. Reuse workspace_handle for routing/cwd and session ownership; its read scope follows the Worker, while ordinary writes follow the workspace sandbox.",
+      "Run shell command with pipes (tty=true for PTY); returns output/session_id. Reuse workspace_handle for routing/cwd and session ownership; omitted handles auto-create a projectless context on primary Worker (or environment_id) and return it. Its read scope follows the Worker, while ordinary writes follow the workspace sandbox.",
       "Start all resident/long-running processes in the background without visible console windows. On Windows, use a no-console process launch mode, not merely a hidden parent terminal. Keep supervision and logs.",
       "Native Codex ExecPolicy .rules decides Allow (Full Access), Prompt (approval), Forbidden (deny); unmatched commands remain sandboxed. Trusted package scripts are workspace/script-hash bound.",
       "For escalation use sandbox_permissions=require_escalated, justification and review_context. Guardian errors return state=review_failed, approval_required=false without dispatch: retry once if review_retryable=true; if it fails again, tell the user to continue when automatic approval responds. Never show a human card for review failures or retry a Guardian denial. If approval_required=true, call request_approval (Guardian disabled).",
@@ -844,7 +816,8 @@ export function registerCoreTools(registry, runtime) {
     ].join('\n\n'),
     inputSchema: {
       cmd: z.string().min(1).describe('Shell command to execute.'),
-      workspace_handle: z.string().uuid().describe('Existing workspace execution handle (UUID). If user/project instructions supply one for the intended workspace, reuse it directly without selecting/registering the workspace again. This is not an environment_id or workspace_id. The handle selects the Worker and workspace root; it does not limit the environment filesystem read scope.'),
+      workspace_handle: z.string().uuid().optional().describe('Existing workspace execution handle (UUID). If user/project instructions supply one for the intended workspace, reuse it directly without selecting/registering. If omitted, CCM creates a projectless workspace, not a registered-project entry.'),
+      environment_id: z.string().optional().describe('Worker for automatic projectless creation without a handle; defaults to primary. Do not combine with workspace_handle.'),
       workdir: z.string().optional().describe('Relative subdirectory inside the selected context root. Defaults to the context root.'),
       tty: z.boolean().optional().describe('True allocates a PTY; false or omitted uses plain pipes.'),
       yield_time_ms: z.number().int().max(30_000).nonnegative().optional().describe('Wait before the initial command call yields output or a session. Defaults to 2000 ms. Values above 5000 ms are clamped to 5000 ms; long-running commands continue in a session and should be resumed with write_stdin.'),
@@ -860,11 +833,6 @@ export function registerCoreTools(registry, runtime) {
     outputSchema: UNIFIED_EXEC_OUTPUT_SCHEMA,
     handler: async (args) => {
       try {
-        if (!args.workspace_handle) {
-          throw new Error(
-            'exec_command requires workspace_handle for Worker routing/cwd. Reuse the supplied handle; for projectless tasks or permitted absolute-path reads, use ccm.create_projectless_handle. Never select/register a project merely to read or work on it; ask for a handle or explicit entry instruction if registered-project writing requires one.',
-          );
-        }
         return execResult(await runtime.processManager.execCommand(args));
       } catch (error) {
         return toolError(error);
@@ -1039,13 +1007,14 @@ export function registerCoreTools(registry, runtime) {
     tags: ['edit', 'patch', 'filesystem'],
     environmentRequirements: { capabilities: ['applyPatch'] },
     description: [
-      'Apply a Codex-style Begin/End Patch inside an existing workspace_handle.',
+      'Apply a Codex-style Begin/End Patch. Reuse an existing workspace_handle; if omitted, CCM creates a projectless handle on the primary Worker (or environment_id).',
       'For timed Full Access, pass the full_access_grant_id supplied by the owner from the CCM unlock webpage, or returned by claim_full_access. Otherwise the original Worker write boundary remains in force.',
-      'Reuse the existing workspace_handle. For genuinely projectless edits, use create_projectless_handle; for registered-project edits without a handle, request the handle or an explicit workspace-entry instruction. Never select/register implicitly or bypass pending approval.',
+      'Automatic projectless creation never enters a registered project. For registered-project edits, supply its handle; select/register only with explicit authorization.',
     ].join('\n\n'),
     inputSchema: {
       patch: z.string().min(1).describe('Codex-style patch text beginning with *** Begin Patch.'),
-      workspace_handle: z.string().uuid().describe('Existing workspace handle.'),
+      workspace_handle: z.string().uuid().optional().describe('Existing workspace handle; omit to create a projectless handle.'),
+      environment_id: z.string().optional().describe('Worker for automatic projectless creation without a handle. Do not combine with workspace_handle.'),
       workdir: z.string().optional().describe('Relative subdirectory inside the selected context root.'),
       full_access_grant_id: z.string().uuid().optional().describe('Active CCM global web Full Access grant for patch permission.'),
     },
@@ -1075,12 +1044,13 @@ export function registerCoreTools(registry, runtime) {
     supportsParallel: true,
     description: [
       'Read a local image and return bounded MCP image content. When the output byte budget is exceeded, the Worker first tries full-resolution low-loss WebP (quality 95/90/85), then progressively reduces dimensions if necessary to fit the budget. The source file is never modified. Source files are limited to 64 MiB.',
-      'Reuse the existing workspace_handle. For genuinely projectless image reads, use create_projectless_handle; do not select/register a project merely to inspect images, or bypass a pending explicit entry approval.',
+      'Reuse an existing workspace_handle; if omitted, CCM creates a projectless handle on the primary Worker (or environment_id). Do not select/register a project merely to inspect images.',
       'For multiple images, the Host may call this tool repeatedly.',
     ].join(' '),
     inputSchema: {
       path: z.string().min(1).describe('Image path relative to the selected context root.'),
-      workspace_handle: z.string().uuid().describe('Existing workspace handle.'),
+      workspace_handle: z.string().uuid().optional().describe('Existing workspace handle; omit to create a projectless handle.'),
+      environment_id: z.string().optional().describe('Worker for automatic projectless creation without a handle. Do not combine with workspace_handle.'),
     },
     handler: async (args) => {
       try {

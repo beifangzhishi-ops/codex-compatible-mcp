@@ -321,17 +321,15 @@ test('full-access Controller enters registered workspaces without approval', asy
       true,
     );
 
-    const projectless = await controller.workspaceHandleManager.createProjectless(
-      'workspace-worker',
-    );
     const first = await controller.processManager.execCommand({
-      workspace_handle: projectless.workspace_handle,
+      environment_id: 'workspace-worker',
       cmd: 'Write-Output PROJECTLESS_OK',
     });
     assert.match(first.output, /PROJECTLESS_OK/);
     assert.equal(first.workspace_kind, 'projectless');
     assert.equal(typeof first.workspace_handle, 'string');
     assert.equal(first.workspace_root.startsWith(projectlessRoot), true);
+    assert.equal(controller.workspaceHandleManager.resolve(first.workspace_handle).workspace_kind, 'projectless');
 
     const second = await controller.processManager.execCommand({
       workspace_handle: first.workspace_handle,
@@ -385,6 +383,22 @@ test('full-access Controller enters registered workspaces without approval', asy
       ),
       'projectless only\n',
     );
+
+    const implicitPatch = await applyPatch.handler({
+      environment_id: 'workspace-worker',
+      patch: [
+        '*** Begin Patch',
+        '*** Add File: implicitly-created.txt',
+        '+automatic context',
+        '*** End Patch',
+      ].join('\n'),
+    });
+    assert.equal(implicitPatch.isError, undefined);
+    assert.equal(implicitPatch.structuredContent.workspace_kind, 'projectless');
+    assert.notEqual(implicitPatch.structuredContent.workspace_handle, first.workspace_handle);
+    assert.equal(await fs.readFile(path.join(
+      implicitPatch.structuredContent.workspace_root, 'implicitly-created.txt',
+    ), 'utf8'), 'automatic context\n');
 
     const seeded = worker.workspaceRegistry.listRegistered()[0];
     const select = tools.registry.get('select_workspace');

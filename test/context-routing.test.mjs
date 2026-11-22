@@ -33,6 +33,9 @@ function environmentRegistry() {
 
 function workspaceHandleManager() {
   return {
+    async resolveOrCreate(handleId, environmentId = null) {
+      return this.resolve(handleId || CONTEXT_ID);
+    },
     resolve(handleId) {
       assert.equal(handleId, CONTEXT_ID);
       return {
@@ -83,7 +86,7 @@ class FakeWorkerHub extends EventEmitter {
   }
 }
 
-test('RemoteProcessManager requires context and rejects environment routing', async () => {
+test('RemoteProcessManager auto-creates a projectless context and rejects ambiguous routing', async () => {
   const workerHub = new FakeWorkerHub();
   const manager = new RemoteProcessManager({
     environmentRegistry: environmentRegistry(),
@@ -91,19 +94,20 @@ test('RemoteProcessManager requires context and rejects environment routing', as
     workspaceHandleManager: workspaceHandleManager(),
   });
   try {
-    await assert.rejects(
-      manager.execCommand({ cmd: 'echo no-context' }),
-      /requires workspace_handle/,
-    );
+    const auto = await manager.execCommand({ cmd: 'echo no-context' });
+    assert.equal(auto.workspace_handle, CONTEXT_ID);
+    assert.equal(auto.workspace_kind, 'projectless');
+    assert.equal(workerHub.calls[0].environmentId, 'worker-a');
+    assert.equal(workerHub.calls[0].params.workspace_id, 'projectless-test');
     await assert.rejects(
       manager.execCommand({
         workspace_handle: CONTEXT_ID,
         environment_id: 'worker-a',
         cmd: 'echo ambiguous',
       }),
-      /does not accept environment_id/,
+      /cannot combine environment_id with workspace_handle/,
     );
-    assert.equal(workerHub.calls.length, 0);
+    assert.equal(workerHub.calls.length, 1);
   } finally {
     await manager.close();
   }
@@ -209,9 +213,12 @@ test('send_file uses context to select Worker without imposing workspace read bo
     },
   });
 
+  const auto = await fileService.sendFile({ path: outsidePath });
+  assert.equal(auto.workspace_handle, CONTEXT_ID);
+  assert.equal(workerHub.calls.length, 2);
   await assert.rejects(
-    fileService.sendFile({ path: outsidePath }),
-    /requires workspace_handle/,
+    fileService.sendFile({ workspace_handle: CONTEXT_ID, environment_id: 'worker-a', path: outsidePath }),
+    /cannot combine environment_id with workspace_handle/,
   );
 });
 
@@ -248,10 +255,9 @@ test('receive_file uses context to select Worker and forwards only a relative de
     },
   });
 
-  await assert.rejects(
-    fileService.receiveFile({ file }),
-    /requires workspace_handle/,
-  );
+  const auto = await fileService.receiveFile({ file });
+  assert.equal(auto.workspace_handle, CONTEXT_ID);
+  assert.equal(workerHub.calls.length, 2);
 });
 
 test('NativeFileService resolves relative send_file paths from workspace root', async () => {

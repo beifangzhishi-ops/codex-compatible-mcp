@@ -321,21 +321,16 @@ export class RemoteProcessManager {
   }
 
   async execCommand(args) {
-    if (!args.workspace_handle) {
+    if (args.environment_id && args.workspace_handle) {
       throw new Error(
-        'exec_command requires workspace_handle. Obtain one explicitly before execution.',
-      );
-    }
-    if (args.environment_id) {
-      throw new Error(
-        'exec_command does not accept environment_id; workspace_handle already determines the environment.',
+        'exec_command cannot combine environment_id with workspace_handle; the handle already determines the environment.',
       );
     }
     if (!this.workspaceHandleManager) {
       throw new Error('Workspace handle manager is not available.');
     }
-    const workspaceHandle = this.workspaceHandleManager.resolve(
-      args.workspace_handle,
+    const workspaceHandle = await this.workspaceHandleManager.resolveOrCreate(
+      args.workspace_handle, args.environment_id,
     );
     const environment = this.environmentRegistry.resolve(
       workspaceHandle.environment_id,
