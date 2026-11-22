@@ -164,10 +164,6 @@ async function publishChunkedWorkerFile(runtime, args) {
       yield bytes;
       offset += length;
     }
-      workspace_handle: value.workspace_handle,
-      workspace_id: value.workspace_id,
-      workspace_kind: value.workspace_kind,
-      workspace_root: value.workspace_root,
   })();
   const transfer = await runtime.fileTransferStore.putChunks({
     filename: path.basename(inspected.source_path), mime_type: mime,
@@ -194,6 +190,10 @@ function receivedFileResult(value, environmentId) {
       byte_length: value.byte_length,
       sha256: value.sha256,
       file_id: value.file_id,
+      workspace_handle: value.workspace_handle,
+      workspace_id: value.workspace_id,
+      workspace_kind: value.workspace_kind,
+      workspace_root: value.workspace_root,
     },
   };
 }
@@ -277,10 +277,6 @@ export function registerSpecializedTools(registry, runtime) {
   ]) {
     registry.register({
       namespace: 'ccm-extra',
-        const workspaceHandle = await runtime.workspaceHandleManager.resolveOrCreate(
-          args.workspace_handle, args.environment_id,
-        );
-        const workerArgs = { path: args.path, workspace_handle: workspaceHandle.workspace_handle };
       name,
       provider: 'ccm-specialized',
       provenance: 'ccm-workerhub-file-transfer',
@@ -294,7 +290,6 @@ export function registerSpecializedTools(registry, runtime) {
           const resolvedArgs = name === 'transfer_path' ? {
             ...args,
             source_handle: (await runtime.workspaceHandleManager.resolveOrCreate(args.source_handle)).workspace_handle,
-          { workspace_handle: workspaceHandle.workspace_handle },
             target_handle: (await runtime.workspaceHandleManager.resolveOrCreate(args.target_handle)).workspace_handle,
           } : args;
           const value = await handler(resolvedArgs);
@@ -346,6 +341,10 @@ export function registerSpecializedTools(registry, runtime) {
             data: bytes.toString('base64'),
           }, null, runtime, { plan_id: args.plan_id });
         }
+        const workspaceHandle = await runtime.workspaceHandleManager.resolveOrCreate(
+          args.workspace_handle, args.environment_id,
+        );
+        const workerArgs = { path: args.path, workspace_handle: workspaceHandle.workspace_handle };
         let value;
         try {
           value = await runtime.fileService.sendFile(workerArgs);
@@ -359,10 +358,10 @@ export function registerSpecializedTools(registry, runtime) {
           value,
           value.environment_id,
           runtime,
+          { workspace_handle: workspaceHandle.workspace_handle },
         );
       } catch (error) {
         return toolError(error);
-      environment_id: z.string().optional().describe('Worker for automatic projectless creation without a handle. Do not combine with workspace_handle.'),
       }
     },
   });
@@ -374,7 +373,6 @@ export function registerSpecializedTools(registry, runtime) {
     provenance: 'ccm-https-file-publishing',
     tags: ['file', 'attachment', 'transfer', 'gpt', 'card'],
     mcpMeta: {
-          ...(args.environment_id ? { environment_id: args.environment_id } : {}),
       ui: { resourceUri: PUBLISHED_FILE_UI_URI },
       'openai/outputTemplate': PUBLISHED_FILE_UI_URI,
     },
@@ -428,6 +426,7 @@ export function registerSpecializedTools(registry, runtime) {
       workspace_handle: z.string().uuid().optional().describe(
         'Existing workspace handle used to determine the target Worker and context root. Omit to create a projectless handle.',
       ),
+      environment_id: z.string().optional().describe('Worker for automatic projectless creation without a handle. Do not combine with workspace_handle.'),
       destination: z.string().min(1).optional().describe(
         'Optional path relative to the selected context root. Absolute paths and workspace escapes are rejected. Defaults to the sanitized ChatGPT file_name.',
       ),
@@ -439,6 +438,7 @@ export function registerSpecializedTools(registry, runtime) {
       try {
         const value = await runtime.fileService.receiveFile({
           workspace_handle: args.workspace_handle,
+          ...(args.environment_id ? { environment_id: args.environment_id } : {}),
           file: args.file,
           destination: args.destination,
           overwrite: args.overwrite === true,

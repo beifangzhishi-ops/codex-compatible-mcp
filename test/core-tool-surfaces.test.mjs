@@ -322,7 +322,7 @@ test('core tool surface returns workspace handles while retaining approval cards
   );
   assert.match(
     registry.get('exec_command').description,
-    /If a rejection happens, you should proceed only with a materially safer alternative, or inform the user of the risk and send a final message to ask for approval\./,
+    /If approval_required=true, call request_approval/i,
   );
   assert.match(
     registry.get('apply_patch').description,
