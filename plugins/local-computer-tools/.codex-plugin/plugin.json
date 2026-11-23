@@ -1,0 +1,20 @@
+{
+  "interface": {
+    "capabilities": [],
+    "category": "Productivity",
+    "developerName": "\u91ce \u91ce\u539f",
+    "displayName": "Local Computer Tools",
+    "longDescription": "Use local CLI and CCM workflows for QQ, WeChat, SJTU Mail, Faster Whisper, BMG, Bilibili, After Effects, background Illustrator/SOLIDWORKS automation, and Quark Cloud Drive uploads on 6v and noha.",
+    "shortDescription": "Use local computer workflows",
+    "defaultPrompt": null
+  },
+  "name": "local-computer-tools",
+  "version": "0.1.4",
+  "description": "On-demand instructions for locally installed applications on 6v and noha. No additional MCP server or runtime.",
+  "author": {
+    "name": "\u91ce \u91ce\u539f",
+    "email": "beifangzhishi@gmail.com"
+  },
+  "keywords": [],
+  "skills": "./skills"
+}

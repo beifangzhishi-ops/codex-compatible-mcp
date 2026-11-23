@@ -207,7 +207,7 @@ All registered tools are equal peers in MCP `tools/list`. The Host controls disc
 | Verification | `ccm.request_verification_input`, `ccm.get_verification_input_status`, `ccm.submit_verification_input` |
 | Plans and restarts | `ccm.plan_patch`, `ccm.plan_read`, `ccm.restart` |
 | File transfer and publishing | `ccm-extra.transfer_path`, `ccm-extra.transfer_status`, `ccm-extra.transfer_cancel`, `ccm-extra.publish`, `ccm-extra.import_chatgpt_file` |
-| External workflows | `ccm-extra.conversation`, `ccm-extra.quark_upload` |
+| External workflows | `ccm-extra.conversation` |
 
 The approval-status/resolution and verification-status/submission bridges are registered in the same MCP list but marked `ui.visibility=["app"]`, so only their corresponding MCP Apps should invoke them. `request_approval` and `request_verification_input` are model-callable tools that present those Apps. The tools themselves retain their original authorization, argument validation and file-safety contracts.
 
@@ -215,7 +215,7 @@ Ordinary repository inspection, search, Git, builds, tests, and diagnostics shou
 
 ### On-demand local app Skills
 
-QQ, WeChat, SJTU Mail, local transcription, BMG browser and Bilibili DASH now use the six independently discoverable Skills in `plugins/local-computer-tools/skills/` (private **Local Computer Tools** plugin). They expose no CCM MCP adapters. Codex installs the same Skill files in `%USERPROFILE%\.codex\skills`. Keep the four basic CLI Skills limited to computer and path; BMG and Bilibili include their local invocation and permission-sensitive handoff instructions. Use `exec_command` on 6v only when the user requests one of these workflows; `quark_upload` stays directly callable.
+QQ, WeChat, SJTU Mail, local transcription, BMG browser, Bilibili DASH, Quark desktop upload and three background-app workflows use independently discoverable Skills in `plugins/local-computer-tools/skills/` (private **Local Computer Tools** plugin). They expose no dedicated CCM MCP adapters. Codex installs these Skill files in `%USERPROFILE%\.codex\skills`. Use CCM `exec_command` for on-demand local workflows. Quark uploads use `tools/quark-transfer/cloud-transfer.cmd` on 6v and are independent of file publishing.
 
 ### Verification input card
 
@@ -301,7 +301,7 @@ CCM exposes optional specialized workflows as ordinary peer tools alongside its 
 - `ccm-extra.transfer_path` is a peer tool for copying a regular file or a recursive directory between two existing CCM workspace handles. Supply `source_handle`, `source_path`, `target_handle`, and `target_path`. The source can be any path readable by its Worker (including an absolute path); the target must be relative to its own selected workspace. It never replaces an existing destination (even an empty directory), never deletes source data, and preserves empty directories. Existing destination collisions are rejected before file bytes are transferred. The destination is reserved first and may be visible/incomplete during transfer. Symbolic links/junctions and workspace escapes are refused.
 - `ccm-extra.transfer_status({transfer_id})` reports file/byte progress and terminal state; `ccm-extra.transfer_cancel({transfer_id})` requests cancellation and safe cleanup. Transfers run in a Controller-owned task independent of the Controller result lifetime; terminal status is retained for up to 24 hours. On a failure, cancellation, or restart, cleanup removes only objects that can still be proven to belong to this transfer; unsafe or externally modified leftovers are preserved and reported. Initial version does not resume interrupted copies.
 - File contents take the Worker A → Controller/WorkerHub → Worker B route as bounded, ordered 4 MiB Base64 chunks over the existing JSON-RPC WorkerHub connection (24 MiB message ceiling). Each chunk is acknowledged before the next, with socket backpressure, bounded task concurrency, source change checks, and full-file SHA-256 verification. File contents are neither exposed in ChatGPT tool results nor placed into the Controller's public download cache. WorkerHub's underlying TCP protocol is not itself TLS; remote link encryption depends on the deployment (for example Tailscale/WireGuard). No extra HTTP listener, certificate, port forwarding, or Tailscale-specific address is required by this tool. Both Workers must be connected to the same Controller.
-- `ccm-extra.quark_upload` is a peer tool, submits one or more files through that local Quark desktop session, and can wait for verified completion.
+- Quark uploads use the standalone `quark-upload` Skill and `tools/quark-transfer/cloud-transfer.cmd`, which submit one or more files through the logged-in Quark desktop session and can wait for verified completion.
 - Bilibili authenticated DASH downloading is documented by the on-demand `bilibili-dash` Skill and `tools/bilibili-download/README.md`. The local `bridge.py` and `download-dash.py` remain available via CCM `exec_command` with the same 6v projectless workspace. The browser-local POST must be confirmed by `BRIDGE_RECEIVED`, and the downloader verifies/pauses the exact Bilibili tab before downloading, remuxing, and checking audio/resolution.
 
 All specialized tools are direct MCP peers. The Host handles their selection and orchestration. Continue live process sessions directly with `write_stdin`.

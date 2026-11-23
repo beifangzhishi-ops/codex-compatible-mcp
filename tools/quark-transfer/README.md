@@ -1,8 +1,6 @@
 # Quark desktop transfer helper
 
-This optional Windows helper is ported from WCM and is exposed by CCM as deferred capabilities:
-
-- `ccm-extra.quark_upload`
+This optional Windows helper is ported from WCM and is invoked through the independent `quark-upload` Skill in **Local Computer Tools**, using CCM `exec_command` on 6v.
 
 Requirements:
 

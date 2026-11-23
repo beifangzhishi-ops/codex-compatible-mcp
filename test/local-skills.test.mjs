@@ -6,12 +6,12 @@ import { fileURLToPath } from 'node:url';
 import { createToolRegistry } from '../src/tools/index.mjs';
 
 const root = fileURLToPath(new URL('../plugins/local-computer-tools/', import.meta.url));
-const skillNames = ['qq', 'wechat', 'sjtu-mail', 'local-transcription', 'bilibili-dash', 'bmg-browser'];
+const skillNames = ['qq', 'wechat', 'sjtu-mail', 'local-transcription', 'bilibili-dash', 'bmg-browser', 'quark-upload'];
 
-test('local app entrypoints are six on-demand Skills, without additional MCP server', () => {
+test('local app entrypoints are on-demand Skills, without additional MCP servers', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'plugin.json'), 'utf8'));
   assert.equal(manifest.name, 'local-computer-tools');
-  assert.equal(manifest.version, '0.1.1');
+  assert.equal(manifest.version, '0.1.4');
   assert.equal(fs.existsSync(path.join(root, 'mcp.json')), false);
   for (const name of skillNames) {
     const content = fs.readFileSync(path.join(root, 'skills', name, 'SKILL.md'), 'utf8');
@@ -38,11 +38,16 @@ test('BMG selection defaults are scoped by scenario rather than carried across t
   assert.match(body, /do not automatically switch to BMG even if lighter tools fail/);
 });
 
-test('the core tool catalog stays lean while Quark remains direct', () => {
+test('Quark upload is a Skill, not a peer MCP tool', () => {
   const { registry } = createToolRegistry({});
   const names = new Set(registry.list().map(tool => tool.name));
-  assert.equal(names.size, 27);
-  assert.equal(names.has('quark_upload'), true);
+  assert.equal(names.has('quark_upload'), false);
   assert.equal(names.has('exec_command'), true);
   assert.equal(names.has('conversation'), true);
+  const skill = fs.readFileSync(path.join(root, 'skills', 'quark-upload', 'SKILL.md'), 'utf8');
+  assert.match(skill, /cloud-transfer\.cmd/);
+  assert.match(skill, /upload.*--timeout/);
+  assert.doesNotMatch(skill, /\bpublish\b/);
+  const bilibiliSkill = fs.readFileSync(path.join(root, 'skills', 'bilibili-dash', 'SKILL.md'), 'utf8');
+  assert.doesNotMatch(bilibiliSkill, /\bpublish\b|\bQuark\b/);
 });

@@ -4,7 +4,7 @@
     "email": "beifangzhishi@gmail.com",
     "name": "\u91ce \u91ce\u539f"
   },
-  "description": "On-demand instructions for locally installed applications on 6v. No additional MCP server or runtime.",
+  "description": "On-demand instructions for locally installed applications on 6v and noha. No additional MCP server or runtime.",
   "extensions": {
     "com.openai": {
       "interface": {
@@ -12,11 +12,11 @@
         "category": "Productivity",
         "developerName": "\u91ce \u91ce\u539f",
         "displayName": "Local Computer Tools",
-        "longDescription": "Use QQ, WeChat, SJTU Mail, Faster Whisper, BMG browser, or Bilibili downloader on 6v through their existing local CLI/script entrypoints.",
-        "shortDescription": "Use six local computer workflows"
+        "longDescription": "Use local CLI and CCM workflows for QQ, WeChat, SJTU Mail, Faster Whisper, BMG, Bilibili, After Effects, background Illustrator/SOLIDWORKS automation, and Quark Cloud Drive uploads on 6v and noha.",
+        "shortDescription": "Use local computer workflows"
       }
     }
   },
   "name": "local-computer-tools",
-  "version": "0.1.1"
+  "version": "0.1.4"
 }

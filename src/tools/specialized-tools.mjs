@@ -13,32 +13,6 @@ function toolError(error) {
   };
 }
 
-function execResult(value, metadata = {}) {
-  const structuredContent = { ...value, ...metadata };
-  const lines = [];
-  if (value.chunk_id) lines.push('Chunk ID: ' + value.chunk_id);
-  if (Number.isFinite(value.wall_time_seconds)) {
-    lines.push(
-      'Wall time: ' + Number(value.wall_time_seconds).toFixed(4) + ' seconds',
-    );
-  }
-  if (value.exit_code !== undefined) {
-    lines.push('Process exited with code ' + value.exit_code);
-  }
-  if (value.session_id !== undefined) {
-    lines.push('Process running with session ID ' + value.session_id);
-  }
-  lines.push('Output:');
-  if (value.output) lines.push(value.output);
-  return {
-    content: [{ type: 'text', text: lines.join('\n') }],
-    structuredContent,
-    ...(value.exit_code !== undefined && value.exit_code !== 0
-      ? { isError: true }
-      : {}),
-  };
-}
-
 async function fileResourceResult(value, environmentId, runtime, metadata = {}, options = {}) {
   const fileTransferStore = runtime.fileTransferStore;
   if (!fileTransferStore) {
@@ -173,10 +147,6 @@ function receivedFileResult(value, environmentId) {
   };
 }
 
-function psQuote(value) {
-  return "'" + String(value).replaceAll("'", "''") + "'";
-}
-
 const BMG_BROWSER_TOOLS = [
   'get_windows_and_tabs',
   'chrome_navigate',
@@ -199,40 +169,6 @@ const BMG_BROWSER_TOOLS = [
   'bmg_show_workspace',
   'bmg_hide_workspace',
 ];
-
-function resolveWindowsEnvironment(runtime, environmentId) {
-  const environment = runtime.environmentRegistry.resolve(environmentId);
-  if (environment.platform !== 'windows') {
-    throw new Error(
-      'This specialized capability currently requires a Windows Remote Worker.',
-    );
-  }
-  return environment;
-}
-
-function toolPath(relativePath) {
-  return [
-    "$root=$env:CCM_INSTALL_ROOT",
-    "if(-not $root){throw 'CCM_INSTALL_ROOT is unavailable; update and restart this Remote Worker.'}",
-    '$tool=Join-Path $root ' + psQuote(relativePath),
-    "if(-not (Test-Path -LiteralPath $tool)){throw ('Bundled CCM tool is missing: ' + $tool)}",
-  ].join('; ');
-}
-
-async function run(runtime, args, command) {
-  if (!runtime.workspaceHandleManager) {
-    throw new Error('Workspace handle manager is unavailable.');
-  }
-  const context = await runtime.workspaceHandleManager.createProjectless(
-    args.environment_id,
-  );
-  return runtime.processManager.execCommand({
-    workspace_handle: context.workspace_handle,
-    cmd: command,
-    yield_time_ms: args.yield_time_ms,
-    max_output_tokens: args.max_output_tokens,
-  });
-}
 
 export function registerSpecializedTools(registry, runtime) {
   for (const [name, schema, handler, description] of [
@@ -449,75 +385,6 @@ export function registerSpecializedTools(registry, runtime) {
       } catch (error) { return toolError(error); }
     },
   });
-
-  registry.register({
-    namespace: 'ccm-extra',
-    name: 'quark_upload',
-    provider: 'ccm-specialized',
-    provenance: 'ported-from-wcm/tools/quark-transfer',
-
-    tags: ['quark', 'cloud', 'upload', 'transfer', 'windows'],
-    environmentRequirements: {
-      platform: 'windows',
-      capabilities: ['exec'],
-      localSoftware: ['QuarkCloudDrive'],
-    },
-    description: [
-      'Upload one or more files through the logged-in Quark Cloud Drive desktop client on the selected Windows Remote Worker.',
-      'When the user asks to upload known local files to Quark Cloud Drive, call this tool directly after resolving the intended local paths.',
-      'The bundled WCM-derived helper uses Quark Desktop local APIs and its in-memory WSG/account mapping. It does not print or persist account secrets.',
-      'By default it waits until every upload reports completion, 100% progress, and matching local/remote sizes. Long uploads may return a live session; poll that session with write_stdin, reusing the returned workspace_handle and session_id.',
-      'Current implementation accepts files only, not directories.',
-    ].join('\n\n'),
-    inputSchema: {
-      paths: z.array(z.string().min(1)).min(1).max(32).describe(
-        'Absolute or environment-native file paths to upload.',
-      ),
-      environment_id: z.string().optional().describe(
-        'Windows Remote Worker environment. Omit to use the default environment.',
-      ),
-      timeout_seconds: z.number().positive().max(86_400).optional().describe(
-        'Maximum time the Quark helper waits for completion. Defaults to 1800 seconds.',
-      ),
-      no_wait: z.boolean().optional().describe(
-        'Submit the upload and return after Quark accepts it instead of waiting for completion.',
-      ),
-      yield_time_ms: z.number().int().min(0).max(30_000).optional().describe(
-        'How long CCM waits before returning a live process session. Defaults to 10000 ms.',
-      ),
-      max_output_tokens: z.number().int().min(256).max(10_000).optional(),
-    },
-    handler: async (args) => {
-      try {
-        const environment = resolveWindowsEnvironment(
-          runtime,
-          args.environment_id,
-        );
-        const pathArgs = args.paths.map(psQuote).join(' ');
-        const timeout = Number(args.timeout_seconds || 1800);
-        const command = [
-          toolPath('tools\\quark-transfer\\cloud_transfer.py'),
-          "$python=(Get-Command python.exe -ErrorAction SilentlyContinue | Select-Object -First 1).Source",
-          "if(-not $python){throw 'Python is required for the bundled Quark transfer tool.'}",
-          "$env:PYTHONUTF8='1'",
-          '& $python $tool upload ' + pathArgs +
-            ' --timeout ' + timeout +
-            (args.no_wait ? ' --no-wait' : '') +
-            ' --json',
-        ].join('; ');
-        return execResult(await run(runtime, args, command), {
-          environment_id: environment.id,
-          capability: 'quark_upload',
-          destination: 'Quark system manual_upload',
-        });
-      } catch (error) {
-        return toolError(error);
-      }
-    },
-  });
-
-
-
 
   return registry;
 }

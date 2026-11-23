@@ -107,7 +107,7 @@ test('publish is a peer MCP tool and yields an HTTPS URL', async () => {
   assert.match(publish.description, /as HTTPS links/);
   assert.match(publish.description, /before sharing ANY link/);
   assert.match(publish.description, /Large files are transferred in chunks/);
-  assert.doesNotMatch(publish.description, /quark_upload|12 MiB/i);
+  assert.doesNotMatch(publish.description, /12 MiB/i);
   assert.match(publish.description, /Honor an explicitly requested delivery method/);
   assert.equal(publish.supportsParallel, false);
   assert.equal(registry.get('ccm-extra.send_file'), null);
@@ -403,12 +403,10 @@ test('conversation capability guard does not invoke an old Worker or trigger qua
   assert.match(result.content[0].text, /does not support conversation/);
 });
 
-test('quark_upload is a peer MCP tool', () => {
+test('Quark upload is not registered as a specialized peer MCP tool', () => {
   const registry = new ToolRegistry();
   registerSpecializedTools(registry, fakeRuntime());
-  const quarkUpload = registry.get('ccm-extra.quark_upload');
-  assert.ok(quarkUpload);
-  assert.match(quarkUpload.description, /call this tool directly/i);
+  assert.equal(registry.list().some(tool => tool.tags?.includes('quark')), false);
 });
 
 test('conversation handles Codex Share and local UUID without workspace registration', async () => {
