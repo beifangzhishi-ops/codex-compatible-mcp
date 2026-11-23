@@ -318,7 +318,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
           : value.state === 'denied'
             ? 'Denied. No action was performed.'
             : value.state === 'execution_unknown'
-              ? 'Execution outcome is unknown. Do not retry automatically.'
+              ? 'Execution outcome is unknown.'
               : value.action_failed
                 ? 'Approved, but the action failed.'
                 : workspaceSuccess
@@ -489,23 +489,9 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
           ...resultSummary(structured),
           decision
         };
-        const workspaceAction =
-          structured?.kind === "workspace" || approval?.kind === "workspace";
-        const contextText = workspaceAction
-          ? (decision === "deny"
-              ? "The user denied the frozen CCM workspace action; do not retry it."
-              : structured?.action_failed
-                ? "The approved CCM workspace action failed safely and was consumed; request a new approval before retrying."
-                : "The user approved the frozen CCM workspace action. CCM completed it and returned the workspace handle; do not recreate or retry the workspace action.")
-          : (decision === "deny"
-              ? (approval?.run_as_admin === true
-                  ? "The user denied the frozen CCM Windows administrator action."
-                  : "The user denied the frozen CCM full-access action.")
-              : decision === "approve_always"
-                ? (structured?.policy_save_failed
-                    ? "The user approved the frozen CCM action. The command already executed, but saving the persistent policy failed; do not rerun the command to retry persistence."
-                    : "The user approved the frozen CCM action and asked CCM to allow future matching executions in this workspace.")
-                : "The user approved the frozen CCM action and CCM handled it without a second model execution request.");
+        const contextText = decision === "deny"
+          ? "The user denied the CCM action."
+          : "CCM executes the action directly after approval.";
         try {
           await request("ui/update-model-context", {
             content: [{
@@ -521,13 +507,9 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
           return;
         }
 
-        const prompt = workspaceAction
-          ? "Continue from the CCM workspace approval result already placed in model context. Do not recreate or rerun the workspace action."
-          : decision === "deny"
-            ? "Continue after my CCM approval-card decision. I denied the frozen action; do not run it."
-            : decision === "approve_always"
-              ? "Continue from the CCM approval result already placed in model context. CCM handled the action and saved a global command allow rule; do not recreate or rerun that command."
-              : "Continue from the CCM approval result already placed in model context. CCM already handled the frozen approved action; do not recreate or rerun that command.";
+        const prompt = decision === "deny"
+          ? "The CCM action was denied."
+          : "CCM executes the action directly after approval.";
         const supportsTextMessage = Boolean(hostCapabilities?.message?.text);
         if (supportsTextMessage) {
           try {
@@ -606,7 +588,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
             return;
           }
           if (structured.state === "execution_unknown") {
-            setStatus(structured.output || "Execution outcome is unknown. CCM will not retry automatically.", true);
+            setStatus(structured.output || "Execution outcome is unknown.", true);
           } else if (structured.action_failed) {
             setStatus(structured.output || "The approved workspace action was not performed.", true);
           } else if (structured.state === "denied") {

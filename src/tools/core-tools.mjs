@@ -103,8 +103,7 @@ function execResult(value) {
     lines.push('Expires: ' + value.expires_at);
     lines.push('Justification: ' + value.justification);
     lines.push(
-      'Call the top-level request_approval tool with this approval_id to render the CCM approval card. ' +
-      'Do not recreate or retry the command yourself.',
+      'Call request_approval with this approval_id. CCM executes the action directly after approval.',
     );
   }
   if (value.chunk_id) lines.push(`Chunk ID: ${value.chunk_id}`);
@@ -175,10 +174,7 @@ function approvalCardResult(prepared) {
         ]
       : ['Command: ' + value.command]),
     'Expires: ' + value.expires_at,
-    'The attached CCM approval card is the only valid approval path for this request.',
-    workspaceAction
-      ? 'Do not recreate or retry this workspace action yourself.'
-      : 'Do not recreate or retry this command yourself.',
+    'CCM executes the action directly after approval.',
   ];
   return {
     content: [{ type: 'text', text: lines.join('\n') }],
@@ -841,7 +837,7 @@ export function registerCoreTools(registry, runtime) {
     description: [
       'Render the CCM approval card for one already-frozen pending action.',
       'Pass only the approval_id returned by a CCM business tool with approval_required=true. This tool does not accept or modify the command, workspace, path, or other frozen action fields.',
-      'After the card is shown, the approval app handles the user decision through resolve_pending_action. Do not recreate or retry the original action.',
+      'CCM executes the action directly after approval.',
     ].join('\n\n'),
     inputSchema: {
       approval_id: z.string().uuid().describe('Opaque pending approval id returned by a CCM tool.'),

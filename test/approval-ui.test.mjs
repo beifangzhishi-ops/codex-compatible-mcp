@@ -544,10 +544,7 @@ test('approval app keeps its capability in result _meta and resolves only the fr
     );
     assert.match(resource.contents[0].text, /Global token prefix \(all Workers and workspaces\):/);
     assert.match(resource.contents[0].text, /policy_save_failed/);
-    assert.match(
-      resource.contents[0].text,
-      /workspace approval result already placed in model context/,
-    );
+    assert.match(resource.contents[0].text, /CCM executes the action directly after approval/);
 
     const pending = await client.callTool({
       name: 'exec_command',

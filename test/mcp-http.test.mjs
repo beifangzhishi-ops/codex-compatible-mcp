@@ -320,7 +320,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     });
     assert.equal(escalation.isError, undefined);
     assert.equal(escalation.structuredContent.approval_required, true);
-    assert.match(escalation.content[0].text, /approval card/i);
+    assert.match(escalation.content[0].text, /CCM executes the action directly after approval/i);
     assert.equal(typeof escalation._meta?.approval_nonce, 'string');
 
     const approvalId = escalation.structuredContent.approval_id;
