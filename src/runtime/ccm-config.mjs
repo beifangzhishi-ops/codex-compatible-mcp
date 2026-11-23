@@ -37,16 +37,18 @@ export function readCcmSection(section, file = DEFAULT_CCM_CONFIG_FILE) {
   return readCcmConfig(file)[section];
 }
 
-/** Optional model-facing directory hints, keyed by the connected Worker ID. */
+/** Optional model-facing directory lists, keyed by the connected Worker ID. */
 export function readProjectDirectoryHints(file = DEFAULT_CCM_CONFIG_FILE) {
   const hints = readCcmSection('controller', file).project_directory_hints;
   if (hints == null) return {};
   if (typeof hints !== 'object' || Array.isArray(hints)) {
     throw new Error('controller.project_directory_hints must be an object');
   }
-  for (const [environmentId, directory] of Object.entries(hints)) {
-    if (!environmentId.trim() || typeof directory !== 'string' ||
-        !(path.win32.isAbsolute(directory) || path.posix.isAbsolute(directory))) {
+  for (const [environmentId, directories] of Object.entries(hints)) {
+    if (!environmentId.trim() || !Array.isArray(directories) || directories.length === 0 ||
+        directories.some((directory) => typeof directory !== 'string' ||
+          !(path.win32.isAbsolute(directory) || path.posix.isAbsolute(directory))) ||
+        new Set(directories.map((directory) => path.win32.normalize(directory).toLowerCase())).size !== directories.length) {
       throw new Error('Invalid project directory hint for environment ' + environmentId);
     }
   }

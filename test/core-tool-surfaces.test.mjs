@@ -212,27 +212,27 @@ test('list_projects displays optional per-Worker default project directories wit
   try {
     const config = readCcmConfig(fileURLToPath(examplePath));
     config.controller.project_directory_hints = {
-      primary: 'C:\\Users\\example\\Documents\\ChatGPT',
-      noha: 'C:\\Users\\example\\Documents\\AAAVitalFile',
+      primary: ['C:\\Users\\example\\Documents\\ChatGPT'],
+      noha: ['C:\\Users\\example\\Documents\\AAAVitalFile', 'C:\\Users\\example\\Documents\\ChatGPT'],
     };
     fs.writeFileSync(configPath, JSON.stringify(config));
     const runtime = runtimeStub();
     runtime.ccmConfigFile = configPath;
     const registry = registerCoreTools(new ToolRegistry(), runtime);
     const listed = (await registry.get('list_projects').handler({})).structuredContent.environments;
-    assert.deepEqual(listed.map((env) => env.project_directory_hint), [
-      'C:\\Users\\example\\Documents\\ChatGPT',
-      'C:\\Users\\example\\Documents\\AAAVitalFile',
+    assert.deepEqual(listed.map((env) => env.project_directory_hints), [
+      ['C:\\Users\\example\\Documents\\ChatGPT'],
+      ['C:\\Users\\example\\Documents\\AAAVitalFile', 'C:\\Users\\example\\Documents\\ChatGPT'],
     ]);
     assert.equal(listed[0].projects[0].root, 'C:\\work\\primary-project');
-    assert.equal((await registry.get('list_projects').handler({ environment_id: 'noha' }))
-      .structuredContent.environments[0].project_directory_hint,
-    'C:\\Users\\example\\Documents\\AAAVitalFile');
+    assert.deepEqual((await registry.get('list_projects').handler({ environment_id: 'noha' }))
+      .structuredContent.environments[0].project_directory_hints,
+    ['C:\\Users\\example\\Documents\\AAAVitalFile', 'C:\\Users\\example\\Documents\\ChatGPT']);
 
     delete config.controller.project_directory_hints;
     fs.writeFileSync(configPath, JSON.stringify(config));
     const withoutHints = (await registry.get('list_projects').handler({})).structuredContent.environments;
-    assert.ok(withoutHints.every((env) => !Object.hasOwn(env, 'project_directory_hint')));
+    assert.ok(withoutHints.every((env) => !Object.hasOwn(env, 'project_directory_hints')));
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

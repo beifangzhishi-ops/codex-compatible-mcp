@@ -27,7 +27,10 @@ test('the tracked root template is a complete independent configuration sample',
   assert.ok(Array.isArray(config.worker_quarantine_errors.error_codes));
   assert.deepEqual(Object.keys(config.codex), ['home']);
   assert.deepEqual(readWorkerCaBundle(example), {});
-  assert.equal(readProjectDirectoryHints(example)['example-worker'], 'C:\\Users\\example\\Documents\\Projects');
+  assert.deepEqual(readProjectDirectoryHints(example)['example-worker'], [
+    'C:\\Users\\example\\Documents\\Projects',
+    'C:\\Users\\example\\Documents\\ChatGPT',
+  ]);
 });
 
 test('bootstrap variables are loaded from the selected JSON section, never shell child secrets', () => {
@@ -55,6 +58,12 @@ test('malformed configurations and unauthorized child overrides fail closed', ()
 
     fixture.worker.child_env = {};
     fixture.controller.project_directory_hints = { noha: 'relative/path' };
+    fs.writeFileSync(fixtureFile, JSON.stringify(fixture));
+    assert.throws(() => readProjectDirectoryHints(fixtureFile), /Invalid project directory hint/);
+    fixture.controller.project_directory_hints = { noha: ['C:\\test', 'relative/path'] };
+    fs.writeFileSync(fixtureFile, JSON.stringify(fixture));
+    assert.throws(() => readProjectDirectoryHints(fixtureFile), /Invalid project directory hint/);
+    fixture.controller.project_directory_hints = { noha: ['C:\\test', 'c:\\TEST'] };
     fs.writeFileSync(fixtureFile, JSON.stringify(fixture));
     assert.throws(() => readProjectDirectoryHints(fixtureFile), /Invalid project directory hint/);
     fixture.controller.project_directory_hints = ['C:\\test'];

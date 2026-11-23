@@ -2,7 +2,7 @@
   "version": 1,
   "controller": {
     "project_directory_hints": {
-      "example-worker": "C:\\Users\\example\\Documents\\Projects"
+      "example-worker": ["C:\\Users\\example\\Documents\\Projects", "C:\\Users\\example\\Documents\\ChatGPT"]
     },
     "guardian": {
       "enabled": false,

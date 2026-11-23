@@ -536,7 +536,7 @@ export function registerCoreTools(registry, runtime) {
     supportsParallel: true,
     description: [
       "List connected Workers, registered projects and configured default project directories without entering a workspace. Omit environment_id for all Workers; all=true also lists existing projectless workspaces.",
-      "Results include independent sandbox_read_scope and sandbox_write_scope, platform, capabilities and Worker state. A project_directory_hint is for display only, never workspace-entry authorization or an authoritative project root. Compare connected_at and state=normal after restart; one stale Worker or a single network timeout does not prove all Workers are offline.",
+      "Results include independent sandbox_read_scope and sandbox_write_scope, platform, capabilities and Worker state. project_directory_hints is a display-only list, never workspace-entry authorization or authoritative project roots. Compare connected_at and state=normal after restart; one stale Worker or a single network timeout does not prove all Workers are offline.",
     ].join('\n\n'),
     inputSchema: {
       environment_id: z.string().optional().describe('Optional environment id. Omit to list projects across every connected environment.'),
@@ -555,11 +555,11 @@ export function registerCoreTools(registry, runtime) {
         }
         const includeAll = Boolean(args.all);
         const discover = async (environment) => {
-          const directoryHint = Object.hasOwn(directoryHints, environment.id)
+          const directoryHintList = Object.hasOwn(directoryHints, environment.id)
             ? directoryHints[environment.id] : undefined;
           const withDirectoryHint = (result) => ({
             ...result,
-            ...(directoryHint === undefined ? {} : { project_directory_hint: directoryHint }),
+            ...(directoryHintList === undefined ? {} : { project_directory_hints: directoryHintList }),
           });
           const currentStatus = runtime.workerHub.environmentStatus?.(
             environment.id,
