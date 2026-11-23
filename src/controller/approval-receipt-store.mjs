@@ -92,7 +92,7 @@ export class ApprovalReceiptStore {
           Number.isInteger(result.session_id)
         ? { session_id: result.session_id } : {}),
       ...(request.kind === 'workspace' &&
-          ['select_workspace', 'register_workspace'].includes(request.intent.operation) &&
+          request.intent.operation === 'select_workspace' &&
           result.state === 'consumed' && !result.action_failed &&
           result.workspace_kind === 'registered' &&
           typeof result.workspace_handle === 'string'

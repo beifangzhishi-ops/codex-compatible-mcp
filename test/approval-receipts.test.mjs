@@ -15,7 +15,7 @@ test('authenticated terminal receipt survives Controller restart and active Map 
     const manager = new ApprovalManager({
       now: () => time, terminalRetentionMs: 100, receiptStore: store,
     });
-    const pending = manager.requestWorkspaceAction('register_workspace', {
+    const pending = manager.requestWorkspaceAction('select_workspace', {
       environment_id: 'worker', workspace_id: 'project', workspace_root: 'C:\\project',
     });
     const { approvalNonce } = manager.prepareAppApproval(pending.approval_id, {
@@ -42,7 +42,7 @@ test('authenticated terminal receipt survives Controller restart and active Map 
     assert.equal(status.state, 'consumed');
     assert.equal(status.workspace_handle, handle);
     assert.equal(status.approval_required, false);
-    assert.equal(status.operation, 'register_workspace');
+    assert.equal(status.operation, 'select_workspace');
     assert.equal(Object.hasOwn(status, 'nonce_hash'), false);
     assert.throws(() => recovered.readAppStatus(pending.approval_id, 'wrong-nonce', {
       hostSession: 'conversation-a',
@@ -56,17 +56,17 @@ test('authenticated terminal receipt survives Controller restart and active Map 
   }
 });
 
-test('terminal receipts never publish a workspace handle for failures, unregister or execution', async () => {
+test('terminal receipts never publish a workspace handle for failed workspace selection', async () => {
   const manager = new ApprovalManager({ receiptStore: new ApprovalReceiptStore() });
-  for (const operation of ['select_workspace', 'unregister_workspace']) {
-    const pending = manager.requestWorkspaceAction(operation, {
+  {
+    const pending = manager.requestWorkspaceAction('select_workspace', {
       environment_id: 'worker', workspace_id: 'project', workspace_root: 'C:\\project',
     });
     const { approvalNonce } = manager.prepareAppApproval(pending.approval_id);
     manager.claimAppWorkspace(pending.approval_id, approvalNonce);
     const consumed = manager.markAppWorkspaceConsumed(pending.approval_id);
     manager.recordAppOutcome(pending.approval_id, {
-      ...consumed, action_failed: operation === 'select_workspace',
+      ...consumed, action_failed: true,
       workspace_handle: '00000000-0000-4000-8000-000000000099',
       workspace_kind: 'registered',
     });

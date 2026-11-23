@@ -140,9 +140,11 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       return tool.description;
     };
     assert.match(toolDescription('list_projects'), /default project directories/);
-    assert.match(toolDescription('list_projects'), /project_directory_hint.*display only/);
-    assert.match(toolDescription('select_workspace'), /explicitly requested entry\/switch/);
-    assert.match(toolDescription('register_workspace'), /explicit user registration request/);
+    assert.match(toolDescription('list_projects'), /project_directory_hints.*display-only/);
+    assert.match(toolDescription('select_workspace'), /explicitly asks to enter\/switch/);
+    assert.match(toolDescription('select_workspace'), /Always requires one-shot approval/);
+    assert.match(toolDescription('register_workspace'), /user explicitly instructs project creation/);
+    assert.match(toolDescription('register_workspace'), /immediately returns its workspace_handle/);
     assert.match(toolDescription('exec_command'), /omitted handles auto-create a projectless context/);
     assert.match(toolDescription('write_stdin'), /Empty chars polls are read-only/);
     assert.match(toolDescription('request_verification_input'), /automatic code-free follow-up/);
@@ -156,8 +158,8 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(toolDescription('conversation'), /chatgpt\.com\/share/);
     assert.match(toolDescription('conversation'), /聊天分享链接/);
     assert.match(toolDescription('conversation'), /Do not use web search, browsing or BMG/);
-    assert.match(toolDescription('unregister_workspace'), /Always requires a one-shot CCM approval card/);
-    assert.match(toolDescription('request_approval'), /Do not recreate or retry/);
+    assert.match(toolDescription('unregister_workspace'), /Executes directly without approval or a card/);
+    assert.match(toolDescription('request_approval'), /CCM executes the action directly after approval/);
     const commandTool = listed.tools.find((tool) => tool.name === 'exec_command');
     assert.match(commandTool.description, /resident\/long-running processes in the background without visible console windows/);
     assert.match(commandTool.description, /no-console process launch mode, not merely a hidden parent terminal/);

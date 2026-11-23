@@ -200,15 +200,48 @@ export class WorkspaceRegistry {
     };
   }
 
+  inspectExistingProject(value) {
+    const inspected = this.inspectPath(value);
+    const registered = [...this.registered.values()].find(
+      (workspace) => pathKey(workspace.root) === pathKey(inspected.root),
+    );
+    if (registered) {
+      return {
+        ...inspected,
+        workspace_id: registered.id,
+        registered: true,
+        created_at: registered.createdAt,
+      };
+    }
+    const base = inspected.workspace_id;
+    let workspaceId = base;
+    let suffix = 2;
+    while (this.registered.has(workspaceId)) {
+      workspaceId = `${base}-${suffix++}`;
+    }
+    return { ...inspected, workspace_id: workspaceId, registered: false };
+  }
+
   register({
     workspace_id: workspaceId,
     path: workspacePath,
     create_if_missing: createIfMissing = false,
     approved_root: approvedRoot = null,
+    new_project_only: newProjectOnly = false,
+    unregistered_only: unregisteredOnly = false,
   } = {}) {
+    if (newProjectOnly && (!createIfMissing || unregisteredOnly)) {
+      throw new Error('New-project registration requires directory creation only.');
+    }
+    if (unregisteredOnly && createIfMissing) {
+      throw new Error('Existing-project registration cannot create directories.');
+    }
     let inspected = this.inspectPath(workspacePath, workspaceId, {
       createIfMissing,
     });
+    if (newProjectOnly && inspected.exists) {
+      throw new Error('Project directory already exists; use approved select_workspace.');
+    }
     if (approvedRoot != null &&
         pathKey(inspected.root) !== pathKey(approvedRoot)) {
       throw new Error(
@@ -216,7 +249,14 @@ export class WorkspaceRegistry {
       );
     }
     if (!inspected.exists) {
-      fs.mkdirSync(inspected.root, { recursive: true });
+      if (newProjectOnly) {
+        fs.mkdirSync(path.dirname(inspected.root), { recursive: true });
+        // The final component must be created exclusively: an existing empty
+        // directory must not become an approval-free project after inspection.
+        fs.mkdirSync(inspected.root);
+      } else {
+        fs.mkdirSync(inspected.root, { recursive: true });
+      }
       const real = canonicalDirectory(inspected.root);
       if (approvedRoot != null && pathKey(real) !== pathKey(approvedRoot)) {
         throw new Error(
@@ -234,6 +274,9 @@ export class WorkspaceRegistry {
     const sameRoot = [...this.registered.values()].find(
       (workspace) => pathKey(workspace.root) === pathKey(inspected.root),
     );
+    if (unregisteredOnly && (sameRoot || this.registered.has(id))) {
+      throw new Error('Project registration changed since workspace approval.');
+    }
     if (sameRoot && sameRoot.id !== id) {
       throw new Error(
         'Workspace path is already registered as ' + sameRoot.id + '.',

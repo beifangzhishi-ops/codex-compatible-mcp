@@ -272,6 +272,8 @@ export class RemoteWorkerClient {
           params.workspace_id,
           { createIfMissing: Boolean(params.create_if_missing) },
         );
+      case 'inspect_existing_project':
+        return this.runtime.workspaceRegistry.inspectExistingProject(params.path);
       case 'register_workspace':
         return this.runtime.workspaceRegistry.register(params);
       case 'unregister_workspace':

@@ -88,6 +88,9 @@ test('ApprovalManager normalizes configured approval durations', () => {
 
 function fakeWorkspaceHandleManager() {
   return {
+    async resolveOrCreate(handleId) {
+      return this.resolve(handleId);
+    },
     resolve(handleId) {
       assert.equal(handleId, '00000000-0000-4000-8000-000000000001');
       return {
@@ -406,60 +409,19 @@ test('ApprovalManager terminal retention is independent of active approval TTL',
   );
 });
 
-test('ApprovalManager freezes workspace creation permission into the pending action', () => {
-  const approvals = new ApprovalManager();
-  const intent = {
-    environment_id: 'approval-worker',
-    workspace_id: 'new-project',
-    workspace_root: 'C:\\projects\\new-project',
-    create_if_missing: true,
-  };
-  const pending = approvals.requestWorkspaceAction(
-    'register_workspace',
-    intent,
-    'Create and register this workspace?',
-  );
-  assert.equal(pending.create_if_missing, true);
-  const prepared = approvals.prepareAppApproval(
-    pending.approval_id,
-    { hostSession: 'chat-a' },
-  );
-  const claimed = approvals.claimAppWorkspace(
-    pending.approval_id,
-    prepared.approvalNonce,
-    'chat-a',
-  );
-  assert.equal(claimed.action.operation, 'register_workspace');
-  assert.equal(claimed.action.create_if_missing, true);
-  assert.equal(claimed.action.workspace_root, intent.workspace_root);
-});
-
-test('ApprovalManager freezes deregistration identity and rejects reusable approval', () => {
+test('ApprovalManager permits workspace approvals only for selecting an existing project', () => {
   const approvals = new ApprovalManager();
   const target = {
     environment_id: 'worker',
-    workspace_id: 'to-remove',
-    workspace_root: 'C:\\projects\\to-remove',
-    workspace_created_at: '2026-10-26T01:00:00.000Z',
+    workspace_id: 'project',
+    workspace_root: 'C:\\projects\\project',
   };
-  const pending = approvals.requestWorkspaceAction(
-    'unregister_workspace', target, 'Remove registration?',
-  );
-  assert.equal(pending.workspace_created_at, target.workspace_created_at);
-  const { approvalNonce } = approvals.prepareAppApproval(pending.approval_id);
-  assert.throws(
-    () => approvals.claimAppWorkspace(pending.approval_id, 'invalid'),
-    /nonce/,
-  );
-  const claimed = approvals.claimAppWorkspace(pending.approval_id, approvalNonce);
-  assert.equal(claimed.action.operation, 'unregister_workspace');
-  assert.equal(claimed.action.workspace_root, target.workspace_root);
-  assert.equal(claimed.action.workspace_created_at, target.workspace_created_at);
-  approvals.markAppWorkspaceConsumed(pending.approval_id);
-  assert.throws(
-    () => approvals.claimAppWorkspace(pending.approval_id, approvalNonce),
-    /state=consumed/,
-  );
+  for (const operation of ['register_workspace', 'unregister_workspace']) {
+    assert.throws(() => approvals.requestWorkspaceAction(operation, target),
+      /Only select_workspace/);
+  }
+  assert.equal(approvals.requestWorkspaceAction('select_workspace', target).operation,
+    'select_workspace');
 });
 
 test('ApprovalManager app workspace approvals require the card nonce and freeze the target', () => {
@@ -468,7 +430,6 @@ test('ApprovalManager app workspace approvals require the card nonce and freeze 
     environment_id: 'approval-worker',
     workspace_id: 'project',
     workspace_root: 'C:\\projects\\project',
-    create_if_missing: false,
   };
   const pending = approvals.requestWorkspaceAction(
     'select_workspace',
@@ -509,6 +470,7 @@ test('ApprovalManager app workspace approvals require the card nonce and freeze 
     type: 'workspace',
     operation: 'select_workspace',
     ...intent,
+    workspace_registered: true,
   });
   const consumed = approvals.markAppWorkspaceConsumed(
     prepared.request.approval_id,

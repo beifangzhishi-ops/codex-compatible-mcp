@@ -271,7 +271,7 @@ async function createApprovalAppHarness({
 
 test('reopened approved project restores the workspace handle from read-only status, never reapproves or continues', async () => {
   const context = '00000000-0000-4000-8000-000000000099';
-  const initial = executionApproval({ kind: 'workspace', operation: 'register_workspace' });
+  const initial = executionApproval({ kind: 'workspace', operation: 'select_workspace' });
   const final = terminalExecution({
     ...initial,
     state: 'consumed',
@@ -822,8 +822,8 @@ test('workspace handle is not shown for denial, failure or absent context', asyn
   for (const overrides of failed) {
     const harness = await createApprovalAppHarness({
       hostCapabilities: { message: { text: {} } },
-      initialApproval: executionApproval({ kind: 'workspace', operation: 'register_workspace' }),
-      toolResults: [terminalExecution({ kind: 'workspace', operation: 'register_workspace', exit_code: undefined, ...overrides })],
+      initialApproval: executionApproval({ kind: 'workspace', operation: 'select_workspace' }),
+      toolResults: [terminalExecution({ kind: 'workspace', operation: 'select_workspace', exit_code: undefined, ...overrides })],
     });
     harness.click(overrides.state === 'denied' ? 'deny' : 'approve');
     await waitFor(() => harness.calls.some((call) => call.method === 'ui/message'), 'workspace terminal decision');
@@ -836,8 +836,8 @@ test('successful workspace handle remains visible even when host continuation fa
   const workspaceHandle = '00000000-0000-4000-8000-000000000099';
   const harness = await createApprovalAppHarness({
     contextError: 'host unavailable',
-    initialApproval: executionApproval({ kind: 'workspace', operation: 'register_workspace' }),
-    toolResults: [terminalExecution({ kind: 'workspace', operation: 'register_workspace', workspace_handle: workspaceHandle, exit_code: undefined })],
+    initialApproval: executionApproval({ kind: 'workspace', operation: 'select_workspace' }),
+    toolResults: [terminalExecution({ kind: 'workspace', operation: 'select_workspace', workspace_handle: workspaceHandle, exit_code: undefined })],
   });
   harness.click('approve');
   await waitFor(() => /handoff failed/i.test(harness.elements.status.textContent), 'handoff error');

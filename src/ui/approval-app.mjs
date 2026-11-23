@@ -211,11 +211,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         const workspaceAction = structured.kind === "workspace";
         const administratorAction = !workspaceAction && structured.run_as_admin === true;
         title.textContent = workspaceAction
-          ? (structured.operation === "register_workspace"
-              ? "CCM requests workspace registration"
-              : structured.operation === "unregister_workspace"
-                ? "CCM requests workspace deregistration"
-                : "CCM requests workspace access")
+          ? "CCM requests workspace access"
           : administratorAction
             ? "CCM requests Windows administrator execution"
             : "CCM requests full-access execution";
@@ -242,13 +238,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
           policyScope.textContent = "";
         }
         command.textContent = workspaceAction
-          ? (structured.operation === "register_workspace"
-              ? (structured.create_if_missing
-                  ? "Create if missing, register, and enter this exact workspace."
-                  : "Register and enter this exact workspace.")
-              : structured.operation === "unregister_workspace"
-                ? "Remove this workspace registration and revoke its handles. Do not delete project files. Running processes are not stopped."
-                : "Enter this exact registered workspace.")
+          ? "Enter this exact registered workspace."
           : (structured.command || "");
         approve.textContent = workspaceAction ? "Approve" : "Approve once";
         approveAlways.hidden = !policyPersistable;
@@ -316,7 +306,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
         handleElement.textContent = '';
         renderOutput(value);
         const workspaceSuccess = value.kind === 'workspace' &&
-          ['select_workspace', 'register_workspace'].includes(value.operation) &&
+          value.operation === 'select_workspace' &&
           value.state === 'consumed' && value.action_failed !== true &&
           validHandle(value.workspace_handle);
         if (workspaceSuccess) {
@@ -353,7 +343,7 @@ export const APPROVAL_UI_HTML = String.raw`<!doctype html>
           state: value.state,
           action_failed: value.action_failed === true,
           ...(value.kind === 'workspace' &&
-            ['select_workspace', 'register_workspace'].includes(value.operation) &&
+            value.operation === 'select_workspace' &&
             value.state === 'consumed' && !value.action_failed &&
             validHandle(value.workspace_handle)
             ? { workspace_handle: value.workspace_handle } : {}),

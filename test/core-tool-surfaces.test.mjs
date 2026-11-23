@@ -107,11 +107,20 @@ function runtimeStub() {
             create_required: Boolean(params.create_if_missing),
           };
         }
+        if (method === 'inspect_existing_project') {
+          return {
+            workspace_id: 'existing-project',
+            root: params.path,
+            exists: true,
+            registered: false,
+          };
+        }
         if (method === 'register_workspace') {
           return {
             workspace_id: params.workspace_id,
             kind: 'registered',
             root: params.path,
+            created_at: '2026-11-23T00:00:00.000Z',
           };
         }
         throw new Error('unexpected worker method: ' + method);
@@ -166,7 +175,7 @@ function runtimeStub() {
           environment_id: intent.environment_id,
           workspace_id: intent.workspace_id,
           workspace_root: intent.workspace_root,
-          create_if_missing: Boolean(intent.create_if_missing),
+          workspace_registered: intent.workspace_registered,
           justification,
           expires_at: new Date(Date.now() + 60_000).toISOString(),
           intent_sha256: 'b'.repeat(64),
@@ -229,7 +238,7 @@ test('list_projects displays optional per-Worker default project directories wit
   }
 });
 
-test('core tool surface returns workspace handles while retaining approval cards', async () => {
+test('new project returns handle; existing project selection requires approval; removal is direct', async () => {
   const registry = registerCoreTools(new ToolRegistry(), runtimeStub());
 
   const direct = registry.list().map((tool) => tool.name).sort();
@@ -268,27 +277,27 @@ test('core tool surface returns workspace handles while retaining approval cards
   assert.equal(registry.get('create_projectless_handle'), null);
   assert.match(
     registry.get('select_workspace').description,
-    /explicitly requested entry\/switch AND there is no usable workspace_handle/i,
+    /explicitly asks to enter\/switch it or recover its handle/i,
   );
   assert.match(
     registry.get('select_workspace').description,
-    /Merely inspecting or editing a project is not entry authorization/i,
+    /Ordinary inspection or editing alone is not entry authorization/i,
   );
   assert.match(
     registry.get('select_workspace').description,
-    /Never expose a pending\/failed handle, retry the frozen entry, or bypass it/i,
+    /returns the handle to both the card and model/i,
   );
   assert.match(
     registry.get('select_workspace').description,
-    /Full Access returns the handle/i,
+    /Always requires one-shot approval/i,
   );
   assert.match(
     registry.get('register_workspace').description,
-    /explicit user registration request AND when no usable handle exists/i,
+    /only when the user explicitly instructs project creation/i,
   );
   assert.match(
     registry.get('register_workspace').description,
-    /inspecting or editing alone is not authorization/i,
+    /inspecting, editing, or working on a project does not authorize creation/i,
   );
   assert.match(
     registry.get('exec_command').inputSchema.workspace_handle.description,
@@ -300,14 +309,14 @@ test('core tool surface returns workspace handles while retaining approval cards
   }
   assert.match(
     registry.get('register_workspace').description,
-    /Do not expose pending\/failed handles, retry the frozen action, or bypass it/i,
+    /without approval\/card/i,
   );
   assert.match(
     registry.get('register_workspace').description,
-    /Full Access returns the handle/i,
+    /immediately returns its workspace_handle/i,
   );
   const unregisterTool = registry.get('unregister_workspace');
-  assert.match(unregisterTool.description, /Always requires a one-shot CCM approval card/);
+  assert.match(unregisterTool.description, /Executes directly without approval or a card/);
   assert.match(
     registry.get('exec_command').description,
     /its read scope follows the Worker, while ordinary writes follow the workspace sandbox/i,
@@ -475,18 +484,7 @@ test('core tool surface returns workspace handles while retaining approval cards
   assert.equal(workspacePending.structuredContent.kind, 'workspace');
   assert.equal(workspacePending.structuredContent.operation, 'select_workspace');
   assert.equal(workspacePending.structuredContent.approval_required, true);
-  assert.match(
-    workspacePending.structuredContent.instruction,
-    /remains the user's intended target.*wait for this frozen action to resolve/i,
-  );
-  assert.match(
-    workspacePending.structuredContent.instruction,
-    /do not retry the same target.*projectless workspace to bypass it/i,
-  );
-  assert.match(
-    workspacePending.structuredContent.instruction,
-    /Changing projects alone does not authorize new entry.*explicit entry\/registration instruction/i,
-  );
+  assert.match(workspacePending.structuredContent.instruction, /CCM executes the action directly after approval/);
   assert.equal(workspacePending._meta, undefined);
 
   assert.ok(registry.list().some((tool) => tool.name === 'claim_full_access'));
@@ -500,13 +498,21 @@ test('core tool surface returns workspace handles while retaining approval cards
   assert.equal(select.structuredContent.approval_required, true);
   const register = await registry.get('register_workspace').handler({
     environment_id: 'noha', workspace_id: 'new-project',
-    path: 'C:\\work\\new-project', create_if_missing: true,
+    path: 'C:\\work\\new-project',
   });
-  assert.equal(register.structuredContent.approval_required, true);
-  assert.equal(register.structuredContent.create_if_missing, true);
-  assert.match(register.structuredContent.justification, /create, register, and enter/i);
-  assert.match(register.structuredContent.instruction,
-    /remains the user's intended target.*wait for this frozen action to resolve/i);
+  assert.equal(register.structuredContent.workspace_kind, 'registered');
+  assert.equal(register.structuredContent.workspace_handle, '00000000-0000-4000-8000-000000000009');
+  assert.equal(register.structuredContent.approval_required, undefined);
+  assert.equal(register.structuredContent.approval_id, undefined);
+  const existing = await registry.get('select_workspace').handler({
+    environment_id: 'noha', path: 'C:\\work\\existing-project',
+  });
+  assert.equal(existing.structuredContent.approval_required, true);
+  assert.equal(existing.structuredContent.workspace_registered, false);
+  assert.equal(existing.structuredContent.workspace_handle, undefined);
+  assert.equal((await registry.get('select_workspace').handler({
+    environment_id: 'noha', workspace_id: 'project', path: 'C:\\work\\project',
+  })).isError, true);
 });
 
 test('write_stdin supports direct empty polling and interactive input', async () => {

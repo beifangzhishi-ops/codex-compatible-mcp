@@ -14,7 +14,7 @@ const UNIFIED_EXEC_OUTPUT_SCHEMA = {
   approval_id: z.string().optional(),
   operation_id: z.string().optional(),
   kind: z.enum(['execution', 'workspace']).optional(),
-  operation: z.enum(['select_workspace', 'register_workspace', 'unregister_workspace']).optional(),
+  operation: z.literal('select_workspace').optional(),
   state: z.enum([
     'pending',
     'approved',
@@ -38,7 +38,7 @@ const UNIFIED_EXEC_OUTPUT_SCHEMA = {
   workspace_kind: z.enum(['registered', 'projectless']).optional(),
   workspace_root: z.string().optional(),
   workspace_created_at: z.string().optional(),
-  create_if_missing: z.boolean().optional(),
+  workspace_registered: z.boolean().optional(),
   created_at: z.string().optional(),
   policy_auto_approved: z.boolean().optional(),
   policy_saved: z.boolean().optional(),
@@ -204,18 +204,10 @@ function workspaceActionStatus(request, {
   };
 }
 
-async function executeWorkspaceAction(runtime, action, {
-  requireFullAccess = false,
-} = {}) {
+async function executeWorkspaceAction(runtime, action) {
   const environment = runtime.environmentRegistry.resolve(
     action.environment_id,
   );
-  const timedFullAccess = runtime.webFullAccess?.authorize(action.full_access_grant_id) || false;
-  if (requireFullAccess && environment.permissionProfile !== 'full-access' && !timedFullAccess) {
-    throw new Error(
-      'Environment is no longer full-access; retry the workspace action.',
-    );
-  }
   let workspace;
   if (action.operation === 'unregister_workspace') {
     const current = await runtime.workerHub.call(
@@ -228,7 +220,7 @@ async function executeWorkspaceAction(runtime, action, {
         current.workspace_id !== action.workspace_id ||
         current.root !== action.workspace_root ||
         current.created_at !== action.workspace_created_at) {
-      throw new Error('Workspace registration changed since approval was requested.');
+      throw new Error('Workspace registration changed before it could be unregistered.');
     }
     // Revoke Controller context handles before changing the Worker registry.
     // A failed Controller state write must not leave an unrevoked old context.
@@ -248,18 +240,41 @@ async function executeWorkspaceAction(runtime, action, {
     return null;
   }
   if (action.operation === 'select_workspace') {
-    workspace = await runtime.workerHub.call(
-      environment.id,
-      'get_workspace',
-      { workspace_id: action.workspace_id },
-      { timeoutMs: 10_000 },
-    );
-    if (workspace.kind !== 'registered' ||
-        workspace.workspace_id !== action.workspace_id ||
-        workspace.root !== action.workspace_root) {
-      throw new Error(
-        'Workspace identity no longer matches the registered workspace.',
+    if (action.workspace_registered === false) {
+      const inspected = await runtime.workerHub.call(
+        environment.id,
+        'inspect_existing_project',
+        { path: action.workspace_root },
+        { timeoutMs: 10_000 },
       );
+      if (inspected.registered || inspected.workspace_id !== action.workspace_id ||
+          inspected.root !== action.workspace_root) {
+        throw new Error('Project directory or registration changed since approval.');
+      }
+      workspace = await runtime.workerHub.call(
+        environment.id,
+        'register_workspace',
+        {
+          path: action.workspace_root,
+          workspace_id: action.workspace_id,
+          approved_root: action.workspace_root,
+          unregistered_only: true,
+        },
+        { timeoutMs: 10_000 },
+      );
+    } else {
+      workspace = await runtime.workerHub.call(
+        environment.id,
+        'get_workspace',
+        { workspace_id: action.workspace_id },
+        { timeoutMs: 10_000 },
+      );
+      if (workspace.kind !== 'registered' ||
+          workspace.workspace_id !== action.workspace_id ||
+          workspace.root !== action.workspace_root ||
+          workspace.created_at !== action.workspace_created_at) {
+        throw new Error('Workspace identity changed since approval.');
+      }
     }
   } else if (action.operation === 'register_workspace') {
     const inspected = await runtime.workerHub.call(
@@ -268,14 +283,14 @@ async function executeWorkspaceAction(runtime, action, {
       {
         path: action.workspace_root,
         workspace_id: action.workspace_id,
-        create_if_missing: Boolean(action.create_if_missing),
+        create_if_missing: true,
       },
       { timeoutMs: 10_000 },
     );
-    if (inspected.workspace_id !== action.workspace_id ||
+    if (inspected.exists || inspected.workspace_id !== action.workspace_id ||
         inspected.root !== action.workspace_root) {
       throw new Error(
-        'Workspace registration target no longer matches the inspected path.',
+        'Project directory already exists or changed; use approved select_workspace.',
       );
     }
     workspace = await runtime.workerHub.call(
@@ -284,12 +299,13 @@ async function executeWorkspaceAction(runtime, action, {
       {
         path: action.workspace_root,
         workspace_id: action.workspace_id,
-        create_if_missing: Boolean(action.create_if_missing),
+        create_if_missing: true,
         approved_root: action.workspace_root,
+        new_project_only: true,
       },
       { timeoutMs: 10_000 },
     );
-    if (workspace.workspace_id !== action.workspace_id ||
+    if (workspace.kind !== 'registered' || workspace.workspace_id !== action.workspace_id ||
         workspace.root !== action.workspace_root) {
       throw new Error(
         'Registered workspace no longer matches the requested target.',
@@ -299,10 +315,7 @@ async function executeWorkspaceAction(runtime, action, {
     throw new Error('Unknown workspace operation: ' + action.operation);
   }
 
-  return runtime.workspaceHandleManager.createRegistered(
-    environment.id,
-    workspace,
-  );
+  return runtime.workspaceHandleManager.createRegistered(environment.id, workspace);
 }
 
 async function resolvePendingWorkspaceAction(
@@ -342,11 +355,7 @@ async function resolvePendingWorkspaceAction(
     );
     return workspaceActionStatus(consumed, {
       workspaceHandle,
-      output: action.operation === 'unregister_workspace'
-        ? 'Approved and unregistered the workspace. Project files were not deleted; previous workspace handles are invalid.'
-        : action.operation === 'select_workspace'
-          ? 'Approved and entered the selected workspace.'
-          : 'Approved, registered, and entered the workspace.',
+      output: 'Approved and entered the selected workspace.',
     });
   } catch (error) {
     let consumed = claimed.request;
@@ -619,41 +628,45 @@ export function registerCoreTools(registry, runtime) {
 
     tags: ['workspace', 'project', 'approval'],
     description: [
-      "Enter an existing registered workspace only when the user explicitly requested entry/switch AND there is no usable workspace_handle. Merely inspecting or editing a project is not entry authorization.",
-      "Full Access returns the handle; otherwise if approval_required=true call request_approval and use the completed card. Never expose a pending/failed handle, retry the frozen entry, or bypass it with projectless work.",
+      "Obtain a handle for an existing project only when the user explicitly asks to enter/switch it or recover its handle, and no usable handle exists. Supply exactly one of workspace_id (registered project) or path (existing directory, registered or not). Ordinary inspection or editing alone is not entry authorization.",
+      "Always requires one-shot approval, including Full Access. Call request_approval if approval_required=true; approval registers an unregistered existing directory and returns the handle to both the card and model. Never create a directory through this tool or bypass approval with projectless work.",
     ].join('\n\n'),
     inputSchema: {
       environment_id: z.string().describe('Environment whose Worker owns the workspace.'),
-      workspace_id: z.string().min(1).describe('Registered workspace id on that Worker.'),
-      full_access_grant_id: z.string().uuid().optional().describe('Optional active CCM web Full Access grant ID, valid for any Worker until expiry.'),
+      workspace_id: z.string().min(1).optional().describe('Registered workspace id. Provide this OR path, not both.'),
+      path: z.string().min(1).optional().describe('Absolute directory path for an existing project (registered or not). Provide this OR workspace_id, not both.'),
     },
     handler: async (args) => {
       try {
+        if (Boolean(args.workspace_id) === Boolean(args.path)) {
+          throw new Error('Supply exactly one of workspace_id or path.');
+        }
         const environment = runtime.environmentRegistry.resolve(args.environment_id);
-        const workspace = await runtime.workerHub.call(
-          environment.id,
-          'get_workspace',
-          { workspace_id: args.workspace_id },
-          { timeoutMs: 10_000 },
-        );
-        if (workspace.kind !== 'registered') {
-          throw new Error('select_workspace only accepts registered workspaces.');
+        const workspace = args.path
+          ? await runtime.workerHub.call(
+            environment.id,
+            'inspect_existing_project',
+            { path: args.path },
+            { timeoutMs: 10_000 },
+          )
+          : await runtime.workerHub.call(
+            environment.id,
+            'get_workspace',
+            { workspace_id: args.workspace_id },
+            { timeoutMs: 10_000 },
+          );
+        if (args.workspace_id && workspace.kind !== 'registered') {
+          throw new Error('select_workspace only accepts registered workspace IDs.');
         }
         const intent = {
           environment_id: environment.id,
           workspace_id: workspace.workspace_id,
           workspace_root: workspace.root,
+          workspace_registered: workspace.registered !== false,
+          ...(workspace.created_at ? { workspace_created_at: workspace.created_at } : {}),
         };
-        const timedFullAccess = runtime.webFullAccess?.authorize(args.full_access_grant_id) || false;
-        if (environment.permissionProfile === 'full-access' || timedFullAccess) {
-          return jsonResult(await executeWorkspaceAction(runtime, {
-            operation: 'select_workspace',
-            ...intent,
-            full_access_grant_id: args.full_access_grant_id,
-          }, { requireFullAccess: true }));
-        }
         const justification =
-          'Allow CCM to enter registered workspace ' +
+          'Allow CCM to obtain a handle for existing project ' +
           environment.id + ' / ' + workspace.workspace_id +
           ' at ' + workspace.root + '?';
         const approval = runtime.approvalManager.requestWorkspaceAction(
@@ -665,11 +678,7 @@ export function registerCoreTools(registry, runtime) {
           approval_required: true,
           ...approval,
           instruction:
-            'Call the top-level request_approval tool with this approval_id. ' +
-            'While this workspace remains the user\'s intended target, wait for this frozen action to resolve; ' +
-            'do not retry the same target or create or switch to projectless workspace to bypass it. ' +
-            'Changing projects alone does not authorize new entry; request a handle or an explicit entry/registration instruction. ' +
-            'A separately authorized new workspace action does not require denying this older pending approval.',
+            'Call request_approval with this approval_id. CCM executes the action directly after approval.',
         });
       } catch (error) {
         return toolError(error);
@@ -681,17 +690,15 @@ export function registerCoreTools(registry, runtime) {
     name: 'register_workspace',
     provider: 'ccm-core',
 
-    tags: ['workspace', 'project', 'approval', 'register'],
+    tags: ['workspace', 'project', 'register'],
     description: [
-      "Register and enter an exact project directory only on explicit user registration request AND when no usable handle exists. create_if_missing may create that directory; inspecting or editing alone is not authorization.",
-      "Full Access returns the handle; otherwise if approval_required=true call request_approval and use the completed card. Do not expose pending/failed handles, retry the frozen action, or bypass it through projectless work.",
+      "Create a NEW project only when the user explicitly instructs project creation. Without that explicit instruction, creating or registering any project is forbidden; inspecting, editing, or working on a project does not authorize creation.",
+      "The target path must not already exist (even as an empty directory). Creates an empty directory, registers it, and immediately returns its workspace_handle without approval/card. Existing directories MUST use approved select_workspace, including nonempty and empty ones. Do not use ordinary shell commands to bypass this project-creation boundary.",
     ].join('\n\n'),
     inputSchema: {
       environment_id: z.string().describe('Environment whose Worker owns the directory.'),
-      path: z.string().min(1).describe('Absolute project directory path on the selected Worker.'),
+      path: z.string().min(1).describe('Absolute path for a project directory that does not yet exist.'),
       workspace_id: z.string().min(1).optional().describe('Optional Worker-local workspace id. Defaults to a safe form of the directory name.'),
-      create_if_missing: z.boolean().optional().describe('Create the target directory during registration if it is missing. Defaults to false.'),
-      full_access_grant_id: z.string().uuid().optional().describe('Optional active CCM web Full Access grant ID.'),
     },
     handler: async (args) => {
       try {
@@ -702,46 +709,20 @@ export function registerCoreTools(registry, runtime) {
           {
             path: args.path,
             workspace_id: args.workspace_id,
-            create_if_missing: Boolean(args.create_if_missing),
+            create_if_missing: true,
           },
           { timeoutMs: 10_000 },
         );
-        const intent = {
+        if (inspected.exists) {
+          throw new Error('Project directory already exists; use approved select_workspace.');
+        }
+        const registered = await executeWorkspaceAction(runtime, {
+          operation: 'register_workspace',
           environment_id: environment.id,
           workspace_id: inspected.workspace_id,
           workspace_root: inspected.root,
-          create_if_missing: Boolean(args.create_if_missing),
-        };
-        const timedFullAccess = runtime.webFullAccess?.authorize(args.full_access_grant_id) || false;
-        if (environment.permissionProfile === 'full-access' || timedFullAccess) {
-          return jsonResult(await executeWorkspaceAction(runtime, {
-            operation: 'register_workspace',
-            ...intent,
-            full_access_grant_id: args.full_access_grant_id,
-          }, { requireFullAccess: true }));
-        }
-        const action = inspected.create_required
-          ? 'create, register, and enter workspace '
-          : 'register and enter workspace ';
-        const justification =
-          'Allow CCM to ' + action +
-          environment.id + ' / ' + inspected.workspace_id +
-          ' at ' + inspected.root + '?';
-        const approval = runtime.approvalManager.requestWorkspaceAction(
-          'register_workspace',
-          intent,
-          justification,
-        );
-        return jsonResult({
-          approval_required: true,
-          ...approval,
-          instruction:
-            'Call the top-level request_approval tool with this approval_id. ' +
-            'While this workspace remains the user\'s intended target, wait for this frozen action to resolve; ' +
-            'do not retry the same target or create or switch to projectless workspace to bypass it. ' +
-            'Changing projects alone does not authorize new entry; request a handle or an explicit entry/registration instruction. ' +
-            'A separately authorized new workspace action does not require denying this older pending approval.',
         });
+        return jsonResult(registered);
       } catch (error) {
         return toolError(error);
       }
@@ -752,10 +733,10 @@ export function registerCoreTools(registry, runtime) {
     name: 'unregister_workspace',
     provider: 'ccm-core',
 
-    tags: ['workspace', 'project', 'approval', 'unregister'],
+    tags: ['workspace', 'project', 'unregister'],
     description: [
-      "Unregister one registered workspace without deleting its files. Always requires a one-shot CCM approval card, including on Full Access; call request_approval if approval_required=true.",
-      "Approval revokes its existing handles but does not kill running processes. Projectless workspaces cannot be unregistered.",
+      "Unregister one registered project only when explicitly requested by the user. Executes directly without approval or a card, and never deletes its files.",
+      "Revokes existing project handles but does not kill running processes. Projectless workspaces cannot be unregistered.",
     ].join('\n\n'),
     inputSchema: {
       environment_id: z.string().describe('Environment whose Worker owns the workspace.'),
@@ -773,22 +754,20 @@ export function registerCoreTools(registry, runtime) {
         if (workspace.kind !== 'registered') {
           throw new Error('unregister_workspace only accepts registered workspaces.');
         }
-        const approval = runtime.approvalManager.requestWorkspaceAction(
-          'unregister_workspace',
-          {
-            environment_id: environment.id,
-            workspace_id: workspace.workspace_id,
-            workspace_root: workspace.root,
-            workspace_created_at: workspace.created_at,
-          },
-          'Allow CCM to unregister workspace ' + environment.id + ' / ' +
-          workspace.workspace_id + ' at ' + workspace.root +
-          '? The project directory and files will remain. Previously issued workspace handles will be invalidated.',
-        );
+        await executeWorkspaceAction(runtime, {
+          operation: 'unregister_workspace',
+          environment_id: environment.id,
+          workspace_id: workspace.workspace_id,
+          workspace_root: workspace.root,
+          workspace_created_at: workspace.created_at,
+        });
         return jsonResult({
-          approval_required: true,
-          ...approval,
-          instruction: 'Call the top-level request_approval tool with this approval_id. Do not retry or bypass this frozen unregister action.',
+          environment_id: environment.id,
+          workspace_id: workspace.workspace_id,
+          workspace_root: workspace.root,
+          unregistered: true,
+          handles_revoked: true,
+          project_files_deleted: false,
         });
       } catch (error) {
         return toolError(error);
