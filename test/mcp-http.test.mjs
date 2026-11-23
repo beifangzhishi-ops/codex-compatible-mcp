@@ -382,7 +382,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     });
     assert.equal(publishResult.isError, undefined);
     assert.ok(!publishResult.content.some((item) => item.type === 'resource_link'));
-    assert.match(publishResult.structuredContent.download_url, /^https:\/\/example\.test\/ccm\/download\/start\//);
+    assert.match(publishResult.structuredContent.download_url, /^https:\/\/example\.test\/ccm\/download\//);
     assert.equal(publishResult.structuredContent.preview_url, undefined);
     assert.equal(publishResult.structuredContent.byte_length, docBytes.length);
     const token = publishResult.structuredContent.download_url.split('/').at(-1);

@@ -115,7 +115,7 @@ test('publish is a peer MCP tool and yields an HTTPS URL', async () => {
   const direct = await publish.handler(args);
   assert.equal(direct.isError, undefined);
   assert.equal(direct.structuredContent.capability, 'publish');
-  assert.match(direct.structuredContent.download_url, /^https:\/\/example\.test\/ccm\/download\/start\/[0-9a-f-]+$/);
+  assert.match(direct.structuredContent.download_url, /^https:\/\/example\.test\/ccm\/download\/[0-9a-f-]+$/);
   assert.equal(direct.structuredContent.preview_url, undefined);
   assert.equal(direct.structuredContent.filename, 'report.docx');
   assert.ok(!direct.content.some((item) => item.type === 'resource_link'));
@@ -152,7 +152,7 @@ test('publish returns an image preview link without a card', async () => {
   assert.equal(result.structuredContent.preview_kind, 'image');
   assert.equal(result.structuredContent.preview_url, 'https://example.test/ccm/preview/' + token);
   assert.equal(result.structuredContent.filename, 'portrait.png');
-  assert.equal(result.structuredContent.download_url, 'https://example.test/ccm/download/start/' + token);
+  assert.equal(result.structuredContent.download_url, 'https://example.test/ccm/download/' + token);
   assert.ok(runtime.fileTransferStore.get(token));
   runtime.fileTransferStore.close();
 });

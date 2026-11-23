@@ -51,24 +51,25 @@ test('Controller streams original file bytes and safe attachment headers', async
   assert.equal((await fetch(origin + '/ccm/preview/' + entry.token, { method: 'POST' })).status, 405);
 }));
 
-test('Published download entry automatically loads the original attachment in a hidden frame', async () => withController(async ({ store, origin }) => {
-  const bytes = Buffer.from('file data');
-  const entry = put(store, bytes);
-  const url = origin + '/ccm/download/start/' + entry.token;
+test('Published APK downloads directly as an attachment without a landing page', async () => withController(async ({ store, origin }) => {
+  const bytes = Buffer.from('apk bytes');
+  const entry = store.put({
+    filename: 'CodexMobileUI-0.1.22-release-arm64.apk',
+    mime_type: 'application/vnd.android.package-archive',
+    byte_length: bytes.length,
+    sha256: createHash('sha256').update(bytes).digest('hex'),
+    data: bytes.toString('base64'),
+  });
+  const url = origin + '/ccm/download/' + entry.token;
   const response = await fetch(url + '?utm_source=chatgpt.com');
   assert.equal(response.status, 200);
-  assert.match(response.headers.get('content-type'), /^text\/html/);
-  assert.match(response.headers.get('content-security-policy'), /frame-src 'self'/);
+  assert.equal(response.headers.get('content-type'), 'application/vnd.android.package-archive');
+  assert.equal(response.headers.get('content-length'), String(bytes.length));
+  assert.equal(response.headers.get('accept-ranges'), 'bytes');
+  assert.match(response.headers.get('content-disposition'), /^attachment; filename="CodexMobileUI-0\.1\.22-release-arm64\.apk"/);
   assert.equal(response.headers.get('cache-control'), 'no-store');
-  const html = await response.text();
-  assert.match(html, /<iframe src="\/ccm\/download\/[0-9a-f-]+" name="ccm-download-target"/);
-  assert.match(html, /href="\/ccm\/download\/[0-9a-f-]+" download="中文__file\.txt" target="ccm-download-target"/);
-  assert.doesNotMatch(html, /<script|fetch\(|\.click\(/);
-  assert.equal((await fetch(url, { method: 'POST' })).status, 405);
-  assert.equal((await fetch(origin + '/ccm/download/start/not-a-token')).status, 404);
-  const direct = await fetch(origin + '/ccm/download/' + entry.token);
-  assert.match(direct.headers.get('content-disposition'), /^attachment/);
-  assert.deepEqual(Buffer.from(await direct.arrayBuffer()), bytes);
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes);
+  assert.equal((await fetch(origin + '/ccm/download/start/' + entry.token)).status, 404);
 }));
 test('Controller serves original PNG bytes inline', async () => withController(async ({ store, origin }) => {
   const entry = put(store, Buffer.from('fake-png'), 'image/png');

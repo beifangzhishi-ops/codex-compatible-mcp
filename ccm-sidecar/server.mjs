@@ -17,7 +17,7 @@ import {
 const MAX_BODY_BYTES = 1024 * 1024;
 const UPSTREAM_TIMEOUT_MS = 120000;
 const MAX_UPSTREAM_RESPONSE_BYTES = 8 * 1024 * 1024;
-const DOWNLOAD_ROUTE = /^\/ccm\/(download\/start|download|preview)\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i;
+const DOWNLOAD_ROUTE = /^\/ccm\/(download|preview)\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i;
 const MCP_SESSION_HEADER = 'mcp-session-id';
 const REQUEST_HOP_HEADERS = new Set([
   'connection',
