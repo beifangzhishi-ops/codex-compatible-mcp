@@ -780,6 +780,7 @@ export function registerCoreTools(registry, runtime) {
     supportsParallel: true,
     description: [
       "Run shell command with pipes (tty=true for PTY); returns output/session_id. Reuse workspace_handle for routing/cwd and session ownership; omitted handles auto-create a projectless context on primary Worker (or environment_id) and return it. Its read scope follows the Worker, while ordinary writes follow the workspace sandbox.",
+      "When searching for text or files, prefer using `rg` or `rg --files` respectively because `rg` is much faster than alternatives like `grep`. (If the `rg` command is not found, then use alternatives.)",
       "Start all resident/long-running processes in the background without visible console windows. On Windows, use a no-console process launch mode, not merely a hidden parent terminal. Keep supervision and logs.",
       "Native Codex ExecPolicy .rules decides Allow (Full Access), Prompt (approval), Forbidden (deny); unmatched commands remain sandboxed. Trusted package scripts are workspace/script-hash bound.",
       "For escalation use sandbox_permissions=require_escalated, justification and review_context. Guardian errors return state=review_failed, approval_required=false without dispatch: retry once if review_retryable=true; if it fails again, tell the user to continue when automatic approval responds. Never show a human card for review failures or retry a Guardian denial. If approval_required=true, call request_approval (Guardian disabled).",

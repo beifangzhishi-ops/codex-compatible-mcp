@@ -112,6 +112,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(client.getInstructions(), /Host chooses and sequences peer tools/);
     assert.match(client.getInstructions(), /keyboard\/mouse automation/);
     assert.doesNotMatch(client.getInstructions(), /resident\/long-running processes|visible console windows/);
+    assert.doesNotMatch(client.getInstructions(), /rg --files/);
     assert.match(client.getInstructions(), /available proxy/);
     assert.match(client.getInstructions(), /historical compatibility/);
     assert.match(client.getInstructions(), /obsolete implementations, names and references/);
@@ -161,6 +162,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(toolDescription('unregister_workspace'), /Executes directly without approval or a card/);
     assert.match(toolDescription('request_approval'), /CCM executes the action directly after approval/);
     const commandTool = listed.tools.find((tool) => tool.name === 'exec_command');
+    assert.ok(commandTool.description.includes('When searching for text or files, prefer using `rg` or `rg --files` respectively because `rg` is much faster than alternatives like `grep`. (If the `rg` command is not found, then use alternatives.)'));
     assert.match(commandTool.description, /resident\/long-running processes in the background without visible console windows/);
     assert.match(commandTool.description, /no-console process launch mode, not merely a hidden parent terminal/);
     assert.match(commandTool.description, /proactively supply a practical prefix_rule/);
@@ -171,7 +173,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(commandTool.description, /Distinguish generic Access is denied, sandbox, path and network errors/);
     assert.match(commandTool.description, /Native Codex ExecPolicy/);
     assert.match(commandTool.description, /do not silently start a replacement session/);
-    assert.ok(commandTool.description.length < 2500, 'exec_command description should stay compact');
+    assert.ok(commandTool.description.length < 2700, 'exec_command description should stay compact including upstream search guidance');
     assert.ok(listed.tools.reduce((size, tool) => size + (tool.description?.length || 0), 0) < 18000,
       'total registered tool descriptions should stay within their context budget');
     assert.match(commandTool.inputSchema.properties.prefix_rule.description, /stable, narrowly useful ordered-token prefix/);
