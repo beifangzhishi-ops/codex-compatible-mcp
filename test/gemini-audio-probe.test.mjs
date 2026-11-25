@@ -5,22 +5,22 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createHttpController } from '../src/controller/mcp-http-server.mjs';
 import { ToolRegistry } from '../src/tools/tool-registry.mjs';
+import { registerGeminiAudioProbe } from '../src/tools/gemini-audio-probe.mjs';
 
-test('Gemini session receives a text control and native WAV; ordinary clients do not see probe', async () => {
+test('All MCP clients receive the same audio test tool, text control and native WAV', async () => {
   const registry = new ToolRegistry();
   registry.register({ name: 'baseline', description: 'Baseline tool', inputSchema: {}, handler: async () => ({ content: [{ type: 'text', text: 'ok' }] }) });
+  registerGeminiAudioProbe(registry);
   const controller = createHttpController({ toolRegistry: registry, runtime: { async close() {} }, port: 0 });
   await controller.start();
   try {
-    for (const name of ['ChatGPT', 'ccm-test-client', 'Gemini', 'Google']) {
+    for (const name of ['mcp', 'ChatGPT', 'ccm-test-client', 'Gemini', 'Google']) {
       const client = new Client({ name, version: '1.0.0' });
       try {
         await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${controller.address.port}/ccm/mcp`)));
         const { tools } = await client.listTools();
         assert.ok(tools.some(tool => tool.name === 'baseline'));
-        const expected = name === 'Gemini' || name === 'Google';
-        assert.equal(tools.some(tool => tool.name === 'listen_audio'), expected);
-        if (!expected) continue;
+        assert.equal(tools.some(tool => tool.name === 'listen_audio'), true);
         const result = await client.callTool({ name: 'listen_audio', arguments: {} });
         const wav = await fs.readFile(new URL('../assets/gemini-audio-probe.wav', import.meta.url));
         assert.equal(wav.toString('ascii', 0, 4), 'RIFF');

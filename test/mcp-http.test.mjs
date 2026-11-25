@@ -128,7 +128,8 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const listed = await client.listTools();
     const names = listed.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, registry.list().map((tool) => tool.name).sort());
-    assert.equal(names.length, 24);
+    assert.equal(names.length, 25);
+    assert.ok(names.includes('listen_audio'));
     assert.equal(names.includes('create_projectless_handle'), false);
     for (const name of ['list_projects','claim_full_access','select_workspace','register_workspace','unregister_workspace',
       'plan_patch','plan_read','restart','import_chatgpt_file','conversation','publish',

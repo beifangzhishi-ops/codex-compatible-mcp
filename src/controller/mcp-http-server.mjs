@@ -12,7 +12,6 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { CCM_ICON_PATH, readCcmIcon } from '../server-icon.mjs';
-import { registerGeminiAudioProbe } from '../tools/gemini-audio-probe.mjs';
 import {
   guardMcpToolResult,
   resolveMaxMcpFileResultBytes,
@@ -34,7 +33,6 @@ function createProtocolServer(
   maxToolResultBytes,
   maxFileResultBytes,
   iconPath,
-  clientInfo,
 ) {
   const icon = readCcmIcon(iconPath);
   const serverInfo = {
@@ -139,7 +137,6 @@ function createProtocolServer(
         maxFileResultBytes,
       ));
   }
-  registerGeminiAudioProbe(server, clientInfo, maxToolResultBytes);
   return server;
 }
 
@@ -342,7 +339,6 @@ export function createHttpController({
           maxToolResultBytes,
           maxFileResultBytes,
           iconPath,
-          req.body.params?.clientInfo,
         );
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
