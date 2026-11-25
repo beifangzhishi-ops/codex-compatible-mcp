@@ -21,14 +21,14 @@ test('the tracked CCM icon is a 512x512 PNG below ChatGPT upload limit', () => {
   assert.ok(icon.length < 10_000);
 });
 
-test('initialize exposes the stable same-origin server icon when its PNG exists', async () => {
+test('initialize embeds the original PNG as a base64 data URI without an external origin', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-icon-mcp-'));
   const iconPath = path.join(root, 'ccm-icon.png');
-  await fs.writeFile(iconPath, ICON_BYTES);
+  const icon = readCcmIcon();
+  await fs.writeFile(iconPath, icon);
   const controller = createHttpController({
     toolRegistry: new ToolRegistry(),
     runtime: {
-      fileDownloadOrigin: () => 'https://ccm.example.test',
       environmentRegistry: { defaultEnvironmentId: null, listPublic: () => [] },
       async close() {},
     },
@@ -42,7 +42,7 @@ test('initialize exposes the stable same-origin server icon when its PNG exists'
     await client.connect(transport);
     assert.equal(client.getServerVersion().title, 'CCM');
     assert.deepEqual(client.getServerVersion().icons, [{
-      src: 'https://ccm.example.test/ccm/preview/icon.png',
+      src: `data:image/png;base64,${icon.toString('base64')}`,
       mimeType: 'image/png',
       sizes: ['512x512'],
     }]);

@@ -11,7 +11,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
-import { CCM_ICON_PATH, CCM_ICON_ROUTE, readCcmIcon } from '../server-icon.mjs';
+import { CCM_ICON_PATH, readCcmIcon } from '../server-icon.mjs';
 import {
   guardMcpToolResult,
   resolveMaxMcpFileResultBytes,
@@ -30,20 +30,17 @@ import {
 
 function createProtocolServer(
   toolRegistry,
-  runtime,
   maxToolResultBytes,
   maxFileResultBytes,
   iconPath,
 ) {
   const icon = readCcmIcon(iconPath);
-  const origin = icon && typeof runtime.fileDownloadOrigin === 'function'
-    ? runtime.fileDownloadOrigin() : null;
   const serverInfo = {
     name: 'ccm',
     title: 'CCM',
     version: '0.1.0',
-    ...(origin ? { icons: [{
-      src: new URL(CCM_ICON_ROUTE, origin).href,
+    ...(icon ? { icons: [{
+      src: `data:image/png;base64,${icon.toString('base64')}`,
       mimeType: 'image/png',
       sizes: ['512x512'],
     }] } : {}),
@@ -339,7 +336,6 @@ export function createHttpController({
         }
         const protocolServer = createProtocolServer(
           toolRegistry,
-          runtime,
           maxToolResultBytes,
           maxFileResultBytes,
           iconPath,

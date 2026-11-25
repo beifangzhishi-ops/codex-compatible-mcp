@@ -105,15 +105,14 @@ CCM includes `assets/ccm-icon.png`, its square 512×512 PNG brand icon. The
 tracked PNG is optimized to 9,617 bytes, below the 10,000-byte upload limit
 observed in ChatGPT's plugin creation UI. **When creating the CCM plugin in
 ChatGPT, manually upload `assets/ccm-icon.png` as its icon.** ChatGPT does not
-currently use the MCP URL metadata to fill that icon field automatically.
+currently use the MCP icon metadata to fill that icon field automatically.
 
-The MCP `initialize` response advertises `serverInfo.icons` with a
-same-origin, permanent HTTPS URL: `<CCM_RESOURCE origin>/ccm/preview/icon.png`. The public
-OAuth sidecar serves that path as `image/png` without credentials, so MCP clients
-that support the standard icon metadata can retrieve the same image by URL.
-The public PNG endpoint supports GET, HEAD and cross-origin retrieval (including
-OPTIONS) for clients such as Gemini; this does not change CORS on OAuth or MCP
-endpoints. Gemini's actual icon rendering has not yet been verified.
+The MCP `initialize` response embeds the same PNG in `serverInfo.icons` as a
+`data:image/png;base64,...` URI, so the client does not need to fetch an external
+image. Gemini's actual icon rendering has not yet been verified.
+The public PNG remains directly accessible at `<CCM_RESOURCE origin>/ccm/preview/icon.png`
+without credentials, supporting GET, HEAD and cross-origin retrieval (including
+OPTIONS). This does not change CORS on OAuth or MCP endpoints.
 
 The public Tailscale Funnel routes the existing `/ccm/preview/*` prefix, but not
 arbitrary new `/ccm/*` paths. Serving the static icon under that existing prefix
