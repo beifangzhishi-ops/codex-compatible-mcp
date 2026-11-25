@@ -1,5 +1,4 @@
 import path from 'node:path';
-import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { EnvironmentRegistry } from '../runtime/environment-registry.mjs';
 import { RemoteProcessManager } from '../runtime/remote-process-manager.mjs';
@@ -10,7 +9,6 @@ import { WorkspaceHandleManager } from './workspace-handle-manager.mjs';
 import { FileTransferStore } from './file-transfer-store.mjs';
 import { requireHttpsIdentity } from '../../ccm-sidecar/config.mjs';
 import { DEFAULT_CCM_CONFIG_FILE, readCcmSection } from '../runtime/ccm-config.mjs';
-import fs from 'node:fs';
 import { PlanManager } from './plan-manager.mjs';
 import { createAuditLogger } from './audit-log.mjs';
 import { CodexExecPolicy } from './codex-execpolicy.mjs';
@@ -61,20 +59,7 @@ export function createControllerRuntime(options = {}) {
     ttlMs: process.env.CCM_APPROVAL_TTL_MS,
     receiptStore: approvalReceiptStore,
   });
-  const enrollmentMarker = path.join(
-    process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'),
-    'CCM', 'secrets', 'confirmed.flag',
-  );
-  const webFullAccess = options.webFullAccess || new WebFullAccess({
-    audit,
-    enrollmentRevision: () => {
-      try { return fs.statSync(enrollmentMarker).mtimeMs; }
-      catch (error) {
-        if (error.code === 'ENOENT') return null;
-        throw error;
-      }
-    },
-  });
+  const webFullAccess = options.webFullAccess || new WebFullAccess({ audit });
   const codexPolicy = options.codexPolicy || new CodexExecPolicy({
     stateFile: options.codexPolicyStateFile ||
       defaultControllerStateFile('rules/default.rules'),

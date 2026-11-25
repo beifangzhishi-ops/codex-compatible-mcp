@@ -1,9 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { constantTimeEqual } from '../../ccm-sidecar/oauth.mjs';
-import { readCcmSection } from '../runtime/ccm-config.mjs';
 import { publishedPreviewKind, ISOLATED_MARKUP_CSP } from './published-file-preview.mjs';
 import { renderMarkdownDocument } from './markdown-preview.mjs';
 import { FILE_TOKEN_RE } from './file-transfer-store.mjs';
@@ -159,7 +154,6 @@ export function createHttpController({
   runtime,
   iconPath = CCM_ICON_PATH,
   healthProvider = null,
-  unlockBridgeSecret = null,
   port = Number(process.env.CCM_PORT || 18209),
   host = process.env.CCM_HOST || '127.0.0.1',
   mcpPath = process.env.CCM_MCP_PATH || '/ccm/mcp',
@@ -171,51 +165,6 @@ export function createHttpController({
   ),
 } = {}) {
   const app = createMcpExpressApp();
-  // The sidecar and Controller are independent local processes. The bridge is
-  // loopback-only and authenticated with their existing ignored OAuth secret.
-  // This route is deliberately not exposed by the Funnel allowlist.
-  const resolveBridgeSecret = () => {
-    if (unlockBridgeSecret != null) return unlockBridgeSecret;
-    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-    const vars = readCcmSection('controller', path.join(root, 'ccm.config.json')).env;
-    return vars.CCM_APPROVAL_SECRET ||
-      fs.readFileSync(path.resolve(root, vars.CCM_APPROVAL_SECRET_FILE ||
-        '.state/ccm-approval-secret.txt'), 'utf8').trim();
-  };
-  app.post('/ccm/internal/web-unlock', (req, res) => {
-    const remote = req.socket.remoteAddress;
-    if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remote)) {
-      res.status(403).json({ error: 'forbidden' });
-      return;
-    }
-    try {
-      const provided = req.headers['x-ccm-unlock-bridge'];
-      if (typeof provided !== 'string' ||
-          !constantTimeEqual(provided, resolveBridgeSecret())) {
-        res.status(403).json({ error: 'forbidden' });
-        return;
-      }
-      res.setHeader('Cache-Control', 'no-store');
-      if (req.body?.action === 'status') {
-        res.json(runtime.webFullAccess.status());
-      } else if (req.body?.action === 'issue') {
-        res.json(runtime.webFullAccess.issue(req.body.duration_seconds));
-      } else if (req.body?.action === 'claim') {
-        if (typeof req.body.grant_id !== 'string' ||
-            !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(req.body.grant_id)) {
-          res.status(400).json({ error: 'invalid_grant_id' });
-        } else {
-          const claim = runtime.webFullAccess.claim(req.body.grant_id);
-          if (!claim) res.status(409).json({ error: 'grant_unavailable' });
-          else res.json(claim);
-        }
-      } else {
-        res.status(400).json({ error: 'invalid_action' });
-      }
-    } catch {
-      res.status(503).json({ error: 'unlock_unavailable' });
-    }
-  });
   // These maps are keyed by the MCP Streamable HTTP protocol/transport session.
   // Mcp-Session-Id is not a host conversation id, workspace_handle, process
   // session_id, approval_id, or durable plan/task identity. Do not persist

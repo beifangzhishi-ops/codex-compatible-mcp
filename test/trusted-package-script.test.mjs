@@ -156,6 +156,7 @@ test('RemoteProcessManager runs a trusted npm test without approval', async () =
       },
     },
     workspaceHandleManager: {
+      async resolveOrCreate(id) { return this.resolve(id); },
       resolve(value) {
         assert.equal(value, workspaceHandle.workspace_handle);
         return { ...workspaceHandle };
@@ -221,6 +222,7 @@ test('changed package script no longer uses the trusted full-access path', async
     environmentRegistry: registry,
     workerHub,
     workspaceHandleManager: {
+      async resolveOrCreate(id) { return this.resolve(id); },
       resolve() {
         return { ...workspaceHandle };
       },

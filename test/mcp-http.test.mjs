@@ -122,15 +122,15 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(client.getInstructions(), /verified absolute executable and file paths/);
     assert.match(client.getInstructions(), /Prefer root-cause fixes/);
     assert.doesNotMatch(client.getInstructions(), /code review findings first|retain actual uncertainty/i);
-    assert.doesNotMatch(client.getInstructions(), /list_projects|workspace_handle|write_stdin|claim_full_access|plan_patch|publish|conversation|ExecPolicy|run_as_admin|request_approval|verification code/i,
+    assert.doesNotMatch(client.getInstructions(), /list_projects|workspace_handle|write_stdin|plan_patch|publish|conversation|ExecPolicy|run_as_admin|request_approval|verification code/i,
       'tool-specific instructions must not pollute every tool discovery entry');
     assert.ok(client.getInstructions().length < 1600, 'Controller introduction should contain only Host defaults and server identity');
     const listed = await client.listTools();
     const names = listed.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, registry.list().map((tool) => tool.name).sort());
-    assert.equal(names.length, 19);
+    assert.equal(names.length, 18);
     assert.equal(names.includes('create_projectless_handle'), false);
-    for (const name of ['list_workers','claim_full_access',
+    for (const name of ['list_workers',
       'plan_patch','plan_read','restart','import_chatgpt_file','conversation','publish',
       'transfer']) {
       assert.ok(names.includes(name), name + ' must be a top-level MCP tool');
@@ -148,7 +148,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(toolDescription('write_stdin'), /Empty chars polls are read-only/);
     assert.match(toolDescription('request_verification_input'), /automatic code-free follow-up/);
     assert.match(toolDescription('request_verification_input'), /Do NOT inspect or request the code/);
-    assert.match(toolDescription('claim_full_access'), /Never request or expose phone enrollment secrets/);
+    assert.match(toolDescription('exec_command'), /full_access_grant_id supplied by the owner/);
     assert.match(toolDescription('plan_patch'), /implementation authorization/);
     assert.match(toolDescription('plan_patch'), /Summarize, do not paste the Plan/);
     assert.match(toolDescription('plan_read'), /lifecycle-neutral/);

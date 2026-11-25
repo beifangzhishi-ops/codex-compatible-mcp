@@ -572,6 +572,7 @@ test('Controller rejects cross-workspace write_stdin before contacting Worker', 
     environmentRegistry: registry,
     workerHub,
     workspaceHandleManager: {
+      async resolveOrCreate(id) { return this.resolve(id); },
       resolve(handleId) {
         if (handleId === contextA.workspace_handle) return contextA;
         if (handleId === contextB.workspace_handle) return contextB;
@@ -640,7 +641,7 @@ test('Controller drops a public session when the Worker reports it expired', asy
   const manager = new RemoteProcessManager({
     environmentRegistry: registry,
     workerHub: new FakeWorkerHub(),
-    workspaceHandleManager: { resolve: () => context },
+    workspaceHandleManager: { resolveOrCreate: () => context, resolve: () => context },
   });
   try {
     const started = await manager.execCommand({
@@ -691,6 +692,7 @@ test('Controller caps initial Remote Worker exec waits at five seconds', async (
     environmentRegistry: registry,
     workerHub: new FakeWorkerHub(),
     workspaceHandleManager: {
+      async resolveOrCreate(id) { return this.resolve(id); },
       resolve(handleId) {
         assert.equal(handleId, '00000000-0000-4000-8000-000000000001');
         return {

@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { randomBytes, createHash } from 'node:crypto';
 import { listManagedProjects, manageProject } from './project-management.mjs';
+import { FULL_ACCESS_DURATIONS } from './web-full-access.mjs';
 
 const token = () => randomBytes(32).toString('base64url');
 const escape = value => String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
@@ -9,7 +10,7 @@ const ttl = 12 * 60 * 60_000;
 const script = "document.querySelectorAll('[data-copy]').forEach(b=>b.onclick=async()=>{try{await navigator.clipboard.writeText(b.dataset.copy);b.textContent='已复制'}catch{b.textContent='请手动复制'}});document.querySelectorAll('[data-remove]').forEach(f=>f.onsubmit=()=>confirm('确认注销该项目？文件不会删除，旧句柄将失效。'));";
 const scriptHash = createHash('sha256').update(script).digest('base64');
 const style = 'body{font:16px system-ui,sans-serif;background:#f5f6f8;color:#18212e;margin:0}main{max-width:760px;margin:auto;padding:20px 16px 48px}header{display:flex;justify-content:space-between;align-items:center;gap:12px}h1{font-size:26px;margin:12px 0}h2{font-size:19px;margin:0 0 14px}p{line-height:1.5;margin:8px 0}section,article{background:white;border:1px solid #dce1e8;border-radius:12px;padding:16px;margin:14px 0}article{padding:12px;background:#fafbfc}small,.muted{color:#536274;overflow-wrap:anywhere}label{display:block;margin:10px 0}input,select,button{font:inherit;border-radius:8px;border:1px solid #bac4d1;padding:10px;box-sizing:border-box}input,select{width:100%;background:white}button{background:#253f67;color:white;cursor:pointer;border:0}button.secondary{background:#e6eaf0;color:#18212e}button.danger{background:#fce9e7;color:#8d2424}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.actions form{margin:0}.notice{background:#e8f4eb;border-color:#a7cfb0}.error{background:#fff0ef;border-color:#e4ada7}code{display:block;overflow-wrap:anywhere;user-select:all;padding:10px;background:#f0f2f5;border-radius:6px}a{color:#274d87}';
-const html = (body) => '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CCM 项目管理</title><style>'+style+'</style><main>'+body+'</main><script>'+script+'</script></html>';
+const html = (body) => '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CCM 管理</title><style>'+style+'</style><main>'+body+'</main><script>'+script+'</script></html>';
 function send(res, status, body, headers = {}) {
   res.writeHead(status, {'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-"+scriptHash+"'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",...headers});
   res.end(html(body));
@@ -19,15 +20,30 @@ function hidden(name,value) { return '<input type="hidden" name="'+escape(name)+
 function form(action, csrf, fields, label, extra='', buttonClass='') {
   return '<form method="post" action="/" '+extra+'>'+hidden('csrf',csrf)+hidden('action',action)+fields+'<button class="'+buttonClass+'">'+label+'</button></form>';
 }
-function dashboard(data, session) {
+function fullAccessSection(grants, csrf) {
+  const labels = ['1 分钟','5 分钟','30 分钟','1 小时','6 小时','1 天','7 天'];
+  const options = FULL_ACCESS_DURATIONS.map((seconds,i) => '<option value="'+seconds+'"'+(seconds===21600?' selected':'')+'>'+labels[i]+'</option>').join('');
+  let body = '<section><h2>全权限</h2><p class="muted">适用所有 Worker，不包含 Windows 管理员权限。</p>'+
+    form('grant_issue',csrf,'<label>授权时长<select name="duration_seconds">'+options+'</select></label>','签发全权限');
+  for (const grant of grants) {
+    const id = grant.full_access_grant_id;
+    const expiry = new Date(grant.expires_at).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});
+    body += '<article><p class="muted">有效期至 '+escape(expiry)+' (UTC+8)</p><code>'+escape(id)+'</code><div class="actions"><button type="button" data-copy="'+escape('full_access_grant_id: '+id)+'">复制全权限句柄</button>'+
+      form('grant_revoke',csrf,hidden('grant_id',id),'撤销','','danger')+'</div></article>';
+  }
+  if (!grants.length) body += '<p class="muted">暂无有效授权</p>';
+  return body+'</section>';
+}
+function dashboard(data, session, grants) {
   const flash = session.flash;
   session.flash = null;
-  let body = '<header><h1>CCM 项目管理</h1>'+'</header><p class="muted">注册项目、复制句柄、注销项目。注销仅撤销注册和句柄，不删除文件。</p>';
+  let body = '<header><h1>CCM 管理</h1>'+'</header><p class="muted">注册项目、复制句柄、注销项目。注销仅撤销注册和句柄，不删除文件。</p>';
   if(flash) {
     body += '<section class="'+(flash.error?'error':'notice')+'"><p>'+escape(flash.error || flash.message)+'</p>';
     if(flash.handle) body += '<code>'+escape(flash.handle)+'</code><div class="actions"><button data-copy="'+escape(flash.handle)+'">复制句柄</button></div>';
     body += '</section>';
   }
+  body += fullAccessSection(grants, session.csrf);
   for (const env of data.environments) {
     body += '<section><h2>'+escape(env.name || env.id)+'</h2><p class="muted">'+escape(env.id)+' · '+escape(env.state)+'</p>';
     if(env.state !== 'normal') { body += '<p>'+escape(env.abnormal_reason || env.project_discovery_error || '机器不可用')+'</p></section>'; continue; }
@@ -72,11 +88,23 @@ export function createProjectManagementServer(runtime, { publicOrigin, port=4193
           sessions.set(id,session);
           headers={'Set-Cookie':sessionCookie(id,secure,ttl/1000)};
         }
-        send(res,200,dashboard(await list(runtime),session),headers); return;
+        send(res,200,dashboard(await list(runtime),session,runtime.webFullAccess.list()),headers); return;
       }
       const params=await readForm(req);
       const action=params.get('action');
       if(!session || params.get('csrf')!==session.csrf) { send(res,403,'请刷新页面后重试。'); return; }
+      if (action === 'grant_issue' || action === 'grant_revoke') {
+        try {
+          if (action === 'grant_issue') {
+            runtime.webFullAccess.issue(Number(params.get('duration_seconds')));
+            session.flash = {message:'全权限已签发，请复制句柄给模型。'};
+          } else {
+            runtime.webFullAccess.revoke(params.get('grant_id'));
+            session.flash = {message:'全权限已撤销。'};
+          }
+        } catch(error) { session.flash={error:String(error?.message||error)}; }
+        redirect(res); return;
+      }
       if(!['create','existing','handle','remove'].includes(action)) {send(res,400,'Invalid action.');return;}
       const args={environment_id:params.get('environment_id')||'',workspace_id:params.get('workspace_id')||undefined,path:params.get('path')||undefined};
       if(!args.environment_id || (['create','existing'].includes(action)?!args.path:!args.workspace_id)){send(res,400,'缺少项目参数。');return;}

@@ -243,7 +243,6 @@ test('only Worker discovery and execution are model-facing', async () => {
   const direct = registry.list().map((tool) => tool.name).sort();
   assert.deepEqual(direct, [
     'apply_patch',
-    'claim_full_access',
     'exec_command',
     'get_approval_status',
     'get_verification_input_status',
@@ -353,8 +352,6 @@ test('only Worker discovery and execution are model-facing', async () => {
     ['approval_id', 'approval_nonce', 'decision'],
   );
 
-  assert.ok(registry.list().some((tool) => tool.name === 'claim_full_access'));
-  assert.equal((await registry.get('claim_full_access').handler({})).structuredContent.claimed, false);
 });
 
 test('write_stdin supports direct empty polling and interactive input', async () => {

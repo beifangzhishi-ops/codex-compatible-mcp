@@ -916,6 +916,7 @@ test('one native Always allow rule auto-authorizes both Workers and mixed comman
     approvalManager,
     codexPolicy,
     workspaceHandleManager: {
+      async resolveOrCreate(id) { return this.resolve(id); },
       resolve(handleId) {
         return {
           workspace_handle: handleId,
@@ -1159,6 +1160,7 @@ test('native policy does not implicitly allow an unmatched Git segment on Linux'
     workerHub,
     approvalManager,
     workspaceHandleManager: {
+      async resolveOrCreate(id) { return this.resolve(id); },
       resolve(handleId) {
         return {
           workspace_handle: handleId,

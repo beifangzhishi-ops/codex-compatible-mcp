@@ -2,11 +2,13 @@ import http from 'node:http';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createProjectManagementServer } from '../src/controller/project-management-web.mjs';
+import { WebFullAccess } from '../src/controller/web-full-access.mjs';
 
 test('project management page opens without login, accepts tracking parameters and protects actions against CSRF', async () => {
   const calls=[];
   let listCalls=0;
-  const server=createProjectManagementServer({},{
+  const grants=new WebFullAccess();
+  const server=createProjectManagementServer({webFullAccess:grants},{
     port:4193, publicOrigin:'https://owner.example.ts.net:4193',
     list:async()=>{listCalls++;return {environments:[{id:'worker',state:'normal',projects:[{project_id:'demo',root:'C:\\demo'}]}]};},
     manage:async(_,action,args)=>{calls.push({action,args});return {workspace_handle:'00000000-0000-4000-8000-000000000001'};}
@@ -34,6 +36,17 @@ test('project management page opens without login, accepts tracking parameters a
     assert.equal((await post({action:'handle',csrf:'wrong',environment_id:'worker',workspace_id:'demo'},{Cookie:cookie})).status,403);
     assert.equal((await post({action:'handle',csrf,environment_id:'worker',workspace_id:'demo'},{Cookie:cookie,Origin:'https://evil.example'})).status,403);
     assert.equal(calls.length,0);
+    assert.equal((await post({action:'grant_issue',csrf:'wrong',duration_seconds:'60'},{Cookie:cookie})).status,403);
+    assert.equal((await post({action:'grant_issue',csrf,duration_seconds:'60'},{Cookie:cookie,Origin:'https://evil.example'})).status,403);
+    assert.deepEqual(grants.list(),[]);
+    assert.equal((await post({action:'grant_issue',csrf,duration_seconds:'60'},{Cookie:cookie})).status,303);
+    const [grant]=grants.list();
+    assert.equal(grants.authorize(grant.full_access_grant_id),true);
+    assert.match(await (await get({Cookie:cookie})).text(),new RegExp(grant.full_access_grant_id));
+    assert.match(await (await get({Cookie:cookie})).text(),new RegExp(grant.full_access_grant_id));
+    assert.equal((await post({action:'grant_revoke',csrf,grant_id:grant.full_access_grant_id},{Cookie:cookie})).status,303);
+    assert.throws(()=>grants.authorize(grant.full_access_grant_id),/unknown or expired/);
+    assert.deepEqual(grants.list(),[]);
     assert.equal((await post({action:'handle',csrf,environment_id:'worker',workspace_id:'demo'},{Cookie:cookie})).status,303);
     assert.equal(calls.length,1);
     assert.match(await (await get({Cookie:cookie})).text(),/00000000-0000-4000-8000-000000000001/);

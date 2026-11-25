@@ -239,21 +239,6 @@ function toolError(error) {
 
 export function registerCoreTools(registry, runtime) {
   registry.register({
-    name: 'claim_full_access',
-    provider: 'ccm-core',
-
-    tags: ['approval', 'full-access', 'unlock'],
-    description: 'Fallback only when the owner unlocked CCM at /ccm/unlock but has not provided a usable full_access_grant_id (for example, ChatGPT blocked the copied message). Claim the pending web grant, or recover the SAME already-claimed ID once after browser copy, within the original five-minute claim window or earlier grant expiry. No arguments. Do not call if the user supplied an already-claimed ID. Use the returned full_access_grant_id explicitly in privileged tools; claiming or recovery never extends expiry or changes Worker configuration. Never request or expose phone enrollment secrets.',
-    inputSchema: {},
-    handler: async () => {
-      const claim = runtime.webFullAccess?.claim();
-      return jsonResult(claim || {
-        claimed: false,
-        message: 'No unused fallback claim is available. The owner can copy the active grant ID from the CCM unlock webpage or unlock again after expiry.',
-      });
-    },
-  });
-  registry.register({
     name: 'request_verification_input',
     provider: 'ccm-core',
 
@@ -374,7 +359,7 @@ export function registerCoreTools(registry, runtime) {
       "Native Codex ExecPolicy .rules decides Allow (Full Access), Prompt (approval), Forbidden (deny); unmatched commands remain sandboxed. Trusted package scripts are workspace/script-hash bound.",
       "For escalation use sandbox_permissions=require_escalated, justification and review_context. Guardian errors return state=review_failed, approval_required=false without dispatch: retry once if review_retryable=true; if it fails again, tell the user to continue when automatic approval responds. Never show a human card for review failures or retry a Guardian denial. If approval_required=true, call request_approval (Guardian disabled).",
       "For repeatable build/test/dev escalation, proactively supply a practical prefix_rule with fixed executable, subcommand, script and options, omitting variable suffixes or generic shells. Always allow saves it across Workers; omit prefix_rule on ordinary commands.",
-      "Timed Full Access: use the supplied claimed full_access_grant_id per command, or call claim_full_access only if the owner unlocked without providing the ID. No grant changes Worker baseline or renews expiry.",
+      "Timed Full Access: use the full_access_grant_id supplied by the owner from the CCM management webpage per command. If needed, ask the owner for the ID. No grant changes Worker baseline or renews expiry.",
       "Windows run_as_admin=true uses an unrestricted administrator Agent after one-shot Guardian approval (or human approval if Guardian is disabled). It cannot combine with escalation, grants or prefix_rule; saved rules cannot authorize admin. Preserve verified absolute targets for destructive file operations.",
       "After a completed Windows command fails with clear administrator-token evidence (e.g., a ProtectedPrefix\\Administrators pipe), proactively consider run_as_admin=true if authorized. Distinguish generic Access is denied, sandbox, path and network errors; never automatically elevate. The retry needs separate one-shot approval.",
       "Host Script/tool failure without a structured CCM result proves neither dispatch nor rejection. Distinguish process exit and network/Worker errors; do not silently start a replacement session.",
@@ -560,7 +545,7 @@ export function registerCoreTools(registry, runtime) {
     environmentRequirements: { capabilities: ['applyPatch'] },
     description: [
       'Apply a Codex-style Begin/End Patch. Reuse an existing workspace_handle; if omitted, CCM creates a projectless handle on the primary Worker (or environment_id).',
-      'For timed Full Access, pass the full_access_grant_id supplied by the owner from the CCM unlock webpage, or returned by claim_full_access. Otherwise the original Worker write boundary remains in force.',
+      'For timed Full Access, pass the full_access_grant_id supplied by the owner from the CCM management webpage. If needed, ask the owner for the ID. Otherwise the original Worker write boundary remains in force.',
       'Automatic projectless creation never enters a registered project. For registered-project edits, supply its handle; ask the owner for the handle if missing.',
     ].join('\n\n'),
     inputSchema: {

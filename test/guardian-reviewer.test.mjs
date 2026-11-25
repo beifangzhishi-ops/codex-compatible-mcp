@@ -211,6 +211,7 @@ function fixtureManager(guardianReviewer) {
   const workerHub = new WorkerHub();
   const approvalManager = new ApprovalManager();
   const workspaceHandleManager = {
+    async resolveOrCreate(id) { return this.resolve(id); },
     resolve(handle) {
       assert.equal(handle, WORKSPACE_HANDLE);
       return {
