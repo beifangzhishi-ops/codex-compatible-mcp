@@ -296,6 +296,11 @@ test('only Worker discovery and execution are model-facing', async () => {
     /If approval_required=true, call request_approval/i,
   );
   assert.match(
+    registry.get('exec_command').description,
+    /fails due to sandbox restrictions, proactively consider an authorized retry with sandbox_permissions=require_escalated.*valid full_access_grant_id supplied by the owner/,
+  );
+  assert.ok(registry.get('exec_command').description.length < 2700);
+  assert.match(
     registry.get('apply_patch').description,
     /ask the owner for the handle if missing/i,
   );

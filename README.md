@@ -423,6 +423,12 @@ does not auto-retry, change execution permissions, bypass Guardian/human
 approval, or hide the original process error; the model still must judge task
 authorization before making a new administrator call.
 
+For a completed command that fails due to sandbox restrictions, `exec_command`
+also advises the Host to proactively consider an authorized retry with
+`sandbox_permissions=require_escalated` (normal approval flow), or use a valid
+owner-supplied `full_access_grant_id`. This is tool-level guidance only; it
+does not change the sandbox, approval policy or administrator retry formatter.
+
 To repair or upgrade an administrator agent that cannot be reached through
 `run_as_admin=true`, execute `scripts/install-ccm-admin-agent.ps1` **from an
 independent, elevated Windows PowerShell on that machine**. The installer

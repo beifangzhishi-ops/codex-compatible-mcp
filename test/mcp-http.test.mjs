@@ -167,6 +167,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(commandTool.description, /state=review_failed, approval_required=false/);
     assert.match(commandTool.description, /If approval_required=true, call request_approval/);
     assert.match(commandTool.description, /proactively consider run_as_admin=true/);
+    assert.match(commandTool.description, /fails due to sandbox restrictions, proactively consider an authorized retry with sandbox_permissions=require_escalated.*valid full_access_grant_id supplied by the owner/);
     assert.match(commandTool.description, /Distinguish generic Access is denied, sandbox, path and network errors/);
     assert.match(commandTool.description, /Native Codex ExecPolicy/);
     assert.match(commandTool.description, /do not silently start a replacement session/);
