@@ -405,7 +405,7 @@ test('owner management creates, registers and revokes persistent handles', async
     const selected = await manageProject(controller,'handle',{environment_id:'workspace-worker',workspace_id:seeded.workspace_id});
     assert.equal(selected.workspace_kind,'registered');
     assert.equal(selected.workspace_root,await fs.realpath(bootstrapRoot));
-    const registered = await manageProject(controller,'register',{environment_id:'workspace-worker',workspace_id:'new-project',path:newRoot});
+    const registered = await manageProject(controller,'register',{environment_id:'workspace-worker',path:newRoot});
     assert.equal(registered.workspace_kind,'registered');
     assert.equal(registered.workspace_root,await fs.realpath(newRoot));
     assert.equal(worker.workspaceRegistry.listRegistered().length,2);

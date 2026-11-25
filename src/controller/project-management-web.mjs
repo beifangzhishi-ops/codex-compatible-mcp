@@ -55,7 +55,7 @@ function dashboard(data, session, grants) {
     const hints = env.project_directory_hints || [];
     if(hints.length) body += '<p class="muted">常用目录：'+hints.map(escape).join(' · ')+'</p>';
     body += '<form method="post" action="/">'+hidden('csrf',session.csrf)+hidden('environment_id',env.id)+
-      '<label>项目绝对路径<input name="path" placeholder="输入完整目录路径" required></label><label>新建目录的项目 ID（可选）<input name="workspace_id" placeholder="默认使用目录名"></label><div class="actions"><button name="action" value="register">注册项目</button></div><small>目录不存在时自动创建。</small></form></section>';
+      '<label>项目绝对路径<input name="path" placeholder="输入完整目录路径" required></label><div class="actions"><button name="action" value="register">注册项目</button></div><small>目录不存在时自动创建。</small></form></section>';
   }
   return body + '<p><a href="/">刷新列表</a></p>';
 }

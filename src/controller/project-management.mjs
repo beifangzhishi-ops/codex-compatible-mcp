@@ -190,7 +190,7 @@ export async function manageProject(runtime, action, args) {
   const environment = runtime.environmentRegistry.resolve(args.environment_id);
   const call = (method, params) => runtime.workerHub.call(environment.id, method, params, { timeoutMs: 10_000 });
   if (action === 'register') {
-    const inspected = await call('inspect_workspace_path', { path: args.path, workspace_id: args.workspace_id, create_if_missing: true });
+    const inspected = await call('inspect_workspace_path', { path: args.path, create_if_missing: true });
     if (!inspected.exists) return executeWorkspaceAction(runtime, { operation: 'register_workspace', environment_id: environment.id,
       workspace_id: inspected.workspace_id, workspace_root: inspected.root });
   }
