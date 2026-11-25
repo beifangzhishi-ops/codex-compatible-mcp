@@ -1,8 +1,5 @@
 import http from 'node:http';
-import os from 'node:os';
-import path from 'node:path';
 import { randomBytes, createHash } from 'node:crypto';
-import { CcmTotpManager } from '../../ccm-sidecar/totp.mjs';
 import { listManagedProjects, manageProject } from './project-management.mjs';
 
 const token = () => randomBytes(32).toString('base64url');
@@ -22,14 +19,10 @@ function hidden(name,value) { return '<input type="hidden" name="'+escape(name)+
 function form(action, csrf, fields, label, extra='', buttonClass='') {
   return '<form method="post" action="/" '+extra+'>'+hidden('csrf',csrf)+hidden('action',action)+fields+'<button class="'+buttonClass+'">'+label+'</button></form>';
 }
-function loginPage(message='') {
-  return '<header><h1>CCM 项目管理</h1></header><section><h2>所有者登录</h2><p class="muted">使用已绑定的 CCM 手机动态验证码。</p>'+(message?'<p class="error">'+escape(message)+'</p>':'')+
-    '<form method="post" action="/">'+hidden('action','login')+'<label>动态验证码<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required></label><button>登录</button></form></section>';
-}
 function dashboard(data, session) {
   const flash = session.flash;
   session.flash = null;
-  let body = '<header><h1>CCM 项目管理</h1>'+form('logout',session.csrf,'','退出','','secondary')+'</header><p class="muted">注册项目、复制句柄、注销项目。注销仅撤销注册和句柄，不删除文件。</p>';
+  let body = '<header><h1>CCM 项目管理</h1>'+'</header><p class="muted">注册项目、复制句柄、注销项目。注销仅撤销注册和句柄，不删除文件。</p>';
   if(flash) {
     body += '<section class="'+(flash.error?'error':'notice')+'"><p>'+escape(flash.error || flash.message)+'</p>';
     if(flash.handle) body += '<code>'+escape(flash.handle)+'</code><div class="actions"><button data-copy="'+escape(flash.handle)+'">复制句柄</button></div>';
@@ -55,39 +48,35 @@ async function readForm(req) {
   for await (const chunk of req) { data += chunk; if (data.length > 16384) throw Error('Request too large.'); }
   return new URLSearchParams(data);
 }
-export function createProjectManagementServer(runtime, { publicOrigin, port=4193, totp, list=listManagedProjects, manage=manageProject } = {}) {
+export function createProjectManagementServer(runtime, { publicOrigin, port=4193, list=listManagedProjects, manage=manageProject } = {}) {
   const origins = new Set(['http://127.0.0.1:'+port, 'http://localhost:'+port, ...(publicOrigin ? [publicOrigin] : [])]);
   const hosts = new Set([...origins].map(origin=>new URL(origin).host));
-  const manager = totp || new CcmTotpManager({stateFile:path.join(process.env.LOCALAPPDATA || os.homedir(),'CCM','secrets','totp-project-state.json')});
   const sessions = new Map();
   let actions = Promise.resolve();
   const sessionCookie = (value, secure, age) => cookieName+'='+value+'; Path=/; HttpOnly; SameSite=Strict; Max-Age='+age+(secure?'; Secure':'');
   const server = http.createServer(async (req,res) => {
     try {
-      if (!hosts.has(req.headers.host) || req.url !== '/') { send(res,404,'Not found.'); return; }
+      if (!hosts.has(req.headers.host) || new URL(req.url, 'http://127.0.0.1').pathname !== '/') { send(res,404,'Not found.'); return; }
       if (!['GET','POST'].includes(req.method)) { send(res,405,'Method not allowed.'); return; }
       const origin = req.headers.origin;
       if (req.method === 'POST' && (!origins.has(origin) || new URL(origin).host !== req.headers.host && !(origin===publicOrigin && req.headers['x-forwarded-proto']==='https'))) { send(res,403,'Forbidden.'); return; }
       const secure = origin===publicOrigin || req.headers['x-forwarded-proto']==='https' || (publicOrigin && req.headers.host===new URL(publicOrigin).host);
       const sid = String(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith(cookieName+'='))?.slice(cookieName.length+1);
       for (const [id,s] of sessions) if (s.expires <= Date.now()) sessions.delete(id);
-      const session = sessions.get(sid);
+      let session = sessions.get(sid);
       if(req.method==='GET') {
-        if(!session) { send(res,200,loginPage()); return; }
-        send(res,200,dashboard(await list(runtime),session)); return;
+        let headers = {};
+        if(!session) {
+          const id=token();
+          session={csrf:token(),expires:Date.now()+ttl};
+          sessions.set(id,session);
+          headers={'Set-Cookie':sessionCookie(id,secure,ttl/1000)};
+        }
+        send(res,200,dashboard(await list(runtime),session),headers); return;
       }
       const params=await readForm(req);
       const action=params.get('action');
-      if(action==='login') {
-        let ok=false;
-        try { ok=manager.verify(params.get('code')); } catch {}
-        if(!ok) { send(res,403,loginPage('验证失败，请确认验证码或稍后重试。')); return; }
-        if(sid) sessions.delete(sid);
-        const id=token(); sessions.set(id,{csrf:token(),expires:Date.now()+ttl});
-        redirect(res,{'Set-Cookie':sessionCookie(id,secure,ttl/1000)}); return;
-      }
-      if(!session || params.get('csrf')!==session.csrf) { send(res,403,'请重新登录。'); return; }
-      if(action==='logout') { sessions.delete(sid);redirect(res,{'Set-Cookie':sessionCookie('',secure,0)});return; }
+      if(!session || params.get('csrf')!==session.csrf) { send(res,403,'请刷新页面后重试。'); return; }
       if(!['create','existing','handle','remove'].includes(action)) {send(res,400,'Invalid action.');return;}
       const args={environment_id:params.get('environment_id')||'',workspace_id:params.get('workspace_id')||undefined,path:params.get('path')||undefined};
       if(!args.environment_id || (['create','existing'].includes(action)?!args.path:!args.workspace_id)){send(res,400,'缺少项目参数。');return;}
