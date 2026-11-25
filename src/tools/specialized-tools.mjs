@@ -171,49 +171,60 @@ const BMG_BROWSER_TOOLS = [
 ];
 
 export function registerSpecializedTools(registry, runtime) {
-  for (const [name, schema, handler, description] of [
-    ['transfer_path', {
-      source_handle: z.string().uuid().optional(),
-      source_path: z.string().min(1),
-      target_handle: z.string().uuid().optional(),
-      target_path: z.string().min(1),
-    }, args => runtime.transferTaskManager.start(args),
-    'Copy a regular file or recursive directory between two CCM workspace handles over WorkerHub. An omitted handle creates a new projectless context on the primary Worker; use explicit handles for non-primary Workers or registered projects. Source may be an absolute readable path; target must be relative to the target workspace and MUST NOT already exist. Never overwrites or deletes source; returns transfer_id to monitor.'],
-    ['transfer_status', { transfer_id: z.string().uuid() },
-      args => runtime.transferTaskManager.status(args.transfer_id),
-      'Read progress and final outcome of a WorkerHub file/directory transfer by transfer_id.'],
-    ['transfer_cancel', { transfer_id: z.string().uuid() },
-      args => runtime.transferTaskManager.cancel(args.transfer_id),
-      'Request cancellation of a running WorkerHub file/directory transfer and safe cleanup of its new target.'],
-  ]) {
-    registry.register({
-      namespace: 'ccm-extra',
-      name,
-      provider: 'ccm-specialized',
-      provenance: 'ccm-workerhub-file-transfer',
-
-      tags: ['file', 'transfer', 'workerhub'],
-      supportsParallel: false,
-      description,
-      inputSchema: schema,
-      handler: async args => {
-        try {
-          const resolvedArgs = name === 'transfer_path' ? {
+  const transferSchema = z.object({
+    action: z.enum(['start', 'status', 'cancel']).default('start'),
+    source_handle: z.string().uuid().optional(),
+    source_path: z.string().min(1).optional(),
+    target_handle: z.string().uuid().optional(),
+    target_path: z.string().min(1).optional(),
+    transfer_id: z.string().uuid().optional(),
+  }).strict().superRefine((args, ctx) => {
+    const valid = args.action === 'start'
+      ? args.source_path != null && args.target_path != null && args.transfer_id == null
+      : args.transfer_id != null && args.source_handle == null && args.source_path == null &&
+        args.target_handle == null && args.target_path == null;
+    if (!valid) ctx.addIssue({
+      code: 'custom',
+      message: 'Start requires source_path and target_path with optional handles; status and cancel require only transfer_id.',
+    });
+  });
+  registry.register({
+    namespace: 'ccm-extra',
+    name: 'transfer',
+    provider: 'ccm-specialized',
+    provenance: 'ccm-workerhub-file-transfer',
+    tags: ['file', 'transfer', 'workerhub'],
+    supportsParallel: false,
+    description: [
+      'Copy a regular file or recursive directory between CCM workspace handles over WorkerHub. action=start (default) takes source_path, target_path and optional source_handle, target_handle; returns transfer_id.',
+      'Omitted handles independently create projectless contexts on the primary Worker; use explicit handles for non-primary Workers or registered projects. Source may be an absolute readable path; target must be relative to its workspace and MUST NOT already exist. Never overwrites a destination or deletes source.',
+      'action=status takes transfer_id to read progress and final outcome. action=cancel takes transfer_id to request cancellation and safe cleanup of its new target. Do not supply paths or handles for status/cancel.',
+    ].join('\n\n'),
+    inputSchema: transferSchema,
+    handler: async rawArgs => {
+      try {
+        const { action, transfer_id, ...args } = transferSchema.parse(rawArgs);
+        let value;
+        if (action === 'start') {
+          value = await runtime.transferTaskManager.start({
             ...args,
             source_handle: (await runtime.workspaceHandleManager.resolveOrCreate(args.source_handle)).workspace_handle,
             target_handle: (await runtime.workspaceHandleManager.resolveOrCreate(args.target_handle)).workspace_handle,
-          } : args;
-          const value = await handler(resolvedArgs);
-          return {
-            content: [{ type: 'text', text: JSON.stringify(value) }],
-            structuredContent: value,
-          };
-        } catch (error) {
-          return toolError(error);
+          });
+        } else if (action === 'status') {
+          value = await runtime.transferTaskManager.status(transfer_id);
+        } else {
+          value = await runtime.transferTaskManager.cancel(transfer_id);
         }
-      },
-    });
-  }
+        return {
+          content: [{ type: 'text', text: JSON.stringify(value) }],
+          structuredContent: value,
+        };
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  });
   registry.register({
     namespace: 'ccm-extra',
     name: 'publish',

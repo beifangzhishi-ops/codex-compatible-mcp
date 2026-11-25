@@ -128,11 +128,11 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const listed = await client.listTools();
     const names = listed.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, registry.list().map((tool) => tool.name).sort());
-    assert.equal(names.length, 21);
+    assert.equal(names.length, 19);
     assert.equal(names.includes('create_projectless_handle'), false);
     for (const name of ['list_workers','claim_full_access',
       'plan_patch','plan_read','restart','import_chatgpt_file','conversation','publish',
-      'transfer_path','transfer_status','transfer_cancel']) {
+      'transfer']) {
       assert.ok(names.includes(name), name + ' must be a top-level MCP tool');
     }
     const toolDescription = (name) => {
@@ -141,6 +141,8 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       return tool.description;
     };
     assert.match(toolDescription('list_workers'), /connection state/);
+    assert.match(toolDescription('transfer'), /action=start \(default\)/);
+    for (const name of ['transfer_path','transfer_status','transfer_cancel']) assert.ok(!names.includes(name));
     for(const name of ['list_projects','select_workspace','register_workspace','unregister_workspace']) assert.ok(!names.includes(name));
     assert.match(toolDescription('exec_command'), /omitted handles auto-create a projectless context/);
     assert.match(toolDescription('write_stdin'), /Empty chars polls are read-only/);
@@ -206,6 +208,29 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const workspaceRoot = projectlessResult.workspace_root;
     assert.equal(projectlessResult.workspace_kind, 'projectless');
     assert.match(projectlessResult.output, /AUTO_CONTEXT_OK/);
+
+    await fs.writeFile(path.join(workspaceRoot, 'transfer-source.txt'), 'MCP transfer');
+    const transfer = await client.callTool({
+      name: 'transfer',
+      arguments: { source_handle: workspaceHandle, source_path: 'transfer-source.txt', target_handle: workspaceHandle, target_path: 'transfer-target.txt' },
+    });
+    assert.equal(transfer.isError, undefined, JSON.stringify(transfer));
+    const transferId = transfer.structuredContent.transfer_id;
+    let transferState;
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const status = await client.callTool({ name: 'transfer', arguments: { action: 'status', transfer_id: transferId } });
+      assert.equal(status.isError, undefined, JSON.stringify(status));
+      transferState = status.structuredContent;
+      if (['completed', 'failed', 'cancelled'].includes(transferState.state)) break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert.equal(transferState.state, 'completed', JSON.stringify(transferState));
+    assert.equal(await fs.readFile(path.join(workspaceRoot, 'transfer-target.txt'), 'utf8'), 'MCP transfer');
+    const invalidTransfer = await client.callTool({ name: 'transfer', arguments: { action: 'status', transfer_id: transferId, source_path: 'invalid' } });
+    assert.equal(invalidTransfer.isError, true);
+    const cancelled = await client.callTool({ name: 'transfer', arguments: { action: 'cancel', transfer_id: transferId } });
+    assert.equal(cancelled.isError, undefined);
+    assert.equal(cancelled.structuredContent.state, 'completed');
 
     const seededWorkspace = workerRuntime.workspaceRegistry.listRegistered()[0];
     const { manageProject } = await import('../src/controller/project-management.mjs');

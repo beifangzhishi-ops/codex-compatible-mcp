@@ -427,3 +427,48 @@ test('conversation handles Codex Share and local UUID without workspace registra
   assert.equal(runtime.calls[0].args.share_url, url);
   assert.equal(runtime.calls[0].method, 'conversation');
 });
+
+test('transfer is one peer tool with start, status and cancel actions', async () => {
+  const runtime = fakeRuntime();
+  const handles = [];
+  const calls = [];
+  const source = '00000000-0000-4000-8000-000000000010';
+  const target = '00000000-0000-4000-8000-000000000011';
+  const id = '00000000-0000-4000-8000-000000000012';
+  runtime.workspaceHandleManager.resolveOrCreate = async handle => {
+    handles.push(handle);
+    return { workspace_handle: handle || (handles.length % 2 ? source : target) };
+  };
+  runtime.transferTaskManager = {
+    start(args) { calls.push(['start', args]); return { transfer_id: id, state: 'reserving' }; },
+    status(id) { calls.push(['status', id]); return { transfer_id: id, state: 'running' }; },
+    cancel(id) { calls.push(['cancel', id]); return { transfer_id: id, state: 'running' }; },
+  };
+  const registry = new ToolRegistry();
+  registerSpecializedTools(registry, runtime);
+  const tool = registry.get('ccm-extra.transfer');
+  assert.ok(tool);
+  for (const name of ['transfer_path', 'transfer_status', 'transfer_cancel']) assert.equal(registry.get(name), null);
+  assert.equal(registry.validateArguments(tool, { source_path: 'a', target_path: 'b' }).action, 'start');
+  const implicit = await tool.handler({ source_path: 'a', target_path: 'b' });
+  assert.equal(implicit.structuredContent.transfer_id, id);
+  assert.deepEqual(handles, [undefined, undefined]);
+  assert.deepEqual(calls[0], ['start', { source_path: 'a', target_path: 'b', source_handle: source, target_handle: target }]);
+  const explicit = await tool.handler({ action: 'start', source_handle: source, target_handle: target, source_path: 'a', target_path: 'c' });
+  assert.equal(explicit.structuredContent.transfer_id, id);
+  assert.deepEqual(handles.slice(2), [source, target]);
+  assert.equal((await tool.handler({ action: 'status', transfer_id: id })).structuredContent.state, 'running');
+  assert.equal((await tool.handler({ action: 'cancel', transfer_id: id })).structuredContent.transfer_id, id);
+  assert.deepEqual(calls.slice(2), [['status', id], ['cancel', id]]);
+  for (const args of [
+    {}, { source_path: 'a' }, { source_path: 'a', target_path: 'b', transfer_id: id },
+    { action: 'status' }, { action: 'cancel' }, { action: 'status', transfer_id: id, source_path: 'a' },
+    { action: 'cancel', transfer_id: id, target_handle: target }, { action: 'bad', transfer_id: id },
+    { action: 'status', transfer_id: 'invalid' }, { action: 'start', source_path: 'a', target_path: 'b', extra: true },
+  ]) {
+    assert.throws(() => registry.validateArguments(tool, args));
+    assert.equal((await tool.handler(args)).isError, true);
+  }
+  assert.equal(calls.length, 4);
+  assert.equal(handles.length, 4);
+});
