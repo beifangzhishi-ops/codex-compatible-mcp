@@ -6,6 +6,10 @@ CCM does **not** reproduce the Codex *main-agent* model loop or own the host app
 
 Before modifying this repository, read and follow [AGENTS.md](AGENTS.md) for repository-specific agent instructions.
 
+## Gemini web audio compatibility probe
+
+Experimental `listen_audio` is a Controller-only, zero-argument MCP tool for sessions whose initialize `clientInfo.name` contains `Gemini` or `Google` (case-insensitive). It returns only native MCP `audio` content (`audio/wav`, base64) from a fixed synthetic speech-and-tone fixture; no transcript, file-path access, Worker changes or additional dependencies. The ordinary GPT tool registry is unchanged. `test/gemini-audio-probe.test.mjs` checks discovery isolation and exact audio bytes over MCP HTTP. The actual Gemini web Host identity and whether it forwards native audio to its model remain unverified; reconnect/refresh discovery and call the tool there before implementing arbitrary audio reads. Remove this temporary probe when the compatibility experiment is resolved.
+
 ## GPT Host context budget
 
 The Controller exposes one short MCP introduction (`src/controller/mcp-http-server.mjs`) and peer-tool descriptions in `src/tools/`. The introduction contains only CCM identity and the user's general Host-facing development preferences; task-specific discovery keywords, invocation instructions and safety-critical constraints belong in the corresponding tool descriptions. This avoids contaminating unrelated tool-search entries when a Host indexes server instructions alongside each tool. It does not guarantee Host discovery or model selection. Zod input/output schemas, MCP App visibility, execution policy, approvals, and Worker routing are unchanged by this prompt-only reduction.
