@@ -30,6 +30,12 @@ test('project management page opens without login, accepts tracking parameters a
     assert.equal(landing.headers.get('referrer-policy'),'same-origin');
     const dashboard=await landing.text();
     assert.match(dashboard,/demo/);
+    assert.match(dashboard,/<article class="project"><div class="project-info"><strong>demo<\/strong><div class="muted project-path" tabindex="0">C:\\demo<\/div><\/div><div class="actions">/);
+    assert.match(dashboard,/\.project-info\{flex:1;min-width:0\}/);
+    assert.match(dashboard,/\.project-path\{[^}]*white-space:nowrap;overflow-x:auto/);
+    assert.match(dashboard,/\.project \.actions\{flex:none;flex-wrap:nowrap/);
+    assert.match(dashboard,/name="action" value="register"/);
+    assert.doesNotMatch(dashboard,/name="action" value="(?:create|existing)"/);
     assert.doesNotMatch(dashboard,/name="action" value="login"/);
     assert.equal(listCalls,1);
     const cookie=landing.headers.get('set-cookie').split(';')[0];

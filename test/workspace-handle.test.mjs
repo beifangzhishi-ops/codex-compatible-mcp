@@ -405,7 +405,7 @@ test('owner management creates, registers and revokes persistent handles', async
     const selected = await manageProject(controller,'handle',{environment_id:'workspace-worker',workspace_id:seeded.workspace_id});
     assert.equal(selected.workspace_kind,'registered');
     assert.equal(selected.workspace_root,await fs.realpath(bootstrapRoot));
-    const registered = await manageProject(controller,'create',{environment_id:'workspace-worker',workspace_id:'new-project',path:newRoot});
+    const registered = await manageProject(controller,'register',{environment_id:'workspace-worker',workspace_id:'new-project',path:newRoot});
     assert.equal(registered.workspace_kind,'registered');
     assert.equal(registered.workspace_root,await fs.realpath(newRoot));
     assert.equal(worker.workspaceRegistry.listRegistered().length,2);
@@ -413,9 +413,11 @@ test('owner management creates, registers and revokes persistent handles', async
     const emptyRoot=path.join(tempRoot,'pre-existing-empty');
     await fs.mkdir(oldRoot); await fs.mkdir(emptyRoot);
     await fs.writeFile(path.join(oldRoot,'README.md'),'existing');
-    for(const existingPath of [oldRoot,emptyRoot,bootstrapRoot]) await assert.rejects(manageProject(controller,'create',{environment_id:'workspace-worker',path:existingPath}), /already exists/);
-    const existingSelected=await manageProject(controller,'existing',{environment_id:'workspace-worker',path:oldRoot});
+    assert.equal((await manageProject(controller,'register',{environment_id:'workspace-worker',path:bootstrapRoot})).workspace_handle,selected.workspace_handle);
+    const existingSelected=await manageProject(controller,'register',{environment_id:'workspace-worker',path:oldRoot});
     assert.equal(existingSelected.workspace_root,await fs.realpath(oldRoot));
+    assert.equal(await fs.readFile(path.join(oldRoot,'README.md'),'utf8'),'existing');
+    assert.equal((await manageProject(controller,'register',{environment_id:'workspace-worker',path:oldRoot})).workspace_handle,existingSelected.workspace_handle);
     assert.equal(worker.workspaceRegistry.listRegistered().length,3);
     const newSelected=await manageProject(controller,'handle',{environment_id:'workspace-worker',workspace_id:'new-project'});
     const newProjectHandle=newSelected.workspace_handle;

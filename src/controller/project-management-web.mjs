@@ -10,7 +10,8 @@ const ttl = 12 * 60 * 60_000;
 const script = "document.querySelectorAll('[data-copy]').forEach(b=>b.onclick=async()=>{try{await navigator.clipboard.writeText(b.dataset.copy);b.textContent='已复制'}catch{b.textContent='请手动复制'}});document.querySelectorAll('[data-remove]').forEach(f=>f.onsubmit=()=>confirm('确认注销该项目？文件不会删除，旧句柄将失效。'));";
 const scriptHash = createHash('sha256').update(script).digest('base64');
 const style = 'body{font:16px system-ui,sans-serif;background:#f5f6f8;color:#18212e;margin:0}main{max-width:760px;margin:auto;padding:20px 16px 48px}header{display:flex;justify-content:space-between;align-items:center;gap:12px}h1{font-size:26px;margin:12px 0}h2{font-size:19px;margin:0 0 14px}p{line-height:1.5;margin:8px 0}section,article{background:white;border:1px solid #dce1e8;border-radius:12px;padding:16px;margin:14px 0}article{padding:12px;background:#fafbfc}small,.muted{color:#536274;overflow-wrap:anywhere}label{display:block;margin:10px 0}input,select,button{font:inherit;border-radius:8px;border:1px solid #bac4d1;padding:10px;box-sizing:border-box}input,select{width:100%;background:white}button{background:#253f67;color:white;cursor:pointer;border:0}button.secondary{background:#e6eaf0;color:#18212e}button.danger{background:#fce9e7;color:#8d2424}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.actions form{margin:0}.notice{background:#e8f4eb;border-color:#a7cfb0}.error{background:#fff0ef;border-color:#e4ada7}code{display:block;overflow-wrap:anywhere;user-select:all;padding:10px;background:#f0f2f5;border-radius:6px}a{color:#274d87}';
-const html = (body) => '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CCM 管理</title><style>'+style+'</style><main>'+body+'</main><script>'+script+'</script></html>';
+const projectStyle = '.project{display:flex;align-items:center;gap:10px;padding:8px 10px;margin:8px 0}.project-info{flex:1;min-width:0}.project-info strong{display:block;overflow-wrap:anywhere}.project-path{display:block;white-space:nowrap;overflow-x:auto;overflow-y:hidden;overflow-wrap:normal;margin:3px 0 0;font-size:14px;line-height:1.4}.project .actions{flex:none;flex-wrap:nowrap;gap:6px;margin:0}.project .actions button{white-space:nowrap;padding:8px;font-size:14px}';
+const html = (body) => '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CCM 管理</title><style>'+style+projectStyle+'</style><main>'+body+'</main><script>'+script+'</script></html>';
 function send(res, status, body, headers = {}) {
   res.writeHead(status, {'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Referrer-Policy':'same-origin','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-"+scriptHash+"'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",...headers});
   res.end(html(body));
@@ -49,12 +50,12 @@ function dashboard(data, session, grants) {
     if(env.state !== 'normal') { body += '<p>'+escape(env.abnormal_reason || env.project_discovery_error || '机器不可用')+'</p></section>'; continue; }
     for (const p of env.projects || []) {
       const fields=hidden('environment_id',env.id)+hidden('workspace_id',p.project_id);
-      body += '<article><strong>'+escape(p.project_id)+'</strong><p class="muted">'+escape(p.root)+'</p><div class="actions">'+form('handle',session.csrf,fields,'获取句柄')+form('remove',session.csrf,fields,'注销','data-remove','danger')+'</div></article>';
+      body += '<article class="project"><div class="project-info"><strong>'+escape(p.project_id)+'</strong><div class="muted project-path" tabindex="0">'+escape(p.root)+'</div></div><div class="actions">'+form('handle',session.csrf,fields,'获取句柄')+form('remove',session.csrf,fields,'注销','data-remove','danger')+'</div></article>';
     }
     const hints = env.project_directory_hints || [];
     if(hints.length) body += '<p class="muted">常用目录：'+hints.map(escape).join(' · ')+'</p>';
     body += '<form method="post" action="/">'+hidden('csrf',session.csrf)+hidden('environment_id',env.id)+
-      '<label>项目绝对路径<input name="path" placeholder="输入完整目录路径" required></label><label>新项目 ID（可选）<input name="workspace_id" placeholder="默认使用目录名"></label><div class="actions"><button name="action" value="existing">注册已有目录</button><button name="action" value="create" class="secondary">新建空项目</button></div></form></section>';
+      '<label>项目绝对路径<input name="path" placeholder="输入完整目录路径" required></label><label>新建目录的项目 ID（可选）<input name="workspace_id" placeholder="默认使用目录名"></label><div class="actions"><button name="action" value="register">注册项目</button></div><small>目录不存在时自动创建。</small></form></section>';
   }
   return body + '<p><a href="/">刷新列表</a></p>';
 }
@@ -105,9 +106,9 @@ export function createProjectManagementServer(runtime, { publicOrigin, port=4193
         } catch(error) { session.flash={error:String(error?.message||error)}; }
         redirect(res); return;
       }
-      if(!['create','existing','handle','remove'].includes(action)) {send(res,400,'Invalid action.');return;}
+      if(!['register','handle','remove'].includes(action)) {send(res,400,'Invalid action.');return;}
       const args={environment_id:params.get('environment_id')||'',workspace_id:params.get('workspace_id')||undefined,path:params.get('path')||undefined};
-      if(!args.environment_id || (['create','existing'].includes(action)?!args.path:!args.workspace_id)){send(res,400,'缺少项目参数。');return;}
+      if(!args.environment_id || (action==='register'?!args.path:!args.workspace_id)){send(res,400,'缺少项目参数。');return;}
       const perform=async()=>{
         try {
           const result=await manage(runtime,action,args);

@@ -189,14 +189,13 @@ export async function listManagedProjects(runtime, args = {}) {
 export async function manageProject(runtime, action, args) {
   const environment = runtime.environmentRegistry.resolve(args.environment_id);
   const call = (method, params) => runtime.workerHub.call(environment.id, method, params, { timeoutMs: 10_000 });
-  if (action === 'create') {
+  if (action === 'register') {
     const inspected = await call('inspect_workspace_path', { path: args.path, workspace_id: args.workspace_id, create_if_missing: true });
-    if (inspected.exists) throw new Error('Project directory already exists; register it instead.');
-    return executeWorkspaceAction(runtime, { operation: 'register_workspace', environment_id: environment.id,
+    if (!inspected.exists) return executeWorkspaceAction(runtime, { operation: 'register_workspace', environment_id: environment.id,
       workspace_id: inspected.workspace_id, workspace_root: inspected.root });
   }
-  if (action === 'handle' || action === 'existing') {
-    const workspace = action === 'existing'
+  if (action === 'handle' || action === 'register') {
+    const workspace = action === 'register'
       ? await call('inspect_existing_project', { path: args.path })
       : await call('get_workspace', { workspace_id: args.workspace_id });
     if (action === 'handle' && workspace.kind !== 'registered') throw new Error('Not a registered project.');
