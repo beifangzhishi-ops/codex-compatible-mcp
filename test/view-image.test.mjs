@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
+import { NativeFileService } from '../src/runtime/filesystem/native-file-service.mjs';
 import {
   MAX_VIEW_IMAGE_SOURCE_BYTES,
   viewImageFromEnvironment,
@@ -41,6 +42,33 @@ test('view_image returns bounded PNG metadata and bytes', async () => {
     assert.equal(Buffer.from(result.data, 'base64').length, TINY_PNG.length);
     assert.equal(result.compressed, false);
     assert.equal(result.data, TINY_PNG.toString('base64'));
+  } finally {
+    await fs.rm(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('NativeFileService view_image follows the Worker read scope, not the workspace write root', async () => {
+  const fx = await fixture();
+  try {
+    const cwd = path.join(fx.root, 'workspace');
+    await fs.mkdir(cwd);
+    const outside = path.join(fx.root, 'tiny.png');
+    await fs.writeFile(outside, TINY_PNG);
+    const environment = { ...fx.environment, cwd, workspaceRoots: [cwd] };
+    const service = new NativeFileService({
+      environmentRegistry: { resolve: () => environment },
+      workspaceRegistry: { environmentFor: () => environment },
+    });
+    for (const profile of ['read-only', 'workspace-write', 'full-access']) {
+      environment.permissionProfile = profile;
+      for (const imagePath of [outside, path.join('..', 'tiny.png')]) {
+        const result = await service.viewImage({ workspace_id: 'test', path: imagePath });
+        assert.equal(result.path, outside);
+        assert.equal(result.data, TINY_PNG.toString('base64'));
+      }
+    }
+    environment.permissionProfile = 'unknown';
+    await assert.rejects(service.viewImage({ workspace_id: 'test', path: outside }), /Unsupported CCM permission profile/);
   } finally {
     await fs.rm(fx.root, { recursive: true, force: true });
   }

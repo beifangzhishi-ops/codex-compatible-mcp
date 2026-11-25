@@ -14,7 +14,7 @@ function defaultShell(platform) {
   return { type: 'bash', path: '/bin/bash' };
 }
 
-function publicSandboxScopes(permissionProfile) {
+export function publicSandboxScopes(permissionProfile) {
   if (permissionProfile === 'read-only') {
     return {
       sandbox_read_scope: 'host',

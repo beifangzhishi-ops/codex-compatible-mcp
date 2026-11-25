@@ -757,7 +757,7 @@ so multimodal clients can preserve the image block instead of reducing the
 result to structured-only output. Other tools may use `structuredContent` as
 the standard optional structured companion to `content`.
 
-`view_image` is a peer MCP tool and returns native MCP image content with source metadata and optional compression information in result `_meta`.
+`view_image` is a peer MCP tool and returns native MCP image content with source metadata and optional compression information in result `_meta`. It accepts absolute and context-relative image paths (including paths outside the context root) according to the Worker's existing host read scope and OS file permissions. The workspace handle still selects the Worker and base directory; write authorization and workspace entry remain unchanged.
 
 
 ## Security notes

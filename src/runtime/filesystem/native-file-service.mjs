@@ -13,6 +13,7 @@ import {
   receiveFileFromEnvironment,
 } from './receive-file.mjs';
 import { resolveWorkspaceRelativePath } from '../workspace-registry.mjs';
+import { publicSandboxScopes } from '../environment-registry.mjs';
 
 export class NativeFileService {
   constructor({
@@ -66,12 +67,12 @@ export class NativeFileService {
         )
       : this.environmentRegistry.resolve(args.environment_id);
     if (!environment) throw new Error('Workspace image reads require a workspace registry.');
-    const imagePath = args.workspace_id
-      ? resolveWorkspaceRelativePath(environment.cwd, args.path, 'path')
-      : args.path;
+    if (publicSandboxScopes(environment.permissionProfile).sandbox_read_scope !== 'host') {
+      throw new Error('Unsupported CCM permission profile: ' + environment.permissionProfile);
+    }
     return viewImageFromEnvironment({
       environment,
-      path: imagePath,
+      path: args.path,
       maxBytes: this.maxViewImageBytes,
     });
   }

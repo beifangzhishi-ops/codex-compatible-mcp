@@ -814,6 +814,7 @@ test('Worker disconnect unregisters its environment', async () => {
 
 test('Remote Worker owns apply_patch, view_image, send_file, and receive_file filesystem work', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-worker-files-'));
+  const outsideRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-worker-image-outside-'));
   const controller = createControllerRuntime({ workerPort: 0 });
   const worker = workerRuntime('worker-files', {
     cwd: tempRoot,
@@ -877,6 +878,22 @@ test('Remote Worker owns apply_patch, view_image, send_file, and receive_file fi
     assert.equal(image.width, 1);
     assert.equal(image.height, 1);
     assert.equal(Buffer.from(image.data, 'base64').length, png.length);
+    const outsideImage = path.join(outsideRoot, 'outside.png');
+    await fs.writeFile(outsideImage, png);
+    for (const imagePath of [path.join(tempRoot, 'tiny.png'), outsideImage, path.relative(tempRoot, outsideImage)]) {
+      const result = await controller.fileService.viewImage({
+        workspace_handle: workspaceHandle.workspace_handle,
+        path: imagePath,
+      });
+      assert.equal(result.data, png.toString('base64'));
+      assert.equal(result.path, path.resolve(tempRoot, imagePath));
+    }
+    const projectlessImage = await controller.fileService.viewImage({
+      environment_id: 'worker-files',
+      path: outsideImage,
+    });
+    assert.equal(projectlessImage.data, png.toString('base64'));
+    assert.equal(projectlessImage.workspace_kind, 'projectless');
 
     const docBytes = Buffer.from('fake-docx-content');
     await fs.writeFile(path.join(tempRoot, 'sample.docx'), docBytes);
@@ -914,5 +931,6 @@ test('Remote Worker owns apply_patch, view_image, send_file, and receive_file fi
     worker.close();
     await controller.close();
     await fs.rm(tempRoot, { recursive: true, force: true });
+    await fs.rm(outsideRoot, { recursive: true, force: true });
   }
 });

@@ -1024,7 +1024,7 @@ export function registerCoreTools(registry, runtime) {
       'For multiple images, the Host may call this tool repeatedly.',
     ].join(' '),
     inputSchema: {
-      path: z.string().min(1).describe('Image path relative to the selected context root.'),
+      path: z.string().min(1).describe('Absolute or context-relative local image path, within the Worker read scope.'),
       workspace_handle: z.string().uuid().optional().describe('Existing workspace handle; omit to create a projectless handle.'),
       environment_id: z.string().optional().describe('Worker for automatic projectless creation without a handle. Do not combine with workspace_handle.'),
     },
