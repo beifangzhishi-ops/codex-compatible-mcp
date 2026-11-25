@@ -6,7 +6,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { createHttpController } from '../src/controller/mcp-http-server.mjs';
 import { ToolRegistry } from '../src/tools/tool-registry.mjs';
 
-test('Gemini session receives native WAV audio only; ordinary clients do not see probe', async () => {
+test('Gemini session receives a text control and native WAV; ordinary clients do not see probe', async () => {
   const registry = new ToolRegistry();
   registry.register({ name: 'baseline', description: 'Baseline tool', inputSchema: {}, handler: async () => ({ content: [{ type: 'text', text: 'ok' }] }) });
   const controller = createHttpController({ toolRegistry: registry, runtime: { async close() {} }, port: 0 });
@@ -27,7 +27,12 @@ test('Gemini session receives native WAV audio only; ordinary clients do not see
         assert.equal(wav.toString('ascii', 8, 12), 'WAVE');
         assert.ok(wav.length > 100000);
         assert.equal(result.isError, undefined);
-        assert.deepEqual(result.content, [{ type: 'audio', mimeType: 'audio/wav', data: wav.toString('base64') }]);
+        assert.equal(result.content.length, 2);
+        assert.equal(result.content[0].type, 'text');
+        assert.match(result.content[0].text, /^TEST ONLY: no practical audio-reading functionality\. Text control marker: [a-f0-9]{12}$/);
+        assert.deepEqual(result.content[1], { type: 'audio', mimeType: 'audio/wav', data: wav.toString('base64') });
+        const next = await client.callTool({ name: 'listen_audio', arguments: {} });
+        assert.notEqual(next.content[0].text, result.content[0].text);
         assert.equal(result.structuredContent, undefined);
       } finally {
         await client.close();
