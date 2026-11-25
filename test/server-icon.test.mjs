@@ -73,7 +73,20 @@ test('sidecar serves the same stable PNG URL without OAuth', async () => {
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('content-type'), 'image/png');
     assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(response.headers.get('access-control-allow-origin'), '*');
     assert.deepEqual(Buffer.from(await response.arrayBuffer()), ICON_BYTES);
+    const head = await fetch(url, { method: 'HEAD', headers: { Origin: 'https://gemini.google.com' } });
+    assert.equal(head.status, 200);
+    assert.equal(head.headers.get('content-type'), 'image/png');
+    assert.equal(head.headers.get('content-length'), String(ICON_BYTES.length));
+    assert.equal(head.headers.get('access-control-allow-origin'), '*');
+    assert.equal((await head.arrayBuffer()).byteLength, 0);
+    const preflight = await fetch(url, { method: 'OPTIONS', headers: {
+      Origin: 'https://gemini.google.com', 'Access-Control-Request-Method': 'GET',
+    } });
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers.get('access-control-allow-origin'), '*');
+    assert.equal(preflight.headers.get('access-control-allow-methods'), 'GET, HEAD, OPTIONS');
     assert.equal((await fetch(url, { method: 'POST' })).status, 405);
   } finally {
     await closeCcmOAuthServer(sidecar);

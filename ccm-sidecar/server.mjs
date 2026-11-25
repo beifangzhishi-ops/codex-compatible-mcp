@@ -1191,8 +1191,17 @@ async function handleRequest(request, response, runtime) {
     return;
   }
   if (url.pathname === CCM_ICON_ROUTE) {
-    if (request.method !== 'GET') {
-      response.writeHead(405, { Allow: 'GET' });
+    if (request.method === 'OPTIONS') {
+      response.writeHead(204, {
+        Allow: 'GET, HEAD, OPTIONS',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+      });
+      response.end();
+      return;
+    }
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      response.writeHead(405, { Allow: 'GET, HEAD, OPTIONS' });
       response.end();
       return;
     }
@@ -1207,8 +1216,9 @@ async function handleRequest(request, response, runtime) {
       'Content-Length': icon.length,
       'Cache-Control': 'public, max-age=3600',
       'X-Content-Type-Options': 'nosniff',
+      'Access-Control-Allow-Origin': '*',
     });
-    response.end(icon);
+    response.end(request.method === 'HEAD' ? undefined : icon);
     return;
   }
   if (url.pathname === '/ccm/download' || url.pathname.startsWith('/ccm/download/') ||

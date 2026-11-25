@@ -111,6 +111,9 @@ The MCP `initialize` response advertises `serverInfo.icons` with a
 same-origin, permanent HTTPS URL: `<CCM_RESOURCE origin>/ccm/preview/icon.png`. The public
 OAuth sidecar serves that path as `image/png` without credentials, so MCP clients
 that support the standard icon metadata can retrieve the same image by URL.
+The public PNG endpoint supports GET, HEAD and cross-origin retrieval (including
+OPTIONS) for clients such as Gemini; this does not change CORS on OAuth or MCP
+endpoints. Gemini's actual icon rendering has not yet been verified.
 
 The public Tailscale Funnel routes the existing `/ccm/preview/*` prefix, but not
 arbitrary new `/ccm/*` paths. Serving the static icon under that existing prefix
