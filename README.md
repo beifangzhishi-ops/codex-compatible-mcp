@@ -6,9 +6,9 @@ CCM does **not** reproduce the Codex *main-agent* model loop or own the host app
 
 Before modifying this repository, read and follow [AGENTS.md](AGENTS.md) for repository-specific agent instructions.
 
-## Gemini web audio compatibility probe
+## Gemini web MCP compatibility
 
-Temporary `listen_audio` is a Controller-only, zero-argument Gemini MCP compatibility test with no practical audio-reading functionality. It is registered as a standard peer tool for every client, including generic `mcp` clients used in tool discovery. It returns a native MCP text block containing a fresh random control marker, followed by native MCP `audio` content (`audio/wav`, base64) from a fixed synthetic speech-and-tone fixture. No transcript, file-path access, Worker changes or additional dependencies. `test/gemini-audio-probe.test.mjs` checks uniform discovery, distinct text markers and exact audio bytes over MCP HTTP. In the first Gemini web test, the model reported empty objects for both image and audio tool calls. The mixed-content control tests whether the Host forwards text while discarding audio; reconnect/refresh discovery and compare the two blocks separately. Remove this temporary probe when the compatibility experiment is resolved.
+On 2026-11-25, Gemini web Custom MCP (Hydrogen) reported empty objects for native MCP image and audio results. A mixed-content control returned a fresh random text marker and a standard WAV audio block; Gemini reproduced the text marker but reported no audio access. Local MCP HTTP tests verified the native content blocks and exact audio bytes. The observed limitation is in the tested Gemini web integration; the precise internal filtering layer is unverified. Keep standard MCP image results for GPT; native audio integration is deferred until Gemini web supports forwarding audio content to the model.
 
 ## GPT Host context budget
 

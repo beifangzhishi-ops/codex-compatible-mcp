@@ -2,7 +2,6 @@ import { registerCoreTools } from './core-tools.mjs';
 import { registerSpecializedTools } from './specialized-tools.mjs';
 import { registerPlanTools } from './plan-tools.mjs';
 import { registerRestartTools } from './restart-tools.mjs';
-import { registerGeminiAudioProbe } from './gemini-audio-probe.mjs';
 import { ToolRegistry } from './tool-registry.mjs';
 
 export function createToolRegistry(runtime) {
@@ -10,6 +9,5 @@ export function createToolRegistry(runtime) {
   registerPlanTools(registry, runtime);
   registerRestartTools(registry, runtime);
   registerSpecializedTools(registry, runtime);
-  registerGeminiAudioProbe(registry);
   return { registry };
 }
