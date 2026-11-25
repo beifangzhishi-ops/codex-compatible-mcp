@@ -26,6 +26,8 @@ test('project management page opens without login, accepts tracking parameters a
   try{
     const landing=await get({},'/?utm_source=chatgpt.com');
     assert.equal(landing.status,200);
+    // Native browser form POSTs must retain their same-origin Origin header.
+    assert.equal(landing.headers.get('referrer-policy'),'same-origin');
     const dashboard=await landing.text();
     assert.match(dashboard,/demo/);
     assert.doesNotMatch(dashboard,/name="action" value="login"/);
@@ -35,6 +37,7 @@ test('project management page opens without login, accepts tracking parameters a
     const csrf=dashboard.match(/name="csrf" value="([^"]+)"/)[1];
     assert.equal((await post({action:'handle',csrf:'wrong',environment_id:'worker',workspace_id:'demo'},{Cookie:cookie})).status,403);
     assert.equal((await post({action:'handle',csrf,environment_id:'worker',workspace_id:'demo'},{Cookie:cookie,Origin:'https://evil.example'})).status,403);
+    assert.equal((await post({action:'grant_issue',csrf,duration_seconds:'60'},{Cookie:cookie,Origin:'null'})).status,403);
     assert.equal(calls.length,0);
     assert.equal((await post({action:'grant_issue',csrf:'wrong',duration_seconds:'60'},{Cookie:cookie})).status,403);
     assert.equal((await post({action:'grant_issue',csrf,duration_seconds:'60'},{Cookie:cookie,Origin:'https://evil.example'})).status,403);

@@ -171,7 +171,7 @@ The webpage unregisters a Worker-local project after revalidating its id/root/cr
 
 ### Owner management: timed global Full Access
 
-The unified owner management webpage (localhost or private Tailscale Serve, port 4193) issues, lists, copies and revokes time-limited Full Access UUIDs without login or pairing. Same-origin and CSRF checks protect mutations. Access to the private management endpoint is the trust boundary; do not expose it through Funnel.
+The unified owner management webpage (localhost or private Tailscale Serve, port 4193) issues, lists, copies and revokes time-limited Full Access UUIDs without login or pairing. Same-origin and CSRF checks protect mutations. The management page uses Referrer-Policy: same-origin to retain the Origin header on native browser form submissions without leaking cross-origin referrers. Access to the private management endpoint is the trust boundary; do not expose it through Funnel.
 
 Select 1 minute, 5 minutes, 30 minutes, 1 hour, 6 hours, 1 day or 7 days. Issuing creates an immediately usable grant with that expiry. The owner copies its `full_access_grant_id` to the model, which passes it explicitly to `exec_command` or `apply_patch`. Multiple grants are independent and work on current and newly connected Workers. Unknown, expired or revoked IDs fail closed. Controller restart clears all grants; already-started processes may finish naturally. Worker profiles and workspace handles remain unchanged. Calls without an ID retain ordinary policy. Native Forbidden rules still reject commands; grants do not save persistent Allow rules or authorize administrator execution.
 
