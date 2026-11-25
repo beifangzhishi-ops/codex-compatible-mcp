@@ -96,6 +96,14 @@ export class WorkspaceHandleManager {
     return this.createProjectless(environmentId);
   }
 
+  findRegistered(environmentId, workspace) {
+    for (const record of this.handles.values()) {
+      if (record.kind === 'registered' && record.environmentId === environmentId &&
+          record.workspaceId === workspace.workspace_id && record.root === workspace.root) return publicHandle(record);
+    }
+    return null;
+  }
+
   createRegistered(environmentId, workspace) {
     return this.#create(environmentId, workspace);
   }

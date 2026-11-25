@@ -128,9 +128,9 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const listed = await client.listTools();
     const names = listed.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, registry.list().map((tool) => tool.name).sort());
-    assert.equal(names.length, 24);
+    assert.equal(names.length, 21);
     assert.equal(names.includes('create_projectless_handle'), false);
-    for (const name of ['list_projects','claim_full_access','select_workspace','register_workspace','unregister_workspace',
+    for (const name of ['list_workers','claim_full_access',
       'plan_patch','plan_read','restart','import_chatgpt_file','conversation','publish',
       'transfer_path','transfer_status','transfer_cancel']) {
       assert.ok(names.includes(name), name + ' must be a top-level MCP tool');
@@ -140,12 +140,8 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       assert.ok(tool, name + ' must be present');
       return tool.description;
     };
-    assert.match(toolDescription('list_projects'), /default project directories/);
-    assert.match(toolDescription('list_projects'), /project_directory_hints.*display-only/);
-    assert.match(toolDescription('select_workspace'), /explicitly asks to enter\/switch/);
-    assert.match(toolDescription('select_workspace'), /Always requires one-shot approval/);
-    assert.match(toolDescription('register_workspace'), /user explicitly instructs project creation/);
-    assert.match(toolDescription('register_workspace'), /immediately returns its workspace_handle/);
+    assert.match(toolDescription('list_workers'), /connection state/);
+    for(const name of ['list_projects','select_workspace','register_workspace','unregister_workspace']) assert.ok(!names.includes(name));
     assert.match(toolDescription('exec_command'), /omitted handles auto-create a projectless context/);
     assert.match(toolDescription('write_stdin'), /Empty chars polls are read-only/);
     assert.match(toolDescription('request_verification_input'), /automatic code-free follow-up/);
@@ -159,7 +155,6 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.match(toolDescription('conversation'), /chatgpt\.com\/share/);
     assert.match(toolDescription('conversation'), /聊天分享链接/);
     assert.match(toolDescription('conversation'), /Do not use web search, browsing or BMG/);
-    assert.match(toolDescription('unregister_workspace'), /Executes directly without approval or a card/);
     assert.match(toolDescription('request_approval'), /CCM executes the action directly after approval/);
     const commandTool = listed.tools.find((tool) => tool.name === 'exec_command');
     assert.ok(commandTool.description.includes('When searching for text or files, prefer using `rg` or `rg --files` respectively because `rg` is much faster than alternatives like `grep`. (If the `rg` command is not found, then use alternatives.)'));
@@ -187,12 +182,12 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(listed.tools.find((tool) => tool.name === 'request_approval')?._meta?.ui?.resourceUri, APPROVAL_UI_URI);
     assert.equal(listed.tools.find((tool) => tool.name === 'publish')?._meta?.ui?.resourceUri, undefined);
     assert.equal(listed.tools.find((tool) => tool.name === 'publish')?._meta?.['openai/outputTemplate'], undefined);
-    const discovered = await client.callTool({name:'list_projects', arguments:{}});
+    const discovered = await client.callTool({name:'list_workers', arguments:{}});
     assert.equal(discovered.isError, undefined);
     assert.equal(discovered.structuredContent.default_environment_id, 'mcp-worker');
     assert.equal(discovered.structuredContent.environments[0].id, 'mcp-worker');
     assert.match(discovered.structuredContent.environments[0].connected_at, /^\d{4}-\d{2}-\d{2}T/);
-    assert.equal(discovered.structuredContent.environments[0].projects.length, 1);
+    assert.equal(Object.hasOwn(discovered.structuredContent.environments[0], 'projects'), false);
     const approvalResource = await client.readResource({ uri: APPROVAL_UI_URI });
     assert.equal(approvalResource.contents[0].text, APPROVAL_UI_HTML);
     assert.equal(approvalResource.contents[0]._meta.ui.prefersBorder, true);
@@ -212,84 +207,11 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.equal(projectlessResult.workspace_kind, 'projectless');
     assert.match(projectlessResult.output, /AUTO_CONTEXT_OK/);
 
-    const completeProjectDiscovery = await client.callTool({
-      name: 'list_projects', arguments: { all: true },
-    });
-    assert.equal(completeProjectDiscovery.isError, undefined);
-    assert.equal(completeProjectDiscovery.structuredContent.environments[0]
-      .projectless_workspaces[0].projectless_id, projectlessResult.workspace_id);
     const seededWorkspace = workerRuntime.workspaceRegistry.listRegistered()[0];
-    const workspacePrepare = await client.callTool({
-      name: 'select_workspace',
-      arguments: { environment_id: 'mcp-worker', workspace_id: seededWorkspace.workspace_id },
-    });
-    assert.equal(workspacePrepare.isError, undefined);
-    const workspacePending = workspacePrepare.structuredContent;
-    assert.equal(workspacePending.kind, 'workspace');
-    assert.equal(
-      workspacePending.operation,
-      'select_workspace',
-    );
-    const workspaceApproval = await client.callTool({
-      name: 'request_approval',
-      arguments: {
-        approval_id: workspacePending.approval_id,
-      },
-    });
-    assert.equal(workspaceApproval.isError, undefined);
-    assert.equal(typeof workspaceApproval._meta?.approval_nonce, 'string');
-    const workspacePersistentBypass = await client.callTool({
-      name: 'resolve_pending_action',
-      arguments: {
-        approval_id: workspacePending.approval_id,
-        approval_nonce: workspaceApproval._meta.approval_nonce,
-        decision: 'approve_always',
-      },
-    });
-    assert.equal(workspacePersistentBypass.isError, true);
-    assert.match(
-      workspacePersistentBypass.content[0].text,
-      /only available for execution approvals/i,
-    );
-    const selectedWorkspace = await client.callTool({
-      name: 'resolve_pending_action',
-      arguments: {
-        approval_id: workspacePending.approval_id,
-        approval_nonce: workspaceApproval._meta.approval_nonce,
-        decision: 'approve',
-      },
-    });
-    assert.equal(selectedWorkspace.isError, undefined);
-    assert.equal(selectedWorkspace.structuredContent.state, 'consumed');
-    assert.equal(
-      selectedWorkspace.structuredContent.workspace_kind,
-      'registered',
-    );
-    assert.equal(
-      selectedWorkspace.structuredContent.workspace_id,
-      seededWorkspace.workspace_id,
-    );
-    const recoveredApproval = await client.callTool({
-      name: 'get_approval_status',
-      arguments: {
-        approval_id: workspacePending.approval_id,
-        approval_nonce: workspaceApproval._meta.approval_nonce,
-      },
-    });
-    assert.equal(recoveredApproval.isError, undefined);
-    assert.equal(recoveredApproval.structuredContent.state, 'consumed');
-    assert.equal(
-      recoveredApproval.structuredContent.workspace_handle,
-      selectedWorkspace.structuredContent.workspace_handle,
-    );
-    const deniedStatusRead = await client.callTool({
-      name: 'get_approval_status',
-      arguments: {
-        approval_id: workspacePending.approval_id,
-        approval_nonce: 'not-the-real-card-secret-000000',
-      },
-    });
-    assert.equal(deniedStatusRead.isError, true);
+    const { manageProject } = await import('../src/controller/project-management.mjs');
+    const selectedWorkspace = await manageProject(runtime,'handle',{environment_id:'mcp-worker',workspace_id:seededWorkspace.workspace_id});
+    assert.equal(selectedWorkspace.workspace_kind,'registered');
+    assert.equal((await manageProject(runtime,'handle',{environment_id:'mcp-worker',workspace_id:seededWorkspace.workspace_id})).workspace_handle,selectedWorkspace.workspace_handle);
 
     const result = await client.callTool({
       name: 'exec_command',

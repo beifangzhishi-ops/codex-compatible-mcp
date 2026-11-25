@@ -1,3 +1,4 @@
+import { listManagedProjects } from '../src/controller/project-management.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -218,27 +219,25 @@ test('list_projects displays optional per-Worker default project directories wit
     fs.writeFileSync(configPath, JSON.stringify(config));
     const runtime = runtimeStub();
     runtime.ccmConfigFile = configPath;
-    const registry = registerCoreTools(new ToolRegistry(), runtime);
-    const listed = (await registry.get('list_projects').handler({})).structuredContent.environments;
+    const listed = (await listManagedProjects(runtime)).environments;
     assert.deepEqual(listed.map((env) => env.project_directory_hints), [
       ['C:\\Users\\example\\Documents\\ChatGPT'],
       ['C:\\Users\\example\\Documents\\AAAVitalFile', 'C:\\Users\\example\\Documents\\ChatGPT'],
     ]);
     assert.equal(listed[0].projects[0].root, 'C:\\work\\primary-project');
-    assert.deepEqual((await registry.get('list_projects').handler({ environment_id: 'noha' }))
-      .structuredContent.environments[0].project_directory_hints,
+    assert.deepEqual((await listManagedProjects(runtime,{ environment_id: 'noha' })).environments[0].project_directory_hints,
     ['C:\\Users\\example\\Documents\\AAAVitalFile', 'C:\\Users\\example\\Documents\\ChatGPT']);
 
     delete config.controller.project_directory_hints;
     fs.writeFileSync(configPath, JSON.stringify(config));
-    const withoutHints = (await registry.get('list_projects').handler({})).structuredContent.environments;
+    const withoutHints = (await listManagedProjects(runtime)).environments;
     assert.ok(withoutHints.every((env) => !Object.hasOwn(env, 'project_directory_hints')));
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
 
-test('new project returns handle; existing project selection requires approval; removal is direct', async () => {
+test('only Worker discovery and execution are model-facing', async () => {
   const registry = registerCoreTools(new ToolRegistry(), runtimeStub());
 
   const direct = registry.list().map((tool) => tool.name).sort();
@@ -248,14 +247,11 @@ test('new project returns handle; existing project selection requires approval; 
     'exec_command',
     'get_approval_status',
     'get_verification_input_status',
-    'list_projects',
-    'register_workspace',
+    'list_workers',
     'request_approval',
     'request_verification_input',
     'resolve_pending_action',
-    'select_workspace',
     'submit_verification_input',
-    'unregister_workspace',
     'view_image',
     'write_stdin',
   ]);
@@ -271,34 +267,11 @@ test('new project returns handle; existing project selection requires approval; 
     'ui://ccm/verification-input-v1.html',
   );
   assert.match(
-    registry.get('list_projects').description,
+    registry.get('list_workers').description,
     /sandbox_read_scope.*sandbox_write_scope/,
   );
   assert.equal(registry.get('create_projectless_handle'), null);
-  assert.match(
-    registry.get('select_workspace').description,
-    /explicitly asks to enter\/switch it or recover its handle/i,
-  );
-  assert.match(
-    registry.get('select_workspace').description,
-    /Ordinary inspection or editing alone is not entry authorization/i,
-  );
-  assert.match(
-    registry.get('select_workspace').description,
-    /returns the handle to both the card and model/i,
-  );
-  assert.match(
-    registry.get('select_workspace').description,
-    /Always requires one-shot approval/i,
-  );
-  assert.match(
-    registry.get('register_workspace').description,
-    /only when the user explicitly instructs project creation/i,
-  );
-  assert.match(
-    registry.get('register_workspace').description,
-    /inspecting, editing, or working on a project does not authorize creation/i,
-  );
+  for (const name of ['select_workspace','register_workspace','unregister_workspace','list_projects']) assert.equal(registry.get(name), null);
   assert.match(
     registry.get('exec_command').inputSchema.workspace_handle.description,
     /If user\/project instructions supply one.*reuse it directly/,
@@ -307,16 +280,6 @@ test('new project returns handle; existing project selection requires approval; 
   for (const name of ['exec_command', 'apply_patch', 'view_image']) {
     assert.equal(registry.get(name).inputSchema.workspace_handle.isOptional(), true);
   }
-  assert.match(
-    registry.get('register_workspace').description,
-    /without approval\/card/i,
-  );
-  assert.match(
-    registry.get('register_workspace').description,
-    /immediately returns its workspace_handle/i,
-  );
-  const unregisterTool = registry.get('unregister_workspace');
-  assert.match(unregisterTool.description, /Executes directly without approval or a card/);
   assert.match(
     registry.get('exec_command').description,
     /its read scope follows the Worker, while ordinary writes follow the workspace sandbox/i,
@@ -335,20 +298,13 @@ test('new project returns handle; existing project selection requires approval; 
   );
   assert.match(
     registry.get('apply_patch').description,
-    /Select\/register only with explicit authorization/i,
+    /ask the owner for the handle if missing/i,
   );
   assert.match(
     registry.get('view_image').description,
-    /do not select\/register a project merely to inspect images/i,
+    /Use a supplied registered-project handle/i,
   );
 
-  for (const name of ['list_projects', 'select_workspace', 'register_workspace']) {
-    assert.ok(registry.get(name));
-  }
-  for (const name of ['select_workspace', 'register_workspace']) {
-    const tool = registry.get(name);
-    assert.equal(tool.mcpMeta?.ui?.resourceUri, undefined, name + ' must not render an empty card before approval');
-  }
   assert.match(registry.get('request_verification_input').description, /wait for its automatic code-free follow-up/i);
   assert.match(registry.get('request_verification_input').description, /Do NOT inspect or request the code/i);
   assert.deepEqual(
@@ -356,93 +312,13 @@ test('new project returns handle; existing project selection requires approval; 
     ['approval_id'],
   );
 
-  const projects = await registry.get('list_projects').handler({});
-  assert.equal(projects.structuredContent.default_environment_id, 'primary');
-  assert.deepEqual(
-    projects.structuredContent.environments.map((environment) => environment.id),
-    ['primary', 'noha'],
-  );
-  assert.equal(projects.structuredContent.environments[0].projects[0].project_id, 'primary-project');
-  assert.equal(
-    Object.hasOwn(projects.structuredContent.environments[0], 'projectless_workspaces'),
-    false,
-  );
-  assert.equal(projects.structuredContent.environments[0].sandbox_read_scope, 'host');
-  assert.equal(projects.structuredContent.environments[0].sandbox_write_scope, 'context_root');
-
-  const filteredProjects = await registry.get('list_projects').handler({
-    environment_id: 'noha',
-  });
-  assert.deepEqual(
-    filteredProjects.structuredContent.environments.map((environment) => environment.id),
-    ['noha'],
-  );
-
-  const allProjects = await registry.get('list_projects').handler({ all: true });
-  assert.equal(
-    allProjects.structuredContent.environments[0].projectless_workspaces[0].projectless_id,
-    'projectless-primary',
-  );
-
-  const partialRuntime = runtimeStub();
-  const abnormal = new Map();
-  const originalCall = partialRuntime.workerHub.call;
-  partialRuntime.workerHub.environmentStatus = (environmentId) =>
-    abnormal.get(environmentId) || { state: 'normal' };
-  partialRuntime.workerHub.quarantine = (environmentId, code, reason) => {
-    abnormal.set(environmentId, {
-      state: 'abnormal',
-      abnormal_code: code,
-      abnormal_reason: reason,
-    });
-    return true;
-  };
-  partialRuntime.workerHub.call = async (environmentId, method, params) => {
-    if (environmentId === 'noha' && method === 'list_projects') {
-      throw new Error('Unknown Remote Worker method: list_projects');
-    }
-    return originalCall(environmentId, method, params);
-  };
-  const partialRegistry = registerCoreTools(new ToolRegistry(), partialRuntime);
-  const partialProjects = await partialRegistry.get('list_projects').handler({});
-  assert.equal(partialProjects.isError, undefined);
-  assert.equal(
-    partialProjects.structuredContent.environments[0].projects[0].project_id,
-    'primary-project',
-  );
-  assert.equal(partialProjects.structuredContent.environments[1].state, 'abnormal');
-  assert.equal(
-    partialProjects.structuredContent.environments[1].abnormal_code,
-    'project_discovery_failed',
-  );
-  assert.match(
-    partialProjects.structuredContent.environments[1].project_discovery_error,
-    /Unknown Remote Worker method/,
-  );
-  assert.equal(
-    Object.hasOwn(partialProjects.structuredContent.environments[1], 'projects'),
-    false,
-  );
-  const partialAllProjects = await partialRegistry.get('list_projects').handler({
-    all: true,
-  });
-  assert.equal(
-    partialAllProjects.structuredContent.environments[0]
-      .projectless_workspaces[0].projectless_id,
-    'projectless-primary',
-  );
-  assert.equal(
-    Object.hasOwn(
-      partialAllProjects.structuredContent.environments[1],
-      'projectless_workspaces',
-    ),
-    false,
-  );
-  const strictProjects = await partialRegistry.get('list_projects').handler({
-    environment_id: 'noha',
-  });
-  assert.equal(strictProjects.isError, true);
-  assert.match(strictProjects.content[0].text, /Unknown Remote Worker method/);
+  const workers = (await registry.get('list_workers').handler({})).structuredContent.environments;
+  assert.deepEqual(workers.map(x=>x.id), ['primary','noha']);
+  assert.ok(workers.every(x=>!Object.hasOwn(x,'projects') && !Object.hasOwn(x,'projectless_workspaces')));
+  assert.equal(workers[0].sandbox_read_scope,'host');
+  assert.equal(workers[0].sandbox_write_scope,'context_root');
+  const filtered = await registry.get('list_workers').handler({environment_id:'noha'});
+  assert.deepEqual(filtered.structuredContent.environments.map(x=>x.id),['noha']);
 
   const missingContext = await registry.get('exec_command').handler({
     cmd: 'Write-Output auto-projectless',
@@ -477,42 +353,8 @@ test('new project returns handle; existing project selection requires approval; 
     ['approval_id', 'approval_nonce', 'decision'],
   );
 
-  const workspacePending = await registry.get('select_workspace').handler({
-    environment_id: 'noha',
-    workspace_id: 'project',
-  });
-  assert.equal(workspacePending.structuredContent.kind, 'workspace');
-  assert.equal(workspacePending.structuredContent.operation, 'select_workspace');
-  assert.equal(workspacePending.structuredContent.approval_required, true);
-  assert.match(workspacePending.structuredContent.instruction, /CCM executes the action directly after approval/);
-  assert.equal(workspacePending._meta, undefined);
-
   assert.ok(registry.list().some((tool) => tool.name === 'claim_full_access'));
   assert.equal((await registry.get('claim_full_access').handler({})).structuredContent.claimed, false);
-  const projectless = await registry.get('exec_command').handler({ environment_id: 'noha', cmd: 'Write-Output noha' });
-  assert.equal(projectless.structuredContent.environment_id, 'noha');
-  const nohaProjects = await registry.get('list_projects').handler({ environment_id: 'noha', all: true });
-  assert.equal(nohaProjects.structuredContent.environments[0].id, 'noha');
-  assert.equal(nohaProjects.structuredContent.environments[0].projectless_workspaces[0].projectless_id, 'projectless-noha');
-  const select = await registry.get('select_workspace').handler({ environment_id: 'noha', workspace_id: 'project' });
-  assert.equal(select.structuredContent.approval_required, true);
-  const register = await registry.get('register_workspace').handler({
-    environment_id: 'noha', workspace_id: 'new-project',
-    path: 'C:\\work\\new-project',
-  });
-  assert.equal(register.structuredContent.workspace_kind, 'registered');
-  assert.equal(register.structuredContent.workspace_handle, '00000000-0000-4000-8000-000000000009');
-  assert.equal(register.structuredContent.approval_required, undefined);
-  assert.equal(register.structuredContent.approval_id, undefined);
-  const existing = await registry.get('select_workspace').handler({
-    environment_id: 'noha', path: 'C:\\work\\existing-project',
-  });
-  assert.equal(existing.structuredContent.approval_required, true);
-  assert.equal(existing.structuredContent.workspace_registered, false);
-  assert.equal(existing.structuredContent.workspace_handle, undefined);
-  assert.equal((await registry.get('select_workspace').handler({
-    environment_id: 'noha', workspace_id: 'project', path: 'C:\\work\\project',
-  })).isError, true);
 });
 
 test('write_stdin supports direct empty polling and interactive input', async () => {

@@ -240,7 +240,7 @@ export class WorkspaceRegistry {
       createIfMissing,
     });
     if (newProjectOnly && inspected.exists) {
-      throw new Error('Project directory already exists; use approved select_workspace.');
+      throw new Error('Project directory already exists; register the existing directory instead.');
     }
     if (approvedRoot != null &&
         pathKey(inspected.root) !== pathKey(approvedRoot)) {

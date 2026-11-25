@@ -1,7 +1,6 @@
 import * as z from 'zod/v4';
 import { APPROVAL_UI_URI } from '../ui/approval-app.mjs';
 import { VERIFICATION_INPUT_UI_URI } from '../ui/verification-input-app.mjs';
-import { readProjectDirectoryHints } from '../runtime/ccm-config.mjs';
 
 const UNIFIED_EXEC_OUTPUT_SCHEMA = {
   chunk_id: z.string().optional(),
@@ -186,187 +185,6 @@ function approvalCardResult(prepared) {
   };
 }
 
-function workspaceActionStatus(request, {
-  output,
-  workspaceHandle = null,
-  actionFailed = false,
-} = {}) {
-  return {
-    wall_time_seconds: 0,
-    output: String(output || ''),
-    ...request,
-    ...(workspaceHandle || {}),
-    ...(actionFailed ? { action_failed: true } : {}),
-  };
-}
-
-async function executeWorkspaceAction(runtime, action) {
-  const environment = runtime.environmentRegistry.resolve(
-    action.environment_id,
-  );
-  let workspace;
-  if (action.operation === 'unregister_workspace') {
-    const current = await runtime.workerHub.call(
-      environment.id,
-      'get_registered_workspace',
-      { workspace_id: action.workspace_id },
-      { timeoutMs: 10_000 },
-    );
-    if (current.kind !== 'registered' ||
-        current.workspace_id !== action.workspace_id ||
-        current.root !== action.workspace_root ||
-        current.created_at !== action.workspace_created_at) {
-      throw new Error('Workspace registration changed before it could be unregistered.');
-    }
-    // Revoke Controller context handles before changing the Worker registry.
-    // A failed Controller state write must not leave an unrevoked old context.
-    runtime.workspaceHandleManager.revokeRegistered(
-      environment.id, action.workspace_id,
-    );
-    await runtime.workerHub.call(
-      environment.id,
-      'unregister_workspace',
-      {
-        workspace_id: action.workspace_id,
-        expected_root: action.workspace_root,
-        expected_created_at: action.workspace_created_at,
-      },
-      { timeoutMs: 10_000 },
-    );
-    return null;
-  }
-  if (action.operation === 'select_workspace') {
-    if (action.workspace_registered === false) {
-      const inspected = await runtime.workerHub.call(
-        environment.id,
-        'inspect_existing_project',
-        { path: action.workspace_root },
-        { timeoutMs: 10_000 },
-      );
-      if (inspected.registered || inspected.workspace_id !== action.workspace_id ||
-          inspected.root !== action.workspace_root) {
-        throw new Error('Project directory or registration changed since approval.');
-      }
-      workspace = await runtime.workerHub.call(
-        environment.id,
-        'register_workspace',
-        {
-          path: action.workspace_root,
-          workspace_id: action.workspace_id,
-          approved_root: action.workspace_root,
-          unregistered_only: true,
-        },
-        { timeoutMs: 10_000 },
-      );
-    } else {
-      workspace = await runtime.workerHub.call(
-        environment.id,
-        'get_workspace',
-        { workspace_id: action.workspace_id },
-        { timeoutMs: 10_000 },
-      );
-      if (workspace.kind !== 'registered' ||
-          workspace.workspace_id !== action.workspace_id ||
-          workspace.root !== action.workspace_root ||
-          workspace.created_at !== action.workspace_created_at) {
-        throw new Error('Workspace identity changed since approval.');
-      }
-    }
-  } else if (action.operation === 'register_workspace') {
-    const inspected = await runtime.workerHub.call(
-      environment.id,
-      'inspect_workspace_path',
-      {
-        path: action.workspace_root,
-        workspace_id: action.workspace_id,
-        create_if_missing: true,
-      },
-      { timeoutMs: 10_000 },
-    );
-    if (inspected.exists || inspected.workspace_id !== action.workspace_id ||
-        inspected.root !== action.workspace_root) {
-      throw new Error(
-        'Project directory already exists or changed; use approved select_workspace.',
-      );
-    }
-    workspace = await runtime.workerHub.call(
-      environment.id,
-      'register_workspace',
-      {
-        path: action.workspace_root,
-        workspace_id: action.workspace_id,
-        create_if_missing: true,
-        approved_root: action.workspace_root,
-        new_project_only: true,
-      },
-      { timeoutMs: 10_000 },
-    );
-    if (workspace.kind !== 'registered' || workspace.workspace_id !== action.workspace_id ||
-        workspace.root !== action.workspace_root) {
-      throw new Error(
-        'Registered workspace no longer matches the requested target.',
-      );
-    }
-  } else {
-    throw new Error('Unknown workspace operation: ' + action.operation);
-  }
-
-  return runtime.workspaceHandleManager.createRegistered(environment.id, workspace);
-}
-
-async function resolvePendingWorkspaceAction(
-  runtime,
-  { approval_id: approvalId, approval_nonce: approvalNonce, decision },
-  { hostSession = null } = {},
-) {
-  if (decision === 'approve_always') {
-    throw new Error(
-      'Always allow is only available for execution approvals.',
-    );
-  }
-  if (decision === 'deny') {
-    const denied = runtime.approvalManager.denyAppWorkspace(
-      approvalId,
-      approvalNonce,
-      hostSession,
-    );
-    return workspaceActionStatus(denied, {
-      output: 'The user denied this workspace action. No workspace change was made.',
-    });
-  }
-  if (decision !== 'approve') {
-    throw new Error('Workspace approval decision must be approve or deny.');
-  }
-
-  const claimed = runtime.approvalManager.claimAppWorkspace(
-    approvalId,
-    approvalNonce,
-    hostSession,
-  );
-  const action = claimed.action;
-  try {
-    const workspaceHandle = await executeWorkspaceAction(runtime, action);
-    const consumed = runtime.approvalManager.markAppWorkspaceConsumed(
-      approvalId,
-    );
-    return workspaceActionStatus(consumed, {
-      workspaceHandle,
-      output: 'Approved and entered the selected workspace.',
-    });
-  } catch (error) {
-    let consumed = claimed.request;
-    try {
-      consumed = runtime.approvalManager.markAppWorkspaceConsumed(approvalId);
-    } catch {}
-    return workspaceActionStatus(consumed, {
-      output:
-        'Workspace action was not performed: ' +
-        String(error?.message || error),
-      actionFailed: true,
-    });
-  }
-}
-
 function patchResult(value) {
   return {
     content: [{ type: 'text', text: value.output }],
@@ -525,249 +343,20 @@ export function registerCoreTools(registry, runtime) {
   });
 
   registry.register({
-    name: 'list_projects',
+    name: 'list_workers',
     provider: 'ccm-core',
-
-    tags: ['project', 'environment', 'worker', 'capabilities'],
+    tags: ['environment', 'worker', 'capabilities'],
     supportsParallel: true,
-    description: [
-      "List connected Workers, registered projects and configured default project directories without entering a workspace. Omit environment_id for all Workers; all=true also lists existing projectless workspaces.",
-      "Results include independent sandbox_read_scope and sandbox_write_scope, platform, capabilities and Worker state. project_directory_hints is a display-only list, never workspace-entry authorization or authoritative project roots. Compare connected_at and state=normal after restart; one stale Worker or a single network timeout does not prove all Workers are offline.",
-    ].join('\n\n'),
-    inputSchema: {
-      environment_id: z.string().optional().describe('Optional environment id. Omit to list projects across every connected environment.'),
-      all: z.boolean().optional().describe('Include existing projectless workspaces in a separate projectless_workspaces collection. Defaults to false.'),
-    },
+    description: 'List connected Workers, platform, capabilities, sandbox_read_scope and sandbox_write_scope, and connection state. Compare connected_at and state=normal after restart. Project management is performed by the owner in the CCM management webpage.',
+    inputSchema: { environment_id: z.string().optional() },
     handler: async (args) => {
       try {
-        const directoryHints = readProjectDirectoryHints(runtime.ccmConfigFile);
-        const publicEnvironments = runtime.environmentRegistry.listPublic();
-        let environments = publicEnvironments;
-        if (args.environment_id) {
-          runtime.environmentRegistry.resolve(args.environment_id);
-          environments = publicEnvironments.filter(
-            (environment) => environment.id === args.environment_id,
-          );
-        }
-        const includeAll = Boolean(args.all);
-        const discover = async (environment) => {
-          const directoryHintList = Object.hasOwn(directoryHints, environment.id)
-            ? directoryHints[environment.id] : undefined;
-          const withDirectoryHint = (result) => ({
-            ...result,
-            ...(directoryHintList === undefined ? {} : { project_directory_hints: directoryHintList }),
-          });
-          const currentStatus = runtime.workerHub.environmentStatus?.(
-            environment.id,
-          ) || { state: 'normal' };
-          if (currentStatus.state === 'abnormal') {
-            const error = new Error(
-              currentStatus.abnormal_reason ||
-              'Remote Worker is quarantined.',
-            );
-            error.code = 'worker_quarantined';
-            if (args.environment_id) throw error;
-            return withDirectoryHint({ ...environment, ...currentStatus });
-          }
-
-          try {
-            const result = await runtime.workerHub.call(
-              environment.id,
-              'list_projects',
-              { all: includeAll },
-              { timeoutMs: 10_000 },
-            );
-            return withDirectoryHint({
-              ...environment,
-              state: 'normal',
-              ...(currentStatus.connected_at ? { connected_at: currentStatus.connected_at } : {}),
-              projects: result.projects || [],
-              ...(includeAll
-                ? { projectless_workspaces: result.projectless_workspaces || [] }
-                : {}),
-            });
-          } catch (error) {
-            runtime.workerHub.quarantine?.(
-              environment.id,
-              error?.code || 'project_discovery_failed',
-              String(error?.message || error),
-            );
-            if (args.environment_id) throw error;
-            const failedStatus = runtime.workerHub.environmentStatus?.(
-              environment.id,
-            ) || {
-              state: 'abnormal',
-              abnormal_code: error?.code || 'project_discovery_failed',
-              abnormal_reason: String(error?.message || error),
-            };
-            return withDirectoryHint({
-              ...environment,
-              ...failedStatus,
-              project_discovery_error: String(error?.message || error),
-            });
-          }
-        };
-        const enriched = await Promise.all(environments.map(discover));
-        return jsonResult({
-          default_environment_id: runtime.environmentRegistry.defaultEnvironmentId,
-          environments: enriched,
-        });
-      } catch (error) {
-        return toolError(error);
-      }
-    },
-  });
-
-  registry.register({
-    name: 'select_workspace',
-    provider: 'ccm-core',
-
-    tags: ['workspace', 'project', 'approval'],
-    description: [
-      "Obtain a handle for an existing project only when the user explicitly asks to enter/switch it or recover its handle, and no usable handle exists. Supply exactly one of workspace_id (registered project) or path (existing directory, registered or not). Ordinary inspection or editing alone is not entry authorization.",
-      "Always requires one-shot approval, including Full Access. Call request_approval if approval_required=true; approval registers an unregistered existing directory and returns the handle to both the card and model. Never create a directory through this tool or bypass approval with projectless work.",
-    ].join('\n\n'),
-    inputSchema: {
-      environment_id: z.string().describe('Environment whose Worker owns the workspace.'),
-      workspace_id: z.string().min(1).optional().describe('Registered workspace id. Provide this OR path, not both.'),
-      path: z.string().min(1).optional().describe('Absolute directory path for an existing project (registered or not). Provide this OR workspace_id, not both.'),
-    },
-    handler: async (args) => {
-      try {
-        if (Boolean(args.workspace_id) === Boolean(args.path)) {
-          throw new Error('Supply exactly one of workspace_id or path.');
-        }
-        const environment = runtime.environmentRegistry.resolve(args.environment_id);
-        const workspace = args.path
-          ? await runtime.workerHub.call(
-            environment.id,
-            'inspect_existing_project',
-            { path: args.path },
-            { timeoutMs: 10_000 },
-          )
-          : await runtime.workerHub.call(
-            environment.id,
-            'get_workspace',
-            { workspace_id: args.workspace_id },
-            { timeoutMs: 10_000 },
-          );
-        if (args.workspace_id && workspace.kind !== 'registered') {
-          throw new Error('select_workspace only accepts registered workspace IDs.');
-        }
-        const intent = {
-          environment_id: environment.id,
-          workspace_id: workspace.workspace_id,
-          workspace_root: workspace.root,
-          workspace_registered: workspace.registered !== false,
-          ...(workspace.created_at ? { workspace_created_at: workspace.created_at } : {}),
-        };
-        const justification =
-          'Allow CCM to obtain a handle for existing project ' +
-          environment.id + ' / ' + workspace.workspace_id +
-          ' at ' + workspace.root + '?';
-        const approval = runtime.approvalManager.requestWorkspaceAction(
-          'select_workspace',
-          intent,
-          justification,
-        );
-        return jsonResult({
-          approval_required: true,
-          ...approval,
-          instruction:
-            'Call request_approval with this approval_id. CCM executes the action directly after approval.',
-        });
-      } catch (error) {
-        return toolError(error);
-      }
-    },
-  });
-
-  registry.register({
-    name: 'register_workspace',
-    provider: 'ccm-core',
-
-    tags: ['workspace', 'project', 'register'],
-    description: [
-      "Create a NEW project only when the user explicitly instructs project creation. Without that explicit instruction, creating or registering any project is forbidden; inspecting, editing, or working on a project does not authorize creation.",
-      "The target path must not already exist (even as an empty directory). Creates an empty directory, registers it, and immediately returns its workspace_handle without approval/card. Existing directories MUST use approved select_workspace, including nonempty and empty ones. Do not use ordinary shell commands to bypass this project-creation boundary.",
-    ].join('\n\n'),
-    inputSchema: {
-      environment_id: z.string().describe('Environment whose Worker owns the directory.'),
-      path: z.string().min(1).describe('Absolute path for a project directory that does not yet exist.'),
-      workspace_id: z.string().min(1).optional().describe('Optional Worker-local workspace id. Defaults to a safe form of the directory name.'),
-    },
-    handler: async (args) => {
-      try {
-        const environment = runtime.environmentRegistry.resolve(args.environment_id);
-        const inspected = await runtime.workerHub.call(
-          environment.id,
-          'inspect_workspace_path',
-          {
-            path: args.path,
-            workspace_id: args.workspace_id,
-            create_if_missing: true,
-          },
-          { timeoutMs: 10_000 },
-        );
-        if (inspected.exists) {
-          throw new Error('Project directory already exists; use approved select_workspace.');
-        }
-        const registered = await executeWorkspaceAction(runtime, {
-          operation: 'register_workspace',
-          environment_id: environment.id,
-          workspace_id: inspected.workspace_id,
-          workspace_root: inspected.root,
-        });
-        return jsonResult(registered);
-      } catch (error) {
-        return toolError(error);
-      }
-    },
-  });
-
-  registry.register({
-    name: 'unregister_workspace',
-    provider: 'ccm-core',
-
-    tags: ['workspace', 'project', 'unregister'],
-    description: [
-      "Unregister one registered project only when explicitly requested by the user. Executes directly without approval or a card, and never deletes its files.",
-      "Revokes existing project handles but does not kill running processes. Projectless workspaces cannot be unregistered.",
-    ].join('\n\n'),
-    inputSchema: {
-      environment_id: z.string().describe('Environment whose Worker owns the workspace.'),
-      workspace_id: z.string().min(1).describe('Exact registered workspace id on that Worker.'),
-    },
-    handler: async (args) => {
-      try {
-        const environment = runtime.environmentRegistry.resolve(args.environment_id);
-        const workspace = await runtime.workerHub.call(
-          environment.id,
-          'get_registered_workspace',
-          { workspace_id: args.workspace_id },
-          { timeoutMs: 10_000 },
-        );
-        if (workspace.kind !== 'registered') {
-          throw new Error('unregister_workspace only accepts registered workspaces.');
-        }
-        await executeWorkspaceAction(runtime, {
-          operation: 'unregister_workspace',
-          environment_id: environment.id,
-          workspace_id: workspace.workspace_id,
-          workspace_root: workspace.root,
-          workspace_created_at: workspace.created_at,
-        });
-        return jsonResult({
-          environment_id: environment.id,
-          workspace_id: workspace.workspace_id,
-          workspace_root: workspace.root,
-          unregistered: true,
-          handles_revoked: true,
-          project_files_deleted: false,
-        });
-      } catch (error) {
-        return toolError(error);
-      }
+        if (args.environment_id) runtime.environmentRegistry.resolve(args.environment_id);
+        const environments = runtime.environmentRegistry.listPublic()
+          .filter(env => !args.environment_id || env.id === args.environment_id)
+          .map(env => ({ ...env, ...(runtime.workerHub.environmentStatus?.(env.id) || { state: 'normal' }) }));
+        return jsonResult({ default_environment_id: runtime.environmentRegistry.defaultEnvironmentId, environments });
+      } catch (error) { return toolError(error); }
     },
   });
 
@@ -792,7 +381,7 @@ export function registerCoreTools(registry, runtime) {
     ].join('\n\n'),
     inputSchema: {
       cmd: z.string().min(1).describe('Shell command to execute.'),
-      workspace_handle: z.string().uuid().optional().describe('Existing workspace execution handle (UUID). If user/project instructions supply one for the intended workspace, reuse it directly without selecting/registering. If omitted, CCM creates a projectless workspace, not a registered-project entry.'),
+      workspace_handle: z.string().uuid().optional().describe('Existing workspace execution handle (UUID). If user/project instructions supply one for the intended workspace, reuse it directly. If omitted, CCM creates a projectless workspace, not a registered-project entry.'),
       environment_id: z.string().optional().describe('Worker for automatic projectless creation without a handle; defaults to primary. Do not combine with workspace_handle.'),
       workdir: z.string().optional().describe('Relative subdirectory inside the selected context root. Defaults to the context root.'),
       tty: z.boolean().optional().describe('True allocates a PTY; false or omitted uses plain pipes.'),
@@ -907,7 +496,7 @@ export function registerCoreTools(registry, runtime) {
     environmentRequirements: { capabilities: ['exec'] },
     description: [
       'App-only resolver for a frozen CCM approval request. It is invoked by the CCM approval card, not by the model.',
-      'On approve, CCM resumes only the previously frozen execution or workspace action. approve_always saves a global token-prefix Allow rule only for execution approvals. This tool accepts no command, workspace target, workdir, or shell override.',
+      'On approve, CCM resumes only the previously frozen execution. approve_always saves a global token-prefix Allow rule for execution approvals. This tool accepts no command, workspace target, workdir, or shell override.',
     ].join('\n\n'),
     inputSchema: {
       approval_id: z.string().uuid().describe('Frozen CCM approval identifier.'),
@@ -918,20 +507,7 @@ export function registerCoreTools(registry, runtime) {
     handler: async (args, context) => {
       try {
         const hostSession = context?.extra?._meta?.['openai/session'] || null;
-        const pending = runtime.approvalManager.getRequest(args.approval_id);
-        let resolved;
-        if (pending.kind === 'workspace') {
-          resolved = await resolvePendingWorkspaceAction(
-            runtime,
-            args,
-            { hostSession },
-          );
-        } else {
-          resolved = await runtime.processManager.resolvePendingExecution(
-            args,
-            { hostSession },
-          );
-        }
+        const resolved = await runtime.processManager.resolvePendingExecution(args, { hostSession });
         try {
           runtime.approvalManager.recordAppOutcome(args.approval_id, resolved);
         } catch (receiptError) {
@@ -985,7 +561,7 @@ export function registerCoreTools(registry, runtime) {
     description: [
       'Apply a Codex-style Begin/End Patch. Reuse an existing workspace_handle; if omitted, CCM creates a projectless handle on the primary Worker (or environment_id).',
       'For timed Full Access, pass the full_access_grant_id supplied by the owner from the CCM unlock webpage, or returned by claim_full_access. Otherwise the original Worker write boundary remains in force.',
-      'Automatic projectless creation never enters a registered project. For registered-project edits, supply its handle; select/register only with explicit authorization.',
+      'Automatic projectless creation never enters a registered project. For registered-project edits, supply its handle; ask the owner for the handle if missing.',
     ].join('\n\n'),
     inputSchema: {
       patch: z.string().min(1).describe('Codex-style patch text beginning with *** Begin Patch.'),
@@ -1020,7 +596,7 @@ export function registerCoreTools(registry, runtime) {
     supportsParallel: true,
     description: [
       'Read a local image and return bounded MCP image content. When the output byte budget is exceeded, the Worker first tries full-resolution low-loss WebP (quality 95/90/85), then progressively reduces dimensions if necessary to fit the budget. The source file is never modified. Source files are limited to 64 MiB.',
-      'Reuse an existing workspace_handle; if omitted, CCM creates a projectless handle on the primary Worker (or environment_id). Do not select/register a project merely to inspect images.',
+      'Reuse an existing workspace_handle; if omitted, CCM creates a projectless handle on the primary Worker (or environment_id). Use a supplied registered-project handle for project access.',
       'For multiple images, the Host may call this tool repeatedly.',
     ].join(' '),
     inputSchema: {

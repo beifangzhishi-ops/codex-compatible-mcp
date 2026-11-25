@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createProjectManagementServer } from './controller/project-management-web.mjs';
 import { createControllerRuntime } from './controller/runtime.mjs';
 import { createHttpController } from './controller/mcp-http-server.mjs';
 import { LocalWorkerSupervisor } from './controller/local-worker-supervisor.mjs';
@@ -102,6 +103,11 @@ const controller = createHttpController({
   },
 });
 await controller.start();
+const projectPort = 4193;
+const publicOrigin = process.env.CCM_RESOURCE ? 'https://' + new URL(process.env.CCM_RESOURCE).hostname + ':' + projectPort : undefined;
+const projectServer = createProjectManagementServer(runtime, { publicOrigin, port: projectPort });
+await new Promise((resolve, reject) => { projectServer.once('error', reject); projectServer.listen(projectPort, '127.0.0.1', resolve); });
+console.log('CCM project management: http://127.0.0.1:' + projectPort);
 
 console.log('CCM listening at ' + controller.endpoint);
 console.log(
@@ -114,6 +120,7 @@ async function shutdown() {
   if (stopping) return;
   stopping = true;
   await localWorkerSupervisor?.stop().catch(() => {});
+  await new Promise(resolve => projectServer.close(resolve));
   await controller.close();
   process.exit(0);
 }

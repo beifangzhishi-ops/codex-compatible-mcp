@@ -81,7 +81,7 @@ export class ControlledRestart {
       finish('failed', String(error?.message || error));
       throw error;
     }
-    return { ...operation, accepted: true, message: '已受理重启；请用 list_projects 检查目标 Worker 的连接时间变化及健康状态。' };
+    return { ...operation, accepted: true, message: '已受理重启；请用 list_workers 检查目标 Worker 的连接时间变化及健康状态。' };
   }
 
   async request({ component, environment_id: environmentId }) {
@@ -103,7 +103,7 @@ export class ControlledRestart {
     } else {
       const active = [...this.operations.values()].find((value) =>
         value.environment_id === environmentId && ['requested', 'reconnecting'].includes(value.state));
-      if (active) return { ...active, accepted: true, message: '重启已在进行；请用 list_projects 检查 Worker 是否重新连接。' };
+      if (active) return { ...active, accepted: true, message: '重启已在进行；请用 list_workers 检查 Worker 是否重新连接。' };
       const environment = this.environmentRegistry.resolve(environmentId);
       if (environment.backend !== 'remote-worker' ||
           this.workerHub.environmentStatus(environmentId).state !== 'normal') {

@@ -10,7 +10,7 @@ export function registerRestartTools(registry, runtime) {
     description: [
       'Request a controlled restart of one allowlisted CCM instance using its registered environment ID. No command, PID, executable, script, path, or extra arguments can be supplied.',
       'component=controller_service_group restarts only this Controller host service group (Controller, local Worker, OAuth sidecar); component=worker restarts only the specified connected Remote Worker. Other programs are never eligible.',
-      'Allowed environment IDs come from ccm.config.json restart_allowlist and are checked at each call. The existing Supervisor must be running. A Worker restart is asynchronous: use list_projects to confirm the environment returns with state=normal and a new connected_at value compared with before restart. Acceptance is not recovery. Controller service-group restarts require separate Controller/OAuth/Worker health verification.',
+      'Allowed environment IDs come from ccm.config.json restart_allowlist and are checked at each call. The existing Supervisor must be running. A Worker restart is asynchronous: use list_workers to confirm the environment returns with state=normal and a new connected_at value compared with before restart. Acceptance is not recovery. Controller service-group restarts require separate Controller/OAuth/Worker health verification.',
       'Call directly. It does not grant any exec_command approval or persistent shell-command prefix.',
     ].join('\n\n'),
     inputSchema: z.object({

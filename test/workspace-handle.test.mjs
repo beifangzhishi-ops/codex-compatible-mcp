@@ -1,3 +1,4 @@
+import { manageProject } from '../src/controller/project-management.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -280,7 +281,7 @@ test('WorkspaceRegistry accepts a UTF-8 BOM in persisted state', async () => {
   }
 });
 
-test('new project returns a handle while existing projects require approval even on full-access', async () => {
+test('owner management creates, registers and revokes persistent handles', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ccm-handles-'));
   const bootstrapRoot = path.join(tempRoot, 'existing-project');
   const newRoot = path.join(tempRoot, 'new-project');
@@ -401,106 +402,27 @@ test('new project returns a handle while existing projects require approval even
     ), 'utf8'), 'automatic context\n');
 
     const seeded = worker.workspaceRegistry.listRegistered()[0];
-    const select = tools.registry.get('select_workspace');
-    const requestCard = tools.registry.get('request_approval');
-    const resolveCard = tools.registry.get('resolve_pending_action');
-    const approveSelection = async (args) => {
-      const pending = await select.handler(args);
-      assert.equal(pending.structuredContent.approval_required, true);
-      assert.equal(pending.structuredContent.workspace_handle, undefined);
-      const card = await requestCard.handler({
-        approval_id: pending.structuredContent.approval_id,
-      });
-      const result = await resolveCard.handler({
-        approval_id: pending.structuredContent.approval_id,
-        approval_nonce: card._meta.approval_nonce,
-        decision: 'approve',
-      });
-      assert.equal(result.structuredContent.state, 'consumed');
-      assert.equal(result.structuredContent.action_failed, undefined);
-      return result;
-    };
-    const selected = await approveSelection({
-      environment_id: 'workspace-worker', workspace_id: seeded.workspace_id,
-    });
-    assert.equal(selected.structuredContent.workspace_kind, 'registered');
-    assert.equal(selected.structuredContent.workspace_root, await fs.realpath(bootstrapRoot));
-
-    const register = tools.registry.get('register_workspace');
-    const registered = await register.handler({
-      environment_id: 'workspace-worker',
-      workspace_id: 'new-project',
-      path: newRoot,
-    }, { extra: { _meta: { 'openai/session': 'workspace-test' } } });
-    assert.equal(
-      Object.hasOwn(registered.structuredContent, 'approval_required'),
-      false,
-    );
-    assert.equal(Object.hasOwn(registered.structuredContent, 'approval_id'), false);
-    assert.equal(registered.structuredContent.workspace_id, 'new-project');
-    assert.equal(registered.structuredContent.workspace_kind, 'registered');
-    assert.equal(typeof registered.structuredContent.workspace_handle, 'string',
-      'a freshly created directory immediately returns its handle');
-    assert.equal(
-      registered.structuredContent.workspace_root,
-      await fs.realpath(newRoot),
-    );
-    assert.equal((await fs.stat(newRoot)).isDirectory(), true);
-    assert.equal(worker.workspaceRegistry.listRegistered().length, 2);
-
-    // Existing directories, empty or nonempty, must never get a handle from
-    // the approval-free creation tool.
-    const oldRoot = path.join(tempRoot, 'pre-existing-project');
-    const emptyRoot = path.join(tempRoot, 'pre-existing-empty');
-    await fs.mkdir(oldRoot);
-    await fs.writeFile(path.join(oldRoot, 'README.md'), '# Existing project\n');
-    await fs.mkdir(emptyRoot);
-    for (const existingPath of [oldRoot, emptyRoot, bootstrapRoot]) {
-      const refused = await register.handler({
-        environment_id: 'workspace-worker', path: existingPath,
-      });
-      assert.equal(refused.isError, true);
-      assert.match(refused.content[0].text, /already exists/);
-    }
-    assert.equal(worker.workspaceRegistry.listRegistered().length, 2);
-    assert.equal((await select.handler({
-      environment_id: 'workspace-worker', path: path.join(tempRoot, 'missing-project'),
-    })).isError, true);
-
-    const existingPending = await select.handler({
-      environment_id: 'workspace-worker', path: oldRoot,
-    });
-    assert.equal(existingPending.structuredContent.approval_required, true);
-    assert.equal(existingPending.structuredContent.workspace_registered, false);
-    assert.equal(worker.workspaceRegistry.listRegistered().length, 2,
-      'unregistered existing directories are not registered before approval');
-    const existingSelected = await approveSelection({
-      environment_id: 'workspace-worker', path: oldRoot,
-    });
-    assert.equal(existingSelected.structuredContent.workspace_kind, 'registered');
-    assert.equal(existingSelected.structuredContent.workspace_root, await fs.realpath(oldRoot));
-    assert.equal(worker.workspaceRegistry.listRegistered().length, 3);
-    const existingAgain = await select.handler({
-      environment_id: 'workspace-worker', path: oldRoot,
-    });
-    assert.equal(existingAgain.structuredContent.workspace_registered, true);
-    assert.equal(existingAgain.structuredContent.workspace_handle, undefined);
-
-    const newSelected = await approveSelection({
-      environment_id: 'workspace-worker', workspace_id: 'new-project',
-    });
-    const newProjectHandle = newSelected.structuredContent.workspace_handle;
-    assert.equal(typeof newProjectHandle, 'string');
-    assert.notEqual(newProjectHandle, registered.structuredContent.workspace_handle);
-
-    const peerSelect = await tools.registry.get('select_workspace').handler({
-      environment_id: 'workspace-worker',
-      workspace_id: seeded.workspace_id,
-    });
-    assert.equal(peerSelect.structuredContent.approval_required, true);
-    assert.equal(peerSelect.structuredContent.workspace_handle, undefined);
-
-    const oldContext = selected.structuredContent.workspace_handle;
+    const selected = await manageProject(controller,'handle',{environment_id:'workspace-worker',workspace_id:seeded.workspace_id});
+    assert.equal(selected.workspace_kind,'registered');
+    assert.equal(selected.workspace_root,await fs.realpath(bootstrapRoot));
+    const registered = await manageProject(controller,'create',{environment_id:'workspace-worker',workspace_id:'new-project',path:newRoot});
+    assert.equal(registered.workspace_kind,'registered');
+    assert.equal(registered.workspace_root,await fs.realpath(newRoot));
+    assert.equal(worker.workspaceRegistry.listRegistered().length,2);
+    const oldRoot=path.join(tempRoot,'pre-existing-project');
+    const emptyRoot=path.join(tempRoot,'pre-existing-empty');
+    await fs.mkdir(oldRoot); await fs.mkdir(emptyRoot);
+    await fs.writeFile(path.join(oldRoot,'README.md'),'existing');
+    for(const existingPath of [oldRoot,emptyRoot,bootstrapRoot]) await assert.rejects(manageProject(controller,'create',{environment_id:'workspace-worker',path:existingPath}), /already exists/);
+    const existingSelected=await manageProject(controller,'existing',{environment_id:'workspace-worker',path:oldRoot});
+    assert.equal(existingSelected.workspace_root,await fs.realpath(oldRoot));
+    assert.equal(worker.workspaceRegistry.listRegistered().length,3);
+    const newSelected=await manageProject(controller,'handle',{environment_id:'workspace-worker',workspace_id:'new-project'});
+    const newProjectHandle=newSelected.workspace_handle;
+    assert.equal(newProjectHandle,registered.workspace_handle);
+    const peerSelect=await manageProject(controller,'handle',{environment_id:'workspace-worker',workspace_id:seeded.workspace_id});
+    assert.equal(peerSelect.workspace_handle,selected.workspace_handle);
+    const oldContext = selected.workspace_handle;
     const oldProjectlessContext = first.workspace_handle;
     await client.close();
     assert.equal(
@@ -544,7 +466,7 @@ test('new project returns a handle while existing projects require approval even
     assert.equal(resumedProjectless.workspace_handle, oldProjectlessContext);
     assert.equal(resumedProjectless.workspace_root, first.workspace_root);
 
-    const unregisterTool = tools.registry.get('unregister_workspace');
+    const remove = args => manageProject(controller,'remove',args);
     // Registration identity is still revalidated, even without an approval card.
     const otherRoot = path.join(tempRoot, 'different-project');
     await fs.mkdir(otherRoot);
@@ -564,27 +486,22 @@ test('new project returns a handle while existing projects require approval even
       }
       return result;
     };
-    const staleOutcome = await unregisterTool.handler({
-      environment_id: 'workspace-worker', workspace_id: 'new-project',
-    });
+    await assert.rejects(remove({environment_id:'workspace-worker',workspace_id:'new-project'}),/registration changed/);
     controller.workerHub.call = originalCall;
-    assert.equal(staleOutcome.isError, true);
-    assert.match(staleOutcome.content[0].text, /registration changed/);
     assert.equal(worker.workspaceRegistry.resolve('new-project').root, await fs.realpath(otherRoot));
 
-    const removed = await unregisterTool.handler({
+    const removed = await remove({
       environment_id: 'workspace-worker', workspace_id: 'new-project',
     });
-    assert.equal(removed.isError, undefined);
-    assert.equal(removed.structuredContent.unregistered, true);
-    assert.equal(removed.structuredContent.project_files_deleted, false);
-    assert.equal(removed.structuredContent.approval_id, undefined);
+    assert.equal(removed.unregistered, true);
+    assert.equal(removed.project_files_deleted, false);
+    assert.equal(removed.approval_id, undefined);
     assert.equal(worker.workspaceRegistry.listRegistered().length, 2);
     assert.throws(() => controller.workspaceHandleManager.resolve(
       newProjectHandle,
     ), /Unknown or expired/);
     assert.throws(() => controller.workspaceHandleManager.resolve(
-      registered.structuredContent.workspace_handle,
+      registered.workspace_handle,
     ), /Unknown or expired/);
     await assert.rejects(controller.processManager.execCommand({
       workspace_handle: newProjectHandle,
@@ -613,14 +530,12 @@ test('new project returns a handle while existing projects require approval even
       'workspace-worker', 'get_registered_workspace',
       { workspace_id: 'gone-project' },
     ), goneRegistration);
-    assert.equal((await unregisterTool.handler({
-      environment_id: 'workspace-worker', workspace_id: 'missing-name',
-    })).isError, true);
-    const goneRequest = await unregisterTool.handler({
+    await assert.rejects(remove({environment_id:'workspace-worker',workspace_id:'missing-name'}));
+    const goneRequest = await remove({
       environment_id: 'workspace-worker', workspace_id: 'gone-project',
     });
-    assert.equal(goneRequest.structuredContent.unregistered, true);
-    assert.equal(goneRequest.structuredContent.approval_id, undefined);
+    assert.equal(goneRequest.unregistered, true);
+    assert.equal(goneRequest.approval_id, undefined);
     assert.equal(worker.workspaceRegistry.listRegistered().some(
       (workspace) => workspace.workspace_id === 'gone-project'), false);
   } finally {
