@@ -127,10 +127,10 @@ function createProtocolServer(
       ...(tool.annotations ? { annotations: tool.annotations } : {}),
       ...(tool.mcpMeta ? { _meta: tool.mcpMeta } : {}),
     }, async (args, extra) => guardMcpToolResult(
-        await tool.handler(args, { extra, clientInfo: server.server.getClientVersion() }),
+        await tool.handler(args, { extra }),
         maxToolResultBytes,
         maxFileResultBytes,
-        tool.name === 'test_image_content' ? undefined : extra.requestInfo?.headers?.['user-agent'],
+        extra.requestInfo?.headers?.['user-agent'],
       ));
   }
   return server;

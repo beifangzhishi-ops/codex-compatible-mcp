@@ -128,8 +128,7 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const listed = await client.listTools();
     const names = listed.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, registry.list().map((tool) => tool.name).sort());
-    assert.equal(names.length, 19);
-    assert.ok(names.includes('test_image_content'));
+    assert.equal(names.length, 18);
     assert.equal(names.includes('create_projectless_handle'), false);
     for (const name of ['list_workers',
       'plan_patch','plan_read','restart','import_chatgpt_file','conversation','publish',
@@ -325,29 +324,6 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.ok(image);
     assert.equal(image.mimeType, 'image/png');
     assert.equal(Buffer.from(image.data, 'base64').length, png.length);
-    const probe = async (format) => {
-      const result = await client.callTool({ name: 'test_image_content', arguments: { format } });
-      assert.equal(result.isError, undefined);
-      return result.content;
-    };
-    const [native] = await probe('native');
-    assert.equal(native.type, 'image');
-    assert.equal(native.mimeType, 'image/png');
-    assert.deepEqual(await probe('native'), [native]);
-    assert.deepEqual(await probe('mixed'), [{ type: 'text', text: 'CCM_IMAGE_TEST_MARKER' }, native]);
-    const [embedded] = await probe('embedded');
-    assert.deepEqual(embedded, { type: 'resource', resource: {
-      uri: 'urn:ccm:test-image-content', mimeType: native.mimeType, blob: native.data,
-    } });
-    const [inline] = await probe('inline_data');
-    assert.deepEqual(JSON.parse(inline.text), { inlineData: { mimeType: native.mimeType, data: native.data } });
-    assert.deepEqual(await probe('markdown_data_uri'), [{ type: 'text', text: `![Test image](data:image/png;base64,${native.data})` }]);
-    assert.deepEqual(await probe('text_control'), [{ type: 'text', text: 'CCM_TEXT_CONTROL_OK' }]);
-    const identity = JSON.parse((await probe('client_info'))[0].text);
-    assert.deepEqual(identity.client_info, { name: 'ccm-test-client', version: '0.1.0' });
-    assert.equal(identity.google_user_agent_match, false);
-    assert.equal(identity.proposed_image_format, 'native');
-    assert.equal(identity.routing_applied, false);
     const google = new Client({ name: 'simulated-google', version: '1' });
     const googleTransport = new StreamableHTTPClientTransport(
       new URL('http://127.0.0.1:' + controller.address.port + '/ccm/mcp'),
@@ -355,11 +331,6 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     );
     try {
       await google.connect(googleTransport);
-      const response = await google.callTool({ name: 'test_image_content', arguments: { format: 'client_info' } });
-      assert.deepEqual(JSON.parse(response.content[0].text), {
-        user_agent: 'Google', client_info: { name: 'simulated-google', version: '1' },
-        google_user_agent_match: true, proposed_image_format: 'embedded', routing_applied: false,
-      });
       const googleImage = await google.callTool({ name: 'view_image', arguments: { workspace_handle: workspaceHandle, path: 'tiny.png' } });
       assert.equal(googleImage.isError, undefined);
       assert.equal(googleImage.content.length, 1);
@@ -368,11 +339,8 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
       assert.equal(googleImage.content[0].resource.mimeType, image.mimeType);
       assert.equal(googleImage.content[0].resource.blob, image.data);
       assert.deepEqual(googleImage._meta, imageResult._meta);
-      const googleRaw = await google.callTool({ name: 'test_image_content', arguments: { format: 'native' } });
-      assert.deepEqual(googleRaw.content, [native]);
       const nativeAgain = await client.callTool({ name: 'view_image', arguments: { workspace_handle: workspaceHandle, path: 'tiny.png' } });
       assert.deepEqual(nativeAgain, imageResult);
-      assert.deepEqual(JSON.parse((await probe('client_info'))[0].text), identity);
     } finally {
       await google.close();
     }
