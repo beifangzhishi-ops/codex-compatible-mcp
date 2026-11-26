@@ -360,6 +360,18 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
         user_agent: 'Google', client_info: { name: 'simulated-google', version: '1' },
         google_user_agent_match: true, proposed_image_format: 'embedded', routing_applied: false,
       });
+      const googleImage = await google.callTool({ name: 'view_image', arguments: { workspace_handle: workspaceHandle, path: 'tiny.png' } });
+      assert.equal(googleImage.isError, undefined);
+      assert.equal(googleImage.content.length, 1);
+      assert.equal(googleImage.content[0].type, 'resource');
+      assert.match(googleImage.content[0].resource.uri, /^urn:ccm:image:/);
+      assert.equal(googleImage.content[0].resource.mimeType, image.mimeType);
+      assert.equal(googleImage.content[0].resource.blob, image.data);
+      assert.deepEqual(googleImage._meta, imageResult._meta);
+      const googleRaw = await google.callTool({ name: 'test_image_content', arguments: { format: 'native' } });
+      assert.deepEqual(googleRaw.content, [native]);
+      const nativeAgain = await client.callTool({ name: 'view_image', arguments: { workspace_handle: workspaceHandle, path: 'tiny.png' } });
+      assert.deepEqual(nativeAgain, imageResult);
       assert.deepEqual(JSON.parse((await probe('client_info'))[0].text), identity);
     } finally {
       await google.close();
@@ -404,6 +416,30 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     } else {
       assert.equal(planPublish.structuredContent.render_inspection.status, 'unavailable');
       assert.match(planPublish.content[0].text, /visual review was not possible/);
+    }
+    const googlePublishClient = new Client({ name: 'google-publish-test', version: '1' });
+    try {
+      await googlePublishClient.connect(new StreamableHTTPClientTransport(
+        new URL('http://127.0.0.1:' + controller.address.port + '/ccm/mcp'),
+        { requestInit: { headers: { 'User-Agent': 'Google' } } },
+      ));
+      const googlePlan = await googlePublishClient.callTool({ name: 'publish', arguments: { plan_id: createdPlan.plan_id } });
+      assert.equal(googlePlan.isError, undefined);
+      assert.equal(googlePlan.structuredContent.plan_id, createdPlan.plan_id);
+      assert.equal(googlePlan.structuredContent.render_inspection.visual_review_required, true);
+      const shots = googlePlan.content.filter(item => item.type === 'resource');
+      assert.equal(shots.length, googlePlan.structuredContent.render_inspection.screenshot_count ?? 0);
+      assert.ok(!googlePlan.content.some(item => item.type === 'image'));
+      if (process.env.CCM_RUN_PUBLISH_VISUAL_TEST === '1') assert.ok(shots.length >= 1);
+      for (const shot of shots) {
+        assert.match(shot.resource.uri, /^urn:ccm:image:/);
+        assert.equal(shot.resource.mimeType, 'image/jpeg');
+        assert.ok(Buffer.from(shot.resource.blob, 'base64').length > 1000);
+      }
+      assert.equal(new Set(shots.map(shot => shot.resource.uri)).size, shots.length);
+      assert.equal(googlePlan.content[0].type, 'text');
+    } finally {
+      await googlePublishClient.close();
     }
     assert.match(planPublish.structuredContent.preview_url, /^https:\/\/example\.test\/ccm\/preview\//);
     const planToken = planPublish.structuredContent.download_url.split('/').at(-1);

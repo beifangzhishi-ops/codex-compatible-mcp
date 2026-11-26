@@ -130,6 +130,7 @@ function createProtocolServer(
         await tool.handler(args, { extra, clientInfo: server.server.getClientVersion() }),
         maxToolResultBytes,
         maxFileResultBytes,
+        tool.name === 'test_image_content' ? undefined : extra.requestInfo?.headers?.['user-agent'],
       ));
   }
   return server;

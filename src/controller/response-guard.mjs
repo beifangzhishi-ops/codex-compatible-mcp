@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 export const DEFAULT_MAX_MCP_TOOL_RESULT_BYTES = 2 * 1024 * 1024;
 export const DEFAULT_MAX_MCP_FILE_RESULT_BYTES = 24 * 1024 * 1024;
 
@@ -22,14 +24,40 @@ function hasEmbeddedFile(result) {
   );
 }
 
+export function usesEmbeddedImages(userAgent) {
+  return typeof userAgent === 'string' && userAgent.trim().toLowerCase() === 'google';
+}
+
+function embedImages(result) {
+  if (!Array.isArray(result?.content) || !result.content.some(item => item.type === 'image')) return result;
+  return {
+    ...result,
+    content: result.content.map(item => {
+      if (item.type !== 'image') return item;
+      const { type, data, mimeType, ...metadata } = item;
+      return {
+        ...metadata,
+        type: 'resource',
+        resource: { uri: `urn:ccm:image:${randomUUID()}`, mimeType, blob: data },
+      };
+    }),
+  };
+}
+
 export function guardMcpToolResult(
   result,
   maxBytes,
   maxFileBytes = DEFAULT_MAX_MCP_FILE_RESULT_BYTES,
+  userAgent,
 ) {
-  const bytes = Buffer.byteLength(JSON.stringify(result ?? {}), 'utf8');
+  // Select the original result's limit before changing its wire representation.
   const effectiveMax = hasEmbeddedFile(result) ? maxFileBytes : maxBytes;
-  if (bytes <= effectiveMax) return result;
+  let bytes = Buffer.byteLength(JSON.stringify(result ?? {}), 'utf8');
+  if (bytes <= effectiveMax) {
+    const adapted = usesEmbeddedImages(userAgent) ? embedImages(result) : result;
+    if (adapted !== result) bytes = Buffer.byteLength(JSON.stringify(adapted), 'utf8');
+    if (bytes <= effectiveMax) return adapted;
+  }
 
   return {
     content: [{

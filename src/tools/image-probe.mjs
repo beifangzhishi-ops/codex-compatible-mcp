@@ -1,5 +1,6 @@
 import sharp from 'sharp';
 import * as z from 'zod/v4';
+import { usesEmbeddedImages } from '../controller/response-guard.mjs';
 
 const formats = ['native', 'mixed', 'embedded', 'inline_data', 'markdown_data_uri', 'text_control', 'client_info'];
 const text = (value) => ({ type: 'text', text: value });
@@ -29,7 +30,7 @@ export function registerImageProbe(registry) {
       if (format === 'client_info') {
         const bounded = (value) => typeof value === 'string' ? value.slice(0, 512) : null;
         const userAgent = bounded(extra?.requestInfo?.headers?.['user-agent']);
-        const isGoogle = userAgent?.trim().toLowerCase() === 'google';
+        const isGoogle = usesEmbeddedImages(userAgent);
         return { content: [text(JSON.stringify({
           user_agent: userAgent,
           client_info: { name: bounded(clientInfo?.name), version: bounded(clientInfo?.version) },
