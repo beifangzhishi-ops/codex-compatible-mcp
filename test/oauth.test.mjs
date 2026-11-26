@@ -689,6 +689,27 @@ test('OAuth sidecar refreshes an invalid downstream session with that client ini
     assert.equal(body.result.client, 'client-a');
     assert.equal(body.result.userAgent, 'Google');
     assert.deepEqual(initializeClients, ['client-a', 'client-b', 'client-a']);
+    const call = (session, userAgent, id, authorization = headers.authorization) => httpRequestLocal(base + '/ccm/mcp', {
+      method: 'POST',
+      headers: { ...headers, authorization, 'user-agent': userAgent, ...(session ? { 'mcp-session-id': session } : {}) },
+      body: JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'noop', arguments: { privateValue: 'private-argument-marker' } } }),
+    });
+    assert.equal((await call(sessionA, 'Google', 2)).status, 200);
+    assert.equal((await call(sessionB, 'OpenAI Example', 3)).status, 200);
+    assert.equal((await call(null, 'Sessionless', 4)).status, 200);
+    assert.equal((await call('unknown-session', 'Unknown', 5)).status, 200);
+    assert.equal((await call('unknown-session', 'Unknown', 6)).status, 200);
+    const secondClient = store.registerClient({ ...metadata(), client_name: 'second-oauth-client' });
+    const secondToken = store.mintTokenPair({ clientId: secondClient.clientId, resource: config.resource, scope: 'mcp', tokenTtlSeconds: 3600 }).accessToken;
+    assert.equal((await call(sessionA, 'Other OAuth', 7, 'Bearer ' + secondToken)).status, 200);
+    const log = await fs.readFile(path.join(config.logDir, 'ccm-http.log'), 'utf8');
+    const entry = id => log.split('\n').find(line => line.includes(`method=tools/call rpcId=${id} tool=noop `));
+    assert.match(entry(0), /userAgent="Google" oauthClientName="ccm-oauth-test" mcpClientName="client-a" mcpClientVersion="1"/);
+    assert.match(entry(2), /userAgent="Google" oauthClientName="ccm-oauth-test" mcpClientName="client-a" mcpClientVersion="1"/);
+    assert.match(entry(3), /userAgent="OpenAI Example" oauthClientName="ccm-oauth-test" mcpClientName="client-b" mcpClientVersion="1"/);
+    for (const id of [4, 5, 6]) assert.match(entry(id), /mcpClientName=null mcpClientVersion=null/);
+    assert.match(entry(7), /oauthClientName="second-oauth-client" mcpClientName=null mcpClientVersion=null/);
+    for (const secret of [token, secondToken, sessionA, sessionB, 'private-argument-marker']) assert.ok(!log.includes(secret));
   } finally {
     await closeCcmOAuthServer(runtime);
     await new Promise((resolve) => upstream.close(resolve));

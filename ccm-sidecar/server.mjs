@@ -208,7 +208,11 @@ function traceField(value) {
   return String(text).replace(/\s+/gu, ' ').slice(0, 160);
 }
 
-function beginMcpTrace(response, runtime, payload, request) {
+function traceIdentityField(value) {
+  return JSON.stringify(typeof value === 'string' ? value.slice(0, 512) : null);
+}
+
+function beginMcpTrace(response, runtime, payload, request, accessRecord) {
   const traceId = randomUUID();
   const startedAt = Date.now();
   const method = traceField(payload?.method || 'invalid-json');
@@ -216,7 +220,11 @@ function beginMcpTrace(response, runtime, payload, request) {
   const tool = traceField(payload?.method === 'tools/call' ? payload?.params?.name : null);
   const device = traceField(payload?.params?.arguments?.deviceId);
   const protocol = traceField(request.headers['mcp-protocol-version']);
-  appendHttpTrace(runtime, `MCP BEGIN trace=${traceId} method=${method} rpcId=${rpcId} tool=${tool} device=${device} session=${request.headers[MCP_SESSION_HEADER] ? 'yes' : 'no'} protocol=${protocol}`);
+  const oauthClient = runtime.store.getClient(accessRecord.clientId);
+  const sessionClientInfo = payload?.method === 'initialize' || payload?.method === 'server/discover'
+    ? payload.params?.clientInfo
+    : runtime.upstreamSession.observedClientInfo(request.headers[MCP_SESSION_HEADER], accessRecord.clientId);
+  appendHttpTrace(runtime, `MCP BEGIN trace=${traceId} method=${method} rpcId=${rpcId} tool=${tool} device=${device} session=${request.headers[MCP_SESSION_HEADER] ? 'yes' : 'no'} protocol=${protocol} userAgent=${traceIdentityField(request.headers['user-agent'])} oauthClientName=${traceIdentityField(oauthClient?.clientName)} mcpClientName=${traceIdentityField(sessionClientInfo?.name)} mcpClientVersion=${traceIdentityField(sessionClientInfo?.version)}`);
   let completed = false;
   const finish = (event) => {
     if (completed) return;
@@ -874,7 +882,7 @@ class UpstreamSessionManager {
     this.sessionRecords = new Map();
   }
 
-  async initializeFromRequest(requestHeaders, payload) {
+  async initializeFromRequest(requestHeaders, payload, observedClientId) {
     const initializeRequest = {
       headers: persistedInitializeHeaders(requestHeaders),
       payload,
@@ -884,6 +892,7 @@ class UpstreamSessionManager {
     this.sessionRecords.set(session.sessionId, {
       upstreamSessionId: session.sessionId,
       initializeRequest,
+      observedClientId,
     });
     saveUpstreamSession(
       this.runtime.config.upstreamSessionFile,
@@ -923,6 +932,13 @@ class UpstreamSessionManager {
       downstreamSessionId;
   }
 
+  observedClientInfo(downstreamSessionId, clientId) {
+    const record = this.sessionRecords.get(downstreamSessionId);
+    // Never attribute a request using the global/persisted recovery template.
+    return record && clientId && record.observedClientId === clientId
+      ? record.initializeRequest?.payload?.params?.clientInfo : undefined;
+  }
+
   async request(requestHeaders, url, body, downstreamSessionId = null) {
     const transient = !downstreamSessionId;
     const existingRecord = downstreamSessionId
@@ -945,6 +961,7 @@ class UpstreamSessionManager {
       this.sessionRecords.set(downstreamSessionId, {
         upstreamSessionId: refreshedSession.sessionId,
         initializeRequest,
+        observedClientId: existingRecord?.observedClientId,
       });
       response = await requestUpstreamBuffer(
         this.runtime,
@@ -1064,7 +1081,8 @@ function proxyMcpStream(request, response, runtime, url, sessionId) {
 
 async function handleProtectedMcp(request, response, runtime, url) {
   const accessToken = parseBearerToken(request);
-  if (!accessToken || !runtime.store.validateAccessToken(accessToken, runtime.config.resource)) {
+  const accessRecord = accessToken ? runtime.store.validateAccessToken(accessToken, runtime.config.resource) : null;
+  if (!accessRecord) {
     sendUnauthorized(response, runtime.config);
     return;
   }
@@ -1120,7 +1138,7 @@ async function handleProtectedMcp(request, response, runtime, url) {
     try {
       payload = JSON.parse(body);
     } catch {}
-    mcpTraceId = beginMcpTrace(response, runtime, payload, request);
+    mcpTraceId = beginMcpTrace(response, runtime, payload, request, accessRecord);
     const modernRequest = String(request.headers['mcp-protocol-version'] || '') === '2026-07-28' || payload?.method === 'server/discover';
     if (modernRequest) {
       const direct = await requestUpstreamBuffer(
@@ -1141,6 +1159,7 @@ async function handleProtectedMcp(request, response, runtime, url) {
       const initialized = await runtime.upstreamSession.initializeFromRequest(
         request.headers,
         payload,
+        accessRecord.clientId,
       );
       sendCachedInitialize(response, payload, initialized);
       return;
