@@ -128,7 +128,8 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     const listed = await client.listTools();
     const names = listed.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, registry.list().map((tool) => tool.name).sort());
-    assert.equal(names.length, 18);
+    assert.equal(names.length, 19);
+    assert.ok(names.includes('test_image_content'));
     assert.equal(names.includes('create_projectless_handle'), false);
     for (const name of ['list_workers',
       'plan_patch','plan_read','restart','import_chatgpt_file','conversation','publish',
@@ -324,6 +325,24 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.ok(image);
     assert.equal(image.mimeType, 'image/png');
     assert.equal(Buffer.from(image.data, 'base64').length, png.length);
+    const probe = async (format) => {
+      const result = await client.callTool({ name: 'test_image_content', arguments: { format } });
+      assert.equal(result.isError, undefined);
+      return result.content;
+    };
+    const [native] = await probe('native');
+    assert.equal(native.type, 'image');
+    assert.equal(native.mimeType, 'image/png');
+    assert.deepEqual(await probe('native'), [native]);
+    assert.deepEqual(await probe('mixed'), [{ type: 'text', text: 'CCM_IMAGE_TEST_MARKER' }, native]);
+    const [embedded] = await probe('embedded');
+    assert.deepEqual(embedded, { type: 'resource', resource: {
+      uri: 'urn:ccm:test-image-content', mimeType: native.mimeType, blob: native.data,
+    } });
+    const [inline] = await probe('inline_data');
+    assert.deepEqual(JSON.parse(inline.text), { inlineData: { mimeType: native.mimeType, data: native.data } });
+    assert.deepEqual(await probe('markdown_data_uri'), [{ type: 'text', text: `![Test image](data:image/png;base64,${native.data})` }]);
+    assert.deepEqual(await probe('text_control'), [{ type: 'text', text: 'CCM_TEXT_CONTROL_OK' }]);
     const docBytes = Buffer.alloc(3 * 1024 * 1024, 0x61);
     await fs.writeFile(path.join(workspaceRoot, 'preview.docx'), docBytes);
     const publishResult = await client.callTool({
