@@ -14,7 +14,7 @@ import {
   usesEmbeddedImages,
 } from './response-guard.mjs';
 import { ToolRegistry } from '../tools/tool-registry.mjs';
-import { registerAudioProbe } from '../tools/audio-probe.mjs';
+import { registerAudioProbe, registerAudioProbeResources } from '../tools/audio-probe.mjs';
 import {
   APPROVAL_UI_HTML,
   APPROVAL_UI_URI,
@@ -128,6 +128,7 @@ function createProtocolServer(
   if (sessionRegistry !== toolRegistry) {
     for (const tool of toolRegistry.list()) sessionRegistry.register(tool);
     registerAudioProbe(sessionRegistry);
+    registerAudioProbeResources(server);
   }
   for (const tool of sessionRegistry.list()) {
     server.registerTool(tool.name, {
