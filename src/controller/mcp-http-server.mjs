@@ -11,7 +11,10 @@ import {
   guardMcpToolResult,
   resolveMaxMcpFileResultBytes,
   resolveMaxMcpToolResultBytes,
+  usesEmbeddedImages,
 } from './response-guard.mjs';
+import { ToolRegistry } from '../tools/tool-registry.mjs';
+import { registerAudioProbe } from '../tools/audio-probe.mjs';
 import {
   APPROVAL_UI_HTML,
   APPROVAL_UI_URI,
@@ -28,6 +31,7 @@ function createProtocolServer(
   maxToolResultBytes,
   maxFileResultBytes,
   iconPath,
+  userAgent,
 ) {
   const icon = readCcmIcon(iconPath);
   const serverInfo = {
@@ -119,7 +123,13 @@ function createProtocolServer(
     }),
   );
 
-  for (const tool of toolRegistry.list()) {
+  // Keep the experimental peer out of GPT/unknown clients and the shared registry.
+  const sessionRegistry = usesEmbeddedImages(userAgent) ? new ToolRegistry() : toolRegistry;
+  if (sessionRegistry !== toolRegistry) {
+    for (const tool of toolRegistry.list()) sessionRegistry.register(tool);
+    registerAudioProbe(sessionRegistry);
+  }
+  for (const tool of sessionRegistry.list()) {
     server.registerTool(tool.name, {
       description: tool.description,
       inputSchema: tool.inputSchema,
@@ -289,6 +299,7 @@ export function createHttpController({
           maxToolResultBytes,
           maxFileResultBytes,
           iconPath,
+          req.headers['user-agent'],
         );
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),

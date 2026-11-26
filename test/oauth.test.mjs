@@ -562,6 +562,7 @@ test('OAuth sidecar refreshes an invalid downstream session with that client ini
   const sessionClient = new Map();
   const invalidSessions = new Set();
   const initializeClients = [];
+  const initializeUserAgents = [];
   const upstream = http.createServer((request, response) => {
     const chunks = [];
     request.on('data', (chunk) => chunks.push(chunk));
@@ -572,6 +573,7 @@ test('OAuth sidecar refreshes an invalid downstream session with that client ini
         const clientName = payload.params?.clientInfo?.name || 'unknown';
         const sessionId = 'refresh-' + upstreamSession;
         initializeClients.push(clientName);
+        initializeUserAgents.push(request.headers['user-agent']);
         sessionClient.set(sessionId, clientName);
         response.statusCode = 200;
         response.setHeader('content-type', 'application/json');
@@ -652,9 +654,9 @@ test('OAuth sidecar refreshes an invalid downstream session with that client ini
       'content-type': 'application/json',
       accept: 'application/json, text/event-stream',
     };
-    const initialize = async (name) => fetch(base + '/ccm/mcp', {
+    const initialize = async (name, userAgent) => fetch(base + '/ccm/mcp', {
       method: 'POST',
-      headers,
+      headers: { ...headers, 'user-agent': userAgent },
       body: JSON.stringify({
         jsonrpc: '2.0',
         id: 1,
@@ -667,8 +669,8 @@ test('OAuth sidecar refreshes an invalid downstream session with that client ini
       }),
     });
 
-    const clientA = await initialize('client-a');
-    const clientB = await initialize('client-b');
+    const clientA = await initialize('client-a', 'Google');
+    const clientB = await initialize('client-b', 'openai-mcp/1.0.0');
     const sessionA = clientA.headers.get('mcp-session-id');
     const sessionB = clientB.headers.get('mcp-session-id');
     assert.notEqual(sessionA, sessionB);
@@ -689,6 +691,7 @@ test('OAuth sidecar refreshes an invalid downstream session with that client ini
     assert.equal(body.result.client, 'client-a');
     assert.equal(body.result.userAgent, 'Google');
     assert.deepEqual(initializeClients, ['client-a', 'client-b', 'client-a']);
+    assert.deepEqual(initializeUserAgents, ['Google', 'openai-mcp/1.0.0', 'Google']);
     const call = (session, userAgent, id, authorization = headers.authorization) => httpRequestLocal(base + '/ccm/mcp', {
       method: 'POST',
       headers: { ...headers, authorization, 'user-agent': userAgent, ...(session ? { 'mcp-session-id': session } : {}) },
@@ -697,6 +700,7 @@ test('OAuth sidecar refreshes an invalid downstream session with that client ini
     assert.equal((await call(sessionA, 'Google', 2)).status, 200);
     assert.equal((await call(sessionB, 'OpenAI Example', 3)).status, 200);
     assert.equal((await call(null, 'Sessionless', 4)).status, 200);
+    assert.equal(initializeUserAgents.at(-1), 'Sessionless');
     assert.equal((await call('unknown-session', 'Unknown', 5)).status, 200);
     assert.equal((await call('unknown-session', 'Unknown', 6)).status, 200);
     const secondClient = store.registerClient({ ...metadata(), client_name: 'second-oauth-client' });

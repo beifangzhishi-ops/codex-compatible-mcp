@@ -888,7 +888,7 @@ class UpstreamSessionManager {
       payload,
     };
     this.initializeRequest = initializeRequest;
-    const session = await this.createSession(initializeRequest);
+    const session = await this.createSession(initializeRequest, requestHeaders['user-agent']);
     this.sessionRecords.set(session.sessionId, {
       upstreamSessionId: session.sessionId,
       initializeRequest,
@@ -904,7 +904,7 @@ class UpstreamSessionManager {
     return session;
   }
 
-  async createSession(initializeRequest = this.initializeRequest) {
+  async createSession(initializeRequest = this.initializeRequest, userAgent) {
     if (!initializeRequest?.payload) {
       throw new Error('MCP initialize is required before other requests.');
     }
@@ -913,7 +913,7 @@ class UpstreamSessionManager {
       this.runtime,
       'POST',
       new URL(MCP_PATH, 'http://127.0.0.1'),
-      buildUpstreamHeaders(initializeRequest.headers, body),
+      buildUpstreamHeaders({ ...initializeRequest.headers, ...(typeof userAgent === 'string' ? { 'user-agent': userAgent } : {}) }, body),
       body,
     );
     if (response.statusCode !== 200) {
@@ -947,7 +947,7 @@ class UpstreamSessionManager {
     const initializeRequest = existingRecord?.initializeRequest ||
       this.initializeRequest;
     const session = transient
-      ? await this.createSession(initializeRequest)
+      ? await this.createSession(initializeRequest, requestHeaders['user-agent'])
       : { sessionId: this.resolveSessionId(downstreamSessionId) };
     let response = await requestUpstreamBuffer(
       this.runtime,
@@ -957,7 +957,7 @@ class UpstreamSessionManager {
       body,
     );
     if (!transient && isInvalidUpstreamSession(response)) {
-      const refreshedSession = await this.createSession(initializeRequest);
+      const refreshedSession = await this.createSession(initializeRequest, requestHeaders['user-agent']);
       this.sessionRecords.set(downstreamSessionId, {
         upstreamSessionId: refreshedSession.sessionId,
         initializeRequest,
