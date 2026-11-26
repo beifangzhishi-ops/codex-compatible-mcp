@@ -127,7 +127,7 @@ function createProtocolServer(
       ...(tool.annotations ? { annotations: tool.annotations } : {}),
       ...(tool.mcpMeta ? { _meta: tool.mcpMeta } : {}),
     }, async (args, extra) => guardMcpToolResult(
-        await tool.handler(args, { extra }),
+        await tool.handler(args, { extra, clientInfo: server.server.getClientVersion() }),
         maxToolResultBytes,
         maxFileResultBytes,
       ));

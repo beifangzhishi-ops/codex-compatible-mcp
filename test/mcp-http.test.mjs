@@ -343,6 +343,27 @@ test('MCP lists and calls tools through a Remote Worker', async () => {
     assert.deepEqual(JSON.parse(inline.text), { inlineData: { mimeType: native.mimeType, data: native.data } });
     assert.deepEqual(await probe('markdown_data_uri'), [{ type: 'text', text: `![Test image](data:image/png;base64,${native.data})` }]);
     assert.deepEqual(await probe('text_control'), [{ type: 'text', text: 'CCM_TEXT_CONTROL_OK' }]);
+    const identity = JSON.parse((await probe('client_info'))[0].text);
+    assert.deepEqual(identity.client_info, { name: 'ccm-test-client', version: '0.1.0' });
+    assert.equal(identity.google_user_agent_match, false);
+    assert.equal(identity.proposed_image_format, 'native');
+    assert.equal(identity.routing_applied, false);
+    const google = new Client({ name: 'simulated-google', version: '1' });
+    const googleTransport = new StreamableHTTPClientTransport(
+      new URL('http://127.0.0.1:' + controller.address.port + '/ccm/mcp'),
+      { requestInit: { headers: { 'User-Agent': 'Google' } } },
+    );
+    try {
+      await google.connect(googleTransport);
+      const response = await google.callTool({ name: 'test_image_content', arguments: { format: 'client_info' } });
+      assert.deepEqual(JSON.parse(response.content[0].text), {
+        user_agent: 'Google', client_info: { name: 'simulated-google', version: '1' },
+        google_user_agent_match: true, proposed_image_format: 'embedded', routing_applied: false,
+      });
+      assert.deepEqual(JSON.parse((await probe('client_info'))[0].text), identity);
+    } finally {
+      await google.close();
+    }
     const docBytes = Buffer.alloc(3 * 1024 * 1024, 0x61);
     await fs.writeFile(path.join(workspaceRoot, 'preview.docx'), docBytes);
     const publishResult = await client.callTool({

@@ -1,7 +1,7 @@
 import sharp from 'sharp';
 import * as z from 'zod/v4';
 
-const formats = ['native', 'mixed', 'embedded', 'inline_data', 'markdown_data_uri', 'text_control'];
+const formats = ['native', 'mixed', 'embedded', 'inline_data', 'markdown_data_uri', 'text_control', 'client_info'];
 const text = (value) => ({ type: 'text', text: value });
 
 // Fixed synthetic fixture, drawn without system fonts or user files.
@@ -23,9 +23,21 @@ export function registerImageProbe(registry) {
     provider: 'ccm-specialized',
     tags: ['image', 'test'],
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-    description: 'Temporary MCP image compatibility test only; no practical functionality. Returns a fixed synthetic PNG in one requested format. Call each format separately, report the actual visible shapes, colors and digits, or say unavailable. Do not guess. text_control tests text delivery only.',
+    description: 'Temporary MCP compatibility test only; no practical functionality. Returns a fixed synthetic PNG in one requested format. Call each format separately, report the actual visible shapes, colors and digits, or say unavailable. Do not guess. text_control tests text delivery only; client_info reports server-observed client identity and proposed image routing.',
     inputSchema: { format: z.enum(formats).default('native') },
-    handler: async ({ format = 'native' }) => {
+    handler: async ({ format = 'native' }, { extra, clientInfo } = {}) => {
+      if (format === 'client_info') {
+        const bounded = (value) => typeof value === 'string' ? value.slice(0, 512) : null;
+        const userAgent = bounded(extra?.requestInfo?.headers?.['user-agent']);
+        const isGoogle = userAgent?.trim().toLowerCase() === 'google';
+        return { content: [text(JSON.stringify({
+          user_agent: userAgent,
+          client_info: { name: bounded(clientInfo?.name), version: bounded(clientInfo?.version) },
+          google_user_agent_match: isGoogle,
+          proposed_image_format: isGoogle ? 'embedded' : 'native',
+          routing_applied: false,
+        }))] };
+      }
       if (format === 'text_control') return { content: [text('CCM_TEXT_CONTROL_OK')] };
       const data = (await sharp(Buffer.from(svg)).png().toBuffer()).toString('base64');
       const mimeType = 'image/png';

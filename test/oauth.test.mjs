@@ -603,7 +603,7 @@ test('OAuth sidecar refreshes an invalid downstream session with that client ini
       response.end(JSON.stringify({
         jsonrpc: '2.0',
         id: payload.id,
-        result: { client: sessionClient.get(sessionId) },
+        result: { client: sessionClient.get(sessionId), userAgent: request.headers['user-agent'] },
       }));
     });
   });
@@ -676,7 +676,7 @@ test('OAuth sidecar refreshes an invalid downstream session with that client ini
 
     const tool = await fetch(base + '/ccm/mcp', {
       method: 'POST',
-      headers: { ...headers, 'mcp-session-id': sessionA },
+      headers: { ...headers, 'mcp-session-id': sessionA, 'user-agent': 'Google' },
       body: JSON.stringify({
         jsonrpc: '2.0',
         id: 0,
@@ -687,6 +687,7 @@ test('OAuth sidecar refreshes an invalid downstream session with that client ini
     assert.equal(tool.status, 200);
     const body = await tool.json();
     assert.equal(body.result.client, 'client-a');
+    assert.equal(body.result.userAgent, 'Google');
     assert.deepEqual(initializeClients, ['client-a', 'client-b', 'client-a']);
   } finally {
     await closeCcmOAuthServer(runtime);
