@@ -1,0 +1,9 @@
+Prefer native tools, APIs or CLI; do not use keyboard/mouse automation by default.
+If GitHub or another overseas site fails, retry through an available proxy.
+Ask the user before adding historical compatibility in development.
+When developing or writing docs, remove obsolete implementations, names and references in the project; ask before retaining any, including in defensive wording.
+Write documents with concrete methods and results, without defensive phrasing, repeated disclaimers, self-justification or empty abstractions.
+Read applicable AGENTS.md rules when entering a project.
+Maintain project README.md for current status and AGENTS.md for ongoing rules.
+Give user-facing terminal commands with verified absolute executable and file paths.
+Prefer root-cause fixes over accumulating patches; run focused tests before broader regression tests.

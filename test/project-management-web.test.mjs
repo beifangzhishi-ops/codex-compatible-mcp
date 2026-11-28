@@ -3,12 +3,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createProjectManagementServer } from '../src/controller/project-management-web.mjs';
 import { WebFullAccess } from '../src/controller/web-full-access.mjs';
+import { GlobalRules } from '../src/controller/global-rules.mjs';
 
 test('project management page opens without login, accepts tracking parameters and protects actions against CSRF', async () => {
   const calls=[];
   let listCalls=0;
   const grants=new WebFullAccess();
-  const server=createProjectManagementServer({webFullAccess:grants},{
+  const globalRules=new GlobalRules();
+  const server=createProjectManagementServer({webFullAccess:grants,globalRules},{
     port:4193, publicOrigin:'https://owner.example.ts.net:4193',
     list:async()=>{listCalls++;return {environments:[{id:'worker',state:'normal',projects:[{project_id:'demo',root:'C:\\demo'},{project_id:'260923',root:'C:\\中期答辩260923'}]}]};},
     manage:async(_,action,args)=>{calls.push({action,args});return {workspace_handle:'00000000-0000-4000-8000-000000000001'};}
@@ -44,6 +46,18 @@ test('project management page opens without login, accepts tracking parameters a
     const cookie=landing.headers.get('set-cookie').split(';')[0];
     assert.equal((await post({action:'handle',environment_id:'worker',workspace_id:'demo'})).status,403);
     const csrf=dashboard.match(/name="csrf" value="([^"]+)"/)[1];
+    const revision=globalRules.read().revision;
+    assert.match(dashboard,/name="rules"/);
+    assert.match(dashboard,/historical compatibility/);
+    const rulesForm={action:'rules_save',csrf,revision,rules:'中文 <script>alert(1)</script>'};
+    assert.equal((await post({...rulesForm,csrf:'wrong'},{Cookie:cookie})).status,403);
+    assert.equal((await post(rulesForm,{Cookie:cookie,Origin:'https://evil.example'})).status,403);
+    assert.equal(globalRules.read().revision,revision);
+    assert.equal((await post(rulesForm,{Cookie:cookie})).status,303);
+    assert.equal(globalRules.read().text,rulesForm.rules);
+    assert.match(await (await get({Cookie:cookie})).text(),/中文 &lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+    assert.equal((await post({...rulesForm,rules:'stale'},{Cookie:cookie})).status,303);
+    assert.equal(globalRules.read().text,rulesForm.rules);
     assert.equal((await post({action:'handle',csrf:'wrong',environment_id:'worker',workspace_id:'demo'},{Cookie:cookie})).status,403);
     assert.equal((await post({action:'handle',csrf,environment_id:'worker',workspace_id:'demo'},{Cookie:cookie,Origin:'https://evil.example'})).status,403);
     assert.equal((await post({action:'grant_issue',csrf,duration_seconds:'60'},{Cookie:cookie,Origin:'null'})).status,403);

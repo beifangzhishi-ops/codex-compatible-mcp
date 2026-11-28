@@ -21,6 +21,7 @@ import { ApprovalReceiptStore } from './approval-receipt-store.mjs';
 import { VerificationInputManager } from './verification-input-manager.mjs';
 import { WebFullAccess } from './web-full-access.mjs';
 import { GuardianReviewer } from './guardian-reviewer.mjs';
+import { GlobalRules } from './global-rules.mjs';
 
 const installRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -29,6 +30,7 @@ const installRoot = path.resolve(
 );
 
 export function createControllerRuntime(options = {}) {
+  const globalRules = options.globalRules || new GlobalRules({ stateFile: options.globalRulesStateFile });
   const audit = options.auditLogger || createAuditLogger({
     file: options.auditLogFile,
   });
@@ -125,6 +127,7 @@ export function createControllerRuntime(options = {}) {
   });
 
   return {
+    globalRules,
     environmentRegistry,
     workerHub,
     approvalManager,

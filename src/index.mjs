@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createProjectManagementServer } from './controller/project-management-web.mjs';
 import { createControllerRuntime } from './controller/runtime.mjs';
+import { defaultControllerStateFile } from './controller/controller-state.mjs';
 import { createHttpController } from './controller/mcp-http-server.mjs';
 import { LocalWorkerSupervisor } from './controller/local-worker-supervisor.mjs';
 import { createToolRegistry } from './tools/index.mjs';
@@ -29,6 +30,7 @@ function requestControllerRestart() {
   setTimeout(() => shutdown(), 1500).unref();
 }
 const runtime = createControllerRuntime({
+  globalRulesStateFile: defaultControllerStateFile('global-rules.txt'),
   defaultEnvironmentId: localEnvironmentId,
   requestControllerRestart,
   armWorkerRestart: (environmentId) => {

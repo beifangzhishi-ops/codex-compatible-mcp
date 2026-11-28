@@ -2,6 +2,7 @@ import http from 'node:http';
 import { randomBytes, createHash } from 'node:crypto';
 import { listManagedProjects, manageProject } from './project-management.mjs';
 import { FULL_ACCESS_DURATIONS } from './web-full-access.mjs';
+import { GlobalRules, MAX_GLOBAL_RULES_LENGTH } from './global-rules.mjs';
 
 const token = () => randomBytes(32).toString('base64url');
 const escape = value => String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
@@ -35,7 +36,11 @@ function fullAccessSection(grants, csrf) {
   if (!grants.length) body += '<p class="muted">暂无有效授权</p>';
   return body+'</section>';
 }
-function dashboard(data, session, grants) {
+function globalRulesSection(rules, csrf) {
+  return '<section><h2>全局规则</h2><p class="muted">保存后新 MCP 连接立即读取最新规则，无需重启 CCM；已有连接须重新初始化才能获取更新。</p>'+
+    form('rules_save',csrf,hidden('revision',rules.revision)+'<label>模型全局规则<textarea name="rules" rows="10" maxlength="'+MAX_GLOBAL_RULES_LENGTH+'" style="width:100%;box-sizing:border-box;font:inherit;padding:10px;border:1px solid #bac4d1;border-radius:8px;resize:vertical">\n'+escape(rules.text)+'</textarea></label>','保存规则')+'</section>';
+}
+function dashboard(data, session, grants, rules) {
   const flash = session.flash;
   session.flash = null;
   let body = '<header><h1>CCM 管理</h1>'+'</header><p class="muted">注册项目、复制句柄、注销项目。注销仅撤销注册和句柄，不删除文件。</p>';
@@ -45,6 +50,7 @@ function dashboard(data, session, grants) {
     body += '</section>';
   }
   body += fullAccessSection(grants, session.csrf);
+  body += globalRulesSection(rules, session.csrf);
   for (const env of data.environments) {
     body += '<section><h2>'+escape(env.name || env.id)+'</h2><p class="muted">'+escape(env.id)+' · '+escape(env.state)+'</p>';
     if(env.state !== 'normal') { body += '<p>'+escape(env.abnormal_reason || env.project_discovery_error || '机器不可用')+'</p></section>'; continue; }
@@ -62,10 +68,11 @@ function dashboard(data, session, grants) {
 async function readForm(req) {
   if (String(req.headers['content-type']||'').split(';')[0] !== 'application/x-www-form-urlencoded') throw Error('Unsupported request content type.');
   let data = '';
-  for await (const chunk of req) { data += chunk; if (data.length > 16384) throw Error('Request too large.'); }
+  for await (const chunk of req) { data += chunk; if (data.length > 65536) throw Error('Request too large.'); }
   return new URLSearchParams(data);
 }
 export function createProjectManagementServer(runtime, { publicOrigin, port=4193, list=listManagedProjects, manage=manageProject } = {}) {
+  const globalRules = runtime.globalRules || new GlobalRules();
   const origins = new Set(['http://127.0.0.1:'+port, 'http://localhost:'+port, ...(publicOrigin ? [publicOrigin] : [])]);
   const hosts = new Set([...origins].map(origin=>new URL(origin).host));
   const sessions = new Map();
@@ -89,11 +96,18 @@ export function createProjectManagementServer(runtime, { publicOrigin, port=4193
           sessions.set(id,session);
           headers={'Set-Cookie':sessionCookie(id,secure,ttl/1000)};
         }
-        send(res,200,dashboard(await list(runtime),session,runtime.webFullAccess.list()),headers); return;
+        send(res,200,dashboard(await list(runtime),session,runtime.webFullAccess.list(),globalRules.read()),headers); return;
       }
       const params=await readForm(req);
       const action=params.get('action');
       if(!session || params.get('csrf')!==session.csrf) { send(res,403,'请刷新页面后重试。'); return; }
+      if (action === 'rules_save') {
+        try {
+          globalRules.save(params.get('rules'), params.get('revision'));
+          session.flash = {message:'全局规则已保存，新 MCP 连接立即生效。'};
+        } catch(error) { session.flash={error:String(error?.message||error)}; }
+        redirect(res); return;
+      }
       if (action === 'grant_issue' || action === 'grant_revoke') {
         try {
           if (action === 'grant_issue') {

@@ -14,6 +14,7 @@ import {
   usesEmbeddedImages,
 } from './response-guard.mjs';
 import { ToolRegistry } from '../tools/tool-registry.mjs';
+import { GlobalRules } from './global-rules.mjs';
 import { registerAudioProbe, registerAudioProbeResources } from '../tools/audio-probe.mjs';
 import {
   APPROVAL_UI_HTML,
@@ -32,6 +33,7 @@ function createProtocolServer(
   maxFileResultBytes,
   iconPath,
   userAgent,
+  instructions,
 ) {
   const icon = readCcmIcon(iconPath);
   const serverInfo = {
@@ -46,18 +48,7 @@ function createProtocolServer(
   };
   const server = new McpServer(serverInfo, {
     capabilities: { tools: { listChanged: true } },
-    instructions: [
-      "CCM provides MCP tools for connected computers and project workflows. The Host chooses and sequences peer tools; use each tool's description for task-specific routing and invocation.",
-      "Prefer native tools, APIs or CLI; do not use keyboard/mouse automation by default.",
-      "If GitHub or another overseas site fails, retry through an available proxy.",
-      "Ask the user before adding historical compatibility in development.",
-      "When developing or writing docs, remove obsolete implementations, names and references in the project; ask before retaining any, including in defensive wording.",
-      "Write documents with concrete methods and results, without defensive phrasing, repeated disclaimers, self-justification or empty abstractions.",
-      "Read applicable AGENTS.md rules when entering a project.",
-      "Maintain project README.md for current status and AGENTS.md for ongoing rules.",
-      "Give user-facing terminal commands with verified absolute executable and file paths.",
-      "Prefer root-cause fixes over accumulating patches; run focused tests before broader regression tests.",
-    ].join('\n'),
+    instructions,
   });
 
   server.registerResource(
@@ -177,6 +168,7 @@ export function createHttpController({
   ),
 } = {}) {
   const app = createMcpExpressApp();
+  const globalRules = runtime.globalRules || new GlobalRules();
   // These maps are keyed by the MCP Streamable HTTP protocol/transport session.
   // Mcp-Session-Id is not a host conversation id, workspace_handle, process
   // session_id, approval_id, or durable plan/task identity. Do not persist
@@ -301,6 +293,7 @@ export function createHttpController({
           maxFileResultBytes,
           iconPath,
           req.headers['user-agent'],
+          globalRules.instructions(),
         );
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
